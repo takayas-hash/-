@@ -1,35 +1,55 @@
 /**
- * スプレッドシートの画像からAIコメントを自動生成するGoogle Apps Script
+ * 【焼肉きんぐ甲府飯田】57期臨店報告書
+ * スプレッドシートの問題写真からAIコメントを自動生成するGoogle Apps Script
+ *
+ * 【列構成】
+ *   G: NO / H: 分類 / I: 項目
+ *   J: 今回（チェックボックス） / K: 前回
+ *   L: 問題写真1 / M: 問題写真2
+ *   N: 改善内容 / O: コメント（自動生成先）
  *
  * 【使い方】
  * 1. スプレッドシートの「拡張機能」→「Apps Script」を開く
- * 2. このコードを貼り付ける
- * 3. CONFIG セクションの設定を自分のシートに合わせて変更する
- * 4. ANTHROPIC_API_KEY にClaude APIキーを設定する（スクリプトプロパティ推奨）
- * 5. メニュー「画像コメント自動生成」→「選択範囲のコメントを生成」を実行
+ * 2. このコードを貼り付けて保存
+ * 3. スプレッドシートをリロード
+ * 4. メニュー「画像コメント自動生成」→「APIキーを設定」からAPIキーを登録
+ * 5. 対象シート（営業前インスペ / 営業中インスペ）を開いた状態で実行
  */
 
 // ============================================================
-// 設定（自分のスプレッドシートに合わせて変更してください）
+// 設定
 // ============================================================
 const CONFIG = {
-  // 画像が貼られている列（A=1, B=2, ...）
-  IMAGE_COLUMN: 4,
+  // 問題写真1の列（L列 = 12）
+  IMAGE_COLUMN_1: 12,
 
-  // コメントを書き込む列
-  COMMENT_COLUMN: 5,
+  // 問題写真2の列（M列 = 13）
+  IMAGE_COLUMN_2: 13,
 
-  // データの開始行（ヘッダーを除いた最初のデータ行）
-  DATA_START_ROW: 2,
+  // コメントを書き込む列（O列 = 15）
+  COMMENT_COLUMN: 15,
 
-  // シート名（空文字の場合はアクティブシートを使用）
-  SHEET_NAME: "",
+  // 今回チェック欄の列（J列 = 10）チェックボックス
+  // 未チェック（FALSE） = 指摘あり → 処理対象
+  CHECK_COLUMN: 10,
 
-  // 指摘項目名の列（コンテキストとしてAIに渡す）
-  ITEM_NAME_COLUMN: 2,
+  // 分類の列（H列 = 8）
+  CATEGORY_COLUMN: 8,
 
-  // 指摘箇所の列（コンテキストとしてAIに渡す）
-  LOCATION_COLUMN: 3,
+  // 項目の列（I列 = 9）
+  ITEM_COLUMN: 9,
+
+  // 改善内容の列（N列 = 14）
+  IMPROVEMENT_COLUMN: 14,
+
+  // データの開始行（ヘッダー2行目の次）
+  DATA_START_ROW: 3,
+
+  // ヘッダー行
+  HEADER_ROW: 2,
+
+  // 対象シート名のリスト
+  TARGET_SHEETS: ["営業前インスペ", "営業中インスペ"],
 
   // 既にコメントがある場合に上書きするか
   OVERWRITE_EXISTING: false,
@@ -38,15 +58,16 @@ const CONFIG = {
   MODEL: "claude-sonnet-4-20250514",
 
   // AIへのシステムプロンプト
-  SYSTEM_PROMPT: `あなたは建築・設備のインスペクション（検査）の専門家です。
-提供された画像を分析し、指摘事項に対する簡潔で的確なコメントを日本語で記載してください。
+  SYSTEM_PROMPT: `あなたは飲食店（焼肉店）のインスペクション（臨店検査）の専門家です。
+提供された問題写真を分析し、指摘事項に対する簡潔で的確なコメントを日本語で記載してください。
 
 コメントには以下を含めてください：
-- 画像から確認できる状況の説明
-- 問題点や改善が必要な箇所の指摘（該当する場合）
-- 対応状況の評価（是正済み・未是正・経過観察など）
+- 画像から確認できる問題点の具体的な説明
+- 改善が必要な箇所の指摘
+- 改善のための具体的なアドバイス（該当する場合）
 
-コメントは簡潔に3〜5文程度でまとめてください。`,
+コメントは簡潔に2〜3文程度でまとめてください。
+専門用語を避け、店舗スタッフが読んですぐ理解できる平易な表現を使ってください。`,
 };
 
 // ============================================================
@@ -55,8 +76,10 @@ const CONFIG = {
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu("画像コメント自動生成")
+    .addItem("現在のシートのコメントを生成", "generateCommentsForCurrentSheet")
     .addItem("選択範囲のコメントを生成", "generateCommentsForSelection")
-    .addItem("シート全体のコメントを生成", "generateCommentsForSheet")
+    .addItem("全対象シートのコメントを生成", "generateCommentsForAllSheets")
+    .addSeparator()
     .addItem("APIキーを設定", "setApiKey")
     .addToUi();
 }
@@ -89,17 +112,40 @@ function getApiKey() {
     PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY");
   if (!key) {
     throw new Error(
-      "APIキーが設定されていません。メニュー「画像コメント自動生成」→「APIキーを設定」から設定してください。"
+      'APIキーが設定されていません。メニュー「画像コメント自動生成」→「APIキーを設定」から設定してください。'
     );
   }
   return key;
 }
 
 // ============================================================
+// メイン処理：現在のシートのコメント生成
+// ============================================================
+function generateCommentsForCurrentSheet() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const sheetName = sheet.getName();
+
+  if (!CONFIG.TARGET_SHEETS.includes(sheetName)) {
+    SpreadsheetApp.getUi().alert(
+      '対象シートではありません。\n対象: ' + CONFIG.TARGET_SHEETS.join(", ")
+    );
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.DATA_START_ROW) {
+    SpreadsheetApp.getUi().alert("データが見つかりません。");
+    return;
+  }
+
+  processRows(sheet, CONFIG.DATA_START_ROW, lastRow);
+}
+
+// ============================================================
 // メイン処理：選択範囲のコメント生成
 // ============================================================
 function generateCommentsForSelection() {
-  const sheet = getTargetSheet();
+  const sheet = SpreadsheetApp.getActiveSheet();
   const selection = SpreadsheetApp.getActiveRange();
 
   if (!selection) {
@@ -114,24 +160,42 @@ function generateCommentsForSelection() {
 }
 
 // ============================================================
-// メイン処理：シート全体のコメント生成
+// メイン処理：全対象シートのコメント生成
 // ============================================================
-function generateCommentsForSheet() {
-  const sheet = getTargetSheet();
-  const lastRow = sheet.getLastRow();
+function generateCommentsForAllSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let totalProcessed = 0;
+  let totalSkipped = 0;
+  let totalErrors = 0;
 
-  if (lastRow < CONFIG.DATA_START_ROW) {
-    SpreadsheetApp.getUi().alert("データが見つかりません。");
-    return;
+  for (const sheetName of CONFIG.TARGET_SHEETS) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      Logger.log('シート「' + sheetName + '」が見つかりません。スキップします。');
+      continue;
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < CONFIG.DATA_START_ROW) continue;
+
+    const result = processRows(sheet, CONFIG.DATA_START_ROW, lastRow, true);
+    totalProcessed += result.processed;
+    totalSkipped += result.skipped;
+    totalErrors += result.errors;
   }
 
-  processRows(sheet, CONFIG.DATA_START_ROW, lastRow);
+  SpreadsheetApp.getUi().alert(
+    "全シート処理完了\n\n" +
+      "生成: " + totalProcessed + " 件\n" +
+      "スキップ: " + totalSkipped + " 件\n" +
+      "エラー: " + totalErrors + " 件"
+  );
 }
 
 // ============================================================
 // 行を処理してコメント生成
 // ============================================================
-function processRows(sheet, startRow, endRow) {
+function processRows(sheet, startRow, endRow, silent) {
   const apiKey = getApiKey();
   let processedCount = 0;
   let skippedCount = 0;
@@ -141,7 +205,14 @@ function processRows(sheet, startRow, endRow) {
   const images = sheet.getImages();
 
   for (let row = startRow; row <= endRow; row++) {
-    // 既存コメントチェック
+    // J列（今回チェック）を確認：チェック済み（TRUE）ならスキップ
+    // 指摘あり = 未チェック（FALSE）の行のみ処理
+    if (!isRowFlagged(sheet, row)) {
+      skippedCount++;
+      continue;
+    }
+
+    // O列の既存コメントチェック
     const existingComment = sheet
       .getRange(row, CONFIG.COMMENT_COLUMN)
       .getValue();
@@ -150,9 +221,9 @@ function processRows(sheet, startRow, endRow) {
       continue;
     }
 
-    // その行の画像列に配置された画像を探す
-    const imageBlob = findImageForRow(sheet, images, row);
-    if (!imageBlob) {
+    // L列・M列の画像を探す（両方取得を試みる）
+    const imageBlobs = findImagesForRow(sheet, images, row);
+    if (imageBlobs.length === 0) {
       skippedCount++;
       continue;
     }
@@ -161,70 +232,102 @@ function processRows(sheet, startRow, endRow) {
     const context = getRowContext(sheet, row);
 
     try {
-      // Claude APIで画像を分析
-      const comment = analyzeImageWithClaude(apiKey, imageBlob, context);
+      // Claude APIで画像を分析してコメント生成
+      const comment = analyzeImagesWithClaude(apiKey, imageBlobs, context);
 
-      // コメントをセルに書き込み
+      // O列にコメントを書き込み
       sheet.getRange(row, CONFIG.COMMENT_COLUMN).setValue(comment);
       processedCount++;
 
       // API レート制限対策
       Utilities.sleep(1000);
     } catch (e) {
-      Logger.log("行 " + row + " でエラー: " + e.message);
+      Logger.log(sheet.getName() + " 行" + row + " でエラー: " + e.message);
       errorCount++;
     }
   }
 
-  // 結果を表示
-  SpreadsheetApp.getUi().alert(
-    "処理完了\n\n" +
-      "生成: " + processedCount + " 件\n" +
-      "スキップ: " + skippedCount + " 件\n" +
-      "エラー: " + errorCount + " 件"
-  );
+  if (!silent) {
+    SpreadsheetApp.getUi().alert(
+      "【" + sheet.getName() + "】処理完了\n\n" +
+        "生成: " + processedCount + " 件\n" +
+        "スキップ: " + skippedCount + " 件\n" +
+        "エラー: " + errorCount + " 件"
+    );
+  }
+
+  return { processed: processedCount, skipped: skippedCount, errors: errorCount };
 }
 
 // ============================================================
-// 行に対応する画像を取得
+// J列のチェック状態を判定（指摘あり = 処理対象かどうか）
+// 未チェック（FALSE / 空）→ true（処理する）
+// チェック済み（TRUE）→ false（スキップ）
 // ============================================================
-function findImageForRow(sheet, images, targetRow) {
+function isRowFlagged(sheet, row) {
+  const value = sheet.getRange(row, CONFIG.CHECK_COLUMN).getValue();
+
+  // チェックボックス: FALSE = 未チェック = 指摘あり
+  if (value === false) return true;
+
+  // 空セルも指摘ありとみなす
+  if (value === "" || value === null || value === undefined) return true;
+
+  // TRUE（チェック済み）はスキップ
+  return false;
+}
+
+// ============================================================
+// 行に対応する画像を取得（L列・M列の両方）
+// ============================================================
+function findImagesForRow(sheet, images, targetRow) {
+  const blobs = [];
+
+  // L列（問題写真1）の画像を取得
+  const blob1 = findImageInColumn(sheet, images, targetRow, CONFIG.IMAGE_COLUMN_1);
+  if (blob1) blobs.push(blob1);
+
+  // M列（問題写真2）の画像を取得
+  const blob2 = findImageInColumn(sheet, images, targetRow, CONFIG.IMAGE_COLUMN_2);
+  if (blob2) blobs.push(blob2);
+
+  return blobs;
+}
+
+// ============================================================
+// 指定列の画像を取得
+// ============================================================
+function findImageInColumn(sheet, images, targetRow, targetCol) {
   // OverGridImage（セルの上に配置された画像）を検索
   for (const image of images) {
     const anchor = image.getAnchorCell();
-    const imageRow = anchor.getRow();
-    const imageCol = anchor.getColumn();
-
-    // 画像列にあり、対象行にある画像を検索
-    if (imageRow === targetRow && imageCol === CONFIG.IMAGE_COLUMN) {
+    if (anchor.getRow() === targetRow && anchor.getColumn() === targetCol) {
       return image.getBlob();
     }
   }
 
-  // セル内画像（IMAGE関数やCellImage）をチェック
-  const cell = sheet.getRange(targetRow, CONFIG.IMAGE_COLUMN);
-  const richText = cell.getRichTextValue();
-  if (richText) {
-    const linkUrl = richText.getLinkUrl();
-    if (linkUrl && isImageUrl(linkUrl)) {
-      try {
-        const response = UrlFetchApp.fetch(linkUrl);
-        return response.getBlob();
-      } catch (e) {
-        Logger.log("画像URLの取得に失敗: " + linkUrl);
+  // =IMAGE() 関数をチェック
+  try {
+    const cell = sheet.getRange(targetRow, targetCol);
+    const formula = cell.getFormula();
+    if (formula && formula.toUpperCase().startsWith("=IMAGE(")) {
+      const match = formula.match(/=IMAGE\("([^"]+)"/i);
+      if (match && match[1]) {
+        return UrlFetchApp.fetch(match[1]).getBlob();
       }
     }
+  } catch (e) {
+    Logger.log("IMAGE関数の取得エラー: " + e.message);
   }
 
-  // セルに画像のURLが文字列として入っている場合
-  const cellValue = cell.getValue().toString();
-  if (cellValue && isImageUrl(cellValue)) {
-    try {
-      const response = UrlFetchApp.fetch(cellValue);
-      return response.getBlob();
-    } catch (e) {
-      Logger.log("画像URLの取得に失敗: " + cellValue);
+  // セルにURLが文字列として入っている場合
+  try {
+    const cellValue = sheet.getRange(targetRow, targetCol).getValue().toString();
+    if (cellValue && isImageUrl(cellValue)) {
+      return UrlFetchApp.fetch(cellValue).getBlob();
     }
+  } catch (e) {
+    Logger.log("画像URL取得エラー: " + e.message);
   }
 
   return null;
@@ -235,10 +338,9 @@ function findImageForRow(sheet, images, targetRow) {
 // ============================================================
 function isImageUrl(url) {
   if (!url) return false;
-  const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"];
-  const lowerUrl = url.toLowerCase();
+  var lowerUrl = url.toLowerCase();
   return (
-    imageExtensions.some((ext) => lowerUrl.includes(ext)) ||
+    /\.(png|jpg|jpeg|gif|webp|bmp)/.test(lowerUrl) ||
     lowerUrl.includes("googleusercontent.com") ||
     lowerUrl.includes("drive.google.com")
   );
@@ -248,68 +350,73 @@ function isImageUrl(url) {
 // 行のコンテキスト情報を取得
 // ============================================================
 function getRowContext(sheet, row) {
-  const context = {};
-
-  if (CONFIG.ITEM_NAME_COLUMN) {
-    context.itemName = sheet
-      .getRange(row, CONFIG.ITEM_NAME_COLUMN)
-      .getValue()
-      .toString();
-  }
-
-  if (CONFIG.LOCATION_COLUMN) {
-    context.location = sheet
-      .getRange(row, CONFIG.LOCATION_COLUMN)
-      .getValue()
-      .toString();
-  }
-
-  return context;
+  return {
+    sheetName: sheet.getName(),
+    category: sheet.getRange(row, CONFIG.CATEGORY_COLUMN).getValue().toString().trim(),
+    item: sheet.getRange(row, CONFIG.ITEM_COLUMN).getValue().toString().trim(),
+    improvement: sheet.getRange(row, CONFIG.IMPROVEMENT_COLUMN).getValue().toString().trim(),
+  };
 }
 
 // ============================================================
-// Claude API で画像を分析
+// Claude API で画像を分析（複数画像対応）
 // ============================================================
-function analyzeImageWithClaude(apiKey, imageBlob, context) {
-  const base64Image = Utilities.base64Encode(imageBlob.getBytes());
-  const mimeType = imageBlob.getContentType() || "image/png";
+function analyzeImagesWithClaude(apiKey, imageBlobs, context) {
+  // メッセージのcontentを組み立て（画像 + テキスト）
+  var content = [];
 
-  // ユーザープロンプトを組み立て
-  let userPrompt = "この画像を分析して、インスペクション（検査）のコメントを記載してください。";
-
-  if (context.itemName) {
-    userPrompt += "\n指摘項目: " + context.itemName;
+  // 画像を追加
+  for (var i = 0; i < imageBlobs.length; i++) {
+    var blob = imageBlobs[i];
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: blob.getContentType() || "image/png",
+        data: Utilities.base64Encode(blob.getBytes()),
+      },
+    });
   }
-  if (context.location) {
-    userPrompt += "\n指摘箇所: " + context.location;
+
+  // プロンプトを組み立て
+  var userPrompt =
+    "この画像は焼肉店のインスペクション（臨店検査）で撮影された問題写真です。\n" +
+    "画像を分析し、指摘コメントを記載してください。\n";
+
+  if (imageBlobs.length > 1) {
+    userPrompt += "（問題写真が2枚あります。両方を踏まえてコメントしてください。）\n";
   }
 
-  const payload = {
+  userPrompt += "\n検査種別: " + context.sheetName;
+
+  if (context.category) {
+    userPrompt += "\n分類: " + context.category;
+  }
+  if (context.item) {
+    userPrompt += "\n項目: " + context.item;
+  }
+  if (context.improvement) {
+    userPrompt += "\n改善内容: " + context.improvement;
+  }
+
+  content.push({
+    type: "text",
+    text: userPrompt,
+  });
+
+  var payload = {
     model: CONFIG.MODEL,
     max_tokens: 1024,
     system: CONFIG.SYSTEM_PROMPT,
     messages: [
       {
         role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mimeType,
-              data: base64Image,
-            },
-          },
-          {
-            type: "text",
-            text: userPrompt,
-          },
-        ],
+        content: content,
       },
     ],
   };
 
-  const options = {
+  var options = {
     method: "post",
     contentType: "application/json",
     headers: {
@@ -320,79 +427,26 @@ function analyzeImageWithClaude(apiKey, imageBlob, context) {
     muteHttpExceptions: true,
   };
 
-  const response = UrlFetchApp.fetch(
+  var response = UrlFetchApp.fetch(
     "https://api.anthropic.com/v1/messages",
     options
   );
-  const responseCode = response.getResponseCode();
-  const responseBody = JSON.parse(response.getContentText());
+  var responseCode = response.getResponseCode();
+  var responseBody = JSON.parse(response.getContentText());
 
   if (responseCode !== 200) {
     throw new Error(
       "API Error (" + responseCode + "): " +
-      (responseBody.error ? responseBody.error.message : "Unknown error")
+        (responseBody.error ? responseBody.error.message : "Unknown error")
     );
   }
 
-  // レスポンスからテキストを抽出
-  const textContent = responseBody.content.find((c) => c.type === "text");
+  var textContent = responseBody.content.find(function (c) {
+    return c.type === "text";
+  });
   if (!textContent) {
     throw new Error("APIからテキスト応答がありませんでした。");
   }
 
   return textContent.text;
-}
-
-// ============================================================
-// 対象シートを取得
-// ============================================================
-function getTargetSheet() {
-  if (CONFIG.SHEET_NAME) {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(
-      CONFIG.SHEET_NAME
-    );
-    if (!sheet) {
-      throw new Error("シート「" + CONFIG.SHEET_NAME + "」が見つかりません。");
-    }
-    return sheet;
-  }
-  return SpreadsheetApp.getActiveSheet();
-}
-
-// ============================================================
-// Google Drive内の画像をBlobとして取得（IMAGE関数で使用されるDriveのURLに対応）
-// ============================================================
-function getImageFromDrive(fileId) {
-  try {
-    const file = DriveApp.getFileById(fileId);
-    return file.getBlob();
-  } catch (e) {
-    Logger.log("Drive画像の取得に失敗: " + e.message);
-    return null;
-  }
-}
-
-// ============================================================
-// CellImage（セル内に挿入された画像）を取得する試み
-// Note: Google Apps Scriptでは CellImage の直接取得に制限があるため、
-// OverGridImage（セル上に配置された画像）の利用を推奨します。
-// ============================================================
-function findCellImageForRow(sheet, row) {
-  try {
-    const cell = sheet.getRange(row, CONFIG.IMAGE_COLUMN);
-    // getFormula() で =IMAGE() 関数を検出
-    const formula = cell.getFormula();
-    if (formula && formula.toUpperCase().startsWith("=IMAGE(")) {
-      // =IMAGE("URL") からURLを抽出
-      const match = formula.match(/=IMAGE\("([^"]+)"/i);
-      if (match && match[1]) {
-        const imageUrl = match[1];
-        const response = UrlFetchApp.fetch(imageUrl);
-        return response.getBlob();
-      }
-    }
-  } catch (e) {
-    Logger.log("CellImage取得エラー: " + e.message);
-  }
-  return null;
 }
