@@ -38,6 +38,11 @@ HOURS = list(range(11, 24))
 DATA_ROWS = 800  # 31日×24時間=744行 + 余裕
 DS1, DS2, DSP = "先月データ", "先々月データ", "前年当月データ"
 LD, DO, CL_ = "ランチ+ディナー", "ディナーのみ", "休業"
+DSO = "売上予測貼付用"
+BANDS = ["ランチ", "アイドル", "ディナー", "ナイト"]  # 【事前】売上予測 の列順
+# 時刻→時間帯（基幹システムの時間帯別売上実績表の区分）
+BAND_OF_HOUR = {h: ("ナイト" if h <= 7 or h >= 22 else "モーニング" if h <= 10 else "ランチ" if h <= 14
+                    else "アイドル" if h <= 17 else "ディナー") for h in range(24)}
 
 HOLIDAYS = [
     ("2025-01-01", "元日"), ("2025-01-13", "成人の日"), ("2025-02-11", "建国記念の日"),
@@ -93,10 +98,10 @@ def header(ws, row, col, labels, fill=FILL_HD, font=FW):
 D0, D1 = 3, 33  # 日別行
 # 先月/先々月ブロック内の列オフセット
 BLK = ["日付", "タイプ", "曜日", "客数", "売上", "前年客数", "ランチ客数", "ディナー客数",
-       "ランチ営業", "前年ディナー", "前年日=祝"]
+       "ランチ営業", "前年ディナー", "前年日=祝", "前年売上"]
 B1, B2 = 2, 14  # 先月ブロック開始列(B)、先々月ブロック開始列(N)
 BP = 26  # 前年当月ブロック開始列(Z)
-BLKP = ["前年当月 日付", "タイプ", "客数", "ランチ客数", "ディナー客数"]
+BLKP = ["前年当月 日付", "タイプ", "客数", "ランチ客数", "ディナー客数", "売上"]
 
 
 def bcol(start, name):
@@ -105,6 +110,13 @@ def bcol(start, name):
 
 def pcol(name):
     return CL(BP + BLKP.index(name))
+
+
+MAPH, MAPB = "設定!$E$4:$E$27", "設定!$F$4:$F$27"
+
+
+def band_formula(cell):
+    return f'IFERROR(INDEX({MAPB},MATCH({cell},{MAPH},0)),"")'
 
 
 def rng(col):
@@ -121,6 +133,7 @@ def build(out, src1=None, src2=None, srcp=None):
     ws_d1 = wb.create_sheet(DS1)
     ws_d2 = wb.create_sheet(DS2)
     ws_dp = wb.create_sheet(DSP)
+    ws_out = wb.create_sheet(DSO, 3)
     ws_hol = wb.create_sheet("祝日")
     ws_c = wb.create_sheet("集計")
 
@@ -154,9 +167,19 @@ def build(out, src1=None, src2=None, srcp=None):
         ("smanual", "季節係数（前年当月データが無い場合の手入力）", 1.0, "0.000", True, "前年当月データを貼ればそちらから自動計算されるので入力不要"),
         ("season", "季節係数（適用値）", None, "0.000", False, "＝前年当月の曜日別ディナー平均 ÷ 前年の先月・先々月の曜日別ディナー平均（祝日を除く）"),
         ("yoy", "直近の前年比（適用値）", None, "0.000", False, "先月の客数 ÷ 先月の前年客数（先月が無ければ先々月）。前年同曜日の値に掛けて今年の水準に合わせる"),
+        ("sec", "▼ 客単価の補正"),
+        ("ptrend", "客単価トレンド係数", 1.0, "0.00", True, "値上げ・メニュー改定・クーポン施策など。例：3%値上げ→1.03"),
+        ("psmanual", "客単価の季節係数（前年当月データが無い場合の手入力）", 1.0, "0.000", True, "前年当月データを貼ればそちらから自動計算"),
+        ("pseason", "客単価の季節係数（適用値）", None, "0.000", False, "＝前年当月の客単価 ÷ 前年の先月・先々月の客単価（重み付け）"),
+        ("pmin", "時間帯別客単価を計算する最低客数", 10, '0"人"', True, "この人数未満の時間帯は、単価がぶれるので全体（全曜日合算）の単価で代用"),
         ("sec", "▼ 判断材料"),
         ("yoy1", "【参考】先月 客数前年比", None, "0.0%", False, ""),
         ("yoy2", "【参考】先々月 客数前年比", None, "0.0%", False, ""),
+        ("pc1", "【参考】先月 客単価", None, "#,##0", False, ""),
+        ("pc2", "【参考】先々月 客単価", None, "#,##0", False, ""),
+        ("ppy", "【参考】前年当月 客単価", None, "#,##0", False, ""),
+        ("ppy1", "【参考】先月の前年 客単価", None, "#,##0", False, "データの「売上前年」÷「客数前年」"),
+        ("ppy2", "【参考】先々月の前年 客単価", None, "#,##0", False, ""),
         ("check", "データチェック", None, None, False, ""),
     ]
     r = 3
@@ -172,6 +195,19 @@ def build(out, src1=None, src2=None, srcp=None):
         s.cell(row=r, column=3, value=note).font = FNOTE
         r += 1
     s.cell(row=r + 1, column=1, value="黄色セル＝入力欄（青字）。その他は自動計算です。").font = FNOTE
+
+    s.column_dimensions["E"].width = 8
+    s.column_dimensions["F"].width = 12
+    s["E2"] = "▼ 時刻→時間帯の対応表（【事前】売上予測の列分けに使用・変更可）"
+    s["E2"].font = FB
+    header(s, 3, 5, ["時刻", "時間帯"])
+    for h_ in range(24):
+        style(s.cell(row=4 + h_, column=5, value=h_), fmt='0"時"', align=CENTER)
+        style(s.cell(row=4 + h_, column=6, value=BAND_OF_HOUR[h_]), font=FIN, fill=FILL_IN, align=CENTER)
+    bdv = DataValidation(type="list", formula1='"' + ",".join(["モーニング"] + BANDS) + '"', allow_blank=True)
+    s.add_data_validation(bdv)
+    bdv.add("F4:F27")
+    s.column_dimensions["C"].width = 70
 
     def setcell(key, formula):
         s[S[key].split("!")[1].replace("$", "")] = formula
@@ -206,10 +242,15 @@ def build(out, src1=None, src2=None, srcp=None):
                 ws.cell(row=rr, column=27, value=(
                     f'=IF(ISNUMBER(A{rr}),IFERROR(INDEX({rng(fcol)},MATCH(A{rr},{rng(dcol)},0)),0),"")')).font = FG
             ws.column_dimensions["AA"].width = 16
+            ws["AB1"] = "時間帯区分(自動)"
+            style(ws["AB1"], font=FB, fill=FILL_GR)
+            for rr in range(2, DATA_ROWS + 1):
+                ws.cell(row=rr, column=28, value=f'=IF(ISNUMBER(A{rr}),{band_formula(f"K{rr}")},"")').font = FG
+            ws.column_dimensions["AB"].width = 16
         ws.column_dimensions["A"].width = 12
         ws.column_dimensions["B"].width = 12
         ws.freeze_panes = "A2"
-    ws_dp["AC1"] = "例：当月が2026年10月なら、期間を2025/10/1〜2025/10/31で出力したものを貼り付け（「当年」列を前年データとして使います）"
+    ws_dp["AC1"] = "例：当月が2026年10月なら、期間を2025/10/1〜2025/11/1で出力したものを貼り付け（「当年」列を前年データとして使います。月末の前年同曜日は翌月1日になるため1日多めに）"
     ws_dp["AC1"].font = FB
 
     # ---------------- 祝日 ----------------
@@ -259,6 +300,7 @@ def build(out, src1=None, src2=None, srcp=None):
                 "ランチ営業": f'=IF({d}="","",IF({bcol(blk, "ランチ客数")}{r}>={S["thr"]},1,0))',
                 "前年ディナー": f'=IF({d}="","",{bcol(blk, "前年客数")}{r}-SUMIFS({rr_},{a},{d},{lunch_crit}))',
                 "前年日=祝": f'=IF({d}="","",IF(COUNTIF(祝日!$A:$A,{d}-364)>0,1,0))',
+                "前年売上": f"=IF({d}=\"\",\"\",SUMIFS('{sheet}'!$M:$M,{a},{d}))",
             }
             for j, name in enumerate(BLK):
                 cc = c.cell(row=r, column=blk + j, value=vals[name])
@@ -273,6 +315,7 @@ def build(out, src1=None, src2=None, srcp=None):
             "客数": f'=IF({d}="","",SUMIFS({q},{a},{d}))',
             "ランチ客数": f'=IF({d}="","",SUMIFS({q},{a},{d},{k},">=6",{k},"<"&{dn}))',
             "ディナー客数": f'=IF({d}="","",{pcol("客数")}{r}-{pcol("ランチ客数")}{r})',
+            "売上": f"=IF({d}=\"\",\"\",SUMIFS('{DSP}'!$L:$L,{a},{d}))",
         }
         for j, name in enumerate(BLKP):
             style(c.cell(row=r, column=BP + j, value=pv[name]), fmt="m/d(aaa)" if j == 0 else "#,##0",
@@ -366,6 +409,18 @@ def build(out, src1=None, src2=None, srcp=None):
     setcell("yoy1", f'=IFERROR(SUM({rng(bcol(B1, "客数"))})/SUM({rng(bcol(B1, "前年客数"))}),"")')
     setcell("yoy2", f'=IFERROR(SUM({rng(bcol(B2, "客数"))})/SUM({rng(bcol(B2, "前年客数"))}),"")')
     setcell("yoy", f'=IF({S["yoy1"]}<>"",{S["yoy1"]},IF({S["yoy2"]}<>"",{S["yoy2"]},1))')
+    def ratio(num, den):
+        return f'IFERROR(SUM({rng(num)})/SUM({rng(den)}),"")'
+
+    setcell("pc1", "=" + ratio(bcol(B1, "売上"), bcol(B1, "客数")))
+    setcell("pc2", "=" + ratio(bcol(B2, "売上"), bcol(B2, "客数")))
+    setcell("ppy", "=" + ratio(pcol("売上"), pcol("客数")))
+    setcell("ppy1", "=" + ratio(bcol(B1, "前年売上"), bcol(B1, "前年客数")))
+    setcell("ppy2", "=" + ratio(bcol(B2, "前年売上"), bcol(B2, "前年客数")))
+    p1, p2 = S["ppy1"], S["ppy2"]
+    setcell("pseason", (f'=IFERROR(IF({S["ppy"]}="",{S["psmanual"]},{S["ppy"]}/'
+                        f'IF(AND(ISNUMBER({p1}),ISNUMBER({p2})),({w1}*{p1}+{w2}*{p2})/({w1}+{w2}),IF(ISNUMBER({p1}),{p1},{p2}))),'
+                        f'{S["psmanual"]})'))
     setcell("check", (f'=IF({S["m1"]}="","先月データ未貼付",'
                       f'IF({S["m2"]}="","先々月データ未貼付（先月のみで予測中）",'
                       f'IF(EDATE({S["m2"]},1)<>{S["m1"]},"⚠ 先々月が先月の前月になっていません",'
@@ -436,6 +491,51 @@ def build(out, src1=None, src2=None, srcp=None):
                       f'IF(N(${dsum_col}${ALL})>0,N({hl}${ALL})/${dsum_col}${ALL},0)))')
             c.cell(row=r, column=2 + j, value=f"=IF({hc}<{dn},{lunch},{dinner})")
             style(c.cell(row=r, column=2 + j), fmt="0.0%")
+    # ---------------- 集計：日タイプ×時間帯の客単価 ----------------
+    PT = SH + 11  # 時間帯名の見出し行（その下にサブ見出し、データ行）
+    c.cell(row=PT - 1, column=1, value=f"日タイプ×時間帯の客単価（売上÷客数。客数が最低客数未満の月は使わず、全体→日タイプ全体の単価で代用）").font = FB
+    style(c.cell(row=PT, column=1, value="タイプ"), font=FW, fill=FILL_HD, align=CENTER)
+    style(c.cell(row=PT + 1, column=1), font=FW, fill=FILL_HD)
+    for k, band in enumerate(BANDS):
+        c0 = 2 + 3 * k
+        c.merge_cells(start_row=PT, start_column=c0, end_row=PT, end_column=c0 + 2)
+        style(c.cell(row=PT, column=c0, value=band), font=FW, fill=FILL_HD, align=CENTER)
+        for j, lab in enumerate(["先月", "先々月", "採用"]):
+            style(c.cell(row=PT + 1, column=c0 + j, value=lab), font=FW, fill=FILL_HD, align=CENTER)
+    P0 = PT + 2  # データ先頭行（8タイプ）、P0+8 が全体
+    pmin = S["pmin"]
+
+    def band_price(sheet, mkey, band, tcrit):
+        mc = S[mkey]
+        crit = (f"'{sheet}'!$AB:$AB,\"{band}\",'{sheet}'!$A:$A,\">=\"&{mc},"
+                f"'{sheet}'!$A:$A,\"<=\"&EOMONTH({mc},0){tcrit}")
+        den = f"SUMIFS('{sheet}'!$Q:$Q,{crit})"
+        return f'=IF({mc}="","",IF({den}<{pmin},"",SUMIFS(\'{sheet}\'!$L:$L,{crit})/{den}))'
+
+    sun_p = P0 + TYPES.index("日")
+    for i, t in enumerate(TYPES + ["全体"]):
+        r = P0 + i
+        c.cell(row=r, column=1, value=t)
+        style(c.cell(row=r, column=1), align=CENTER, fill=FILL_GR if t == "全体" else None)
+        for k, band in enumerate(BANDS):
+            c0 = 2 + 3 * k
+            x1, x2, ad = CL(c0), CL(c0 + 1), CL(c0 + 2)
+            for j, (sheet, mkey) in enumerate(((DS1, "m1"), (DS2, "m2"))):
+                tcrit = "" if t == "全体" else f",'{sheet}'!$Z:$Z,$A{r}"
+                c.cell(row=r, column=c0 + j, value=band_price(sheet, mkey, band, tcrit))
+            if t == "全体":
+                fb = '""'
+            elif t == "祝":
+                fb = f'IF({ad}${sun_p}<>"",{ad}${sun_p},IF({ad}${P0 + 8}<>"",{ad}${P0 + 8},$P${TR + i}))'
+            else:
+                fb = f'IF({ad}${P0 + 8}<>"",{ad}${P0 + 8},$P${TR + i})'
+            c.cell(row=r, column=c0 + 2, value=(
+                f'=IF(AND({x1}{r}<>"",{x2}{r}<>""),({w1}*{x1}{r}+{w2}*{x2}{r})/({w1}+{w2}),'
+                f'IF({x1}{r}<>"",{x1}{r},IF({x2}{r}<>"",{x2}{r},{fb})))'))
+            for j in range(3):
+                style(c.cell(row=r, column=c0 + j), fmt="#,##0", font=FB if j == 2 else F,
+                      fill=FILL_GR if t == "全体" else None)
+
     c.column_dimensions["A"].width = 13
     for col in range(2, 32):
         c.column_dimensions[CL(col)].width = 10
@@ -451,7 +551,8 @@ def build(out, src1=None, src2=None, srcp=None):
     f["A2"].font = FNOTE
     FR0, FR1 = 9, 39
     kpis = [("月間予測客数", f"=SUM(O{FR0}:O{FR1})", "#,##0"), ("月間予測売上", f"=SUM(P{FR0}:P{FR1})", "#,##0"),
-            ("先月実績客数", f"=SUM({rng(bcol(B1, '客数'))})", "#,##0"), ("先月比(客数)", '=IFERROR(D3/D5,"")', "0.0%")]
+            ("先月実績客数", f"=SUM({rng(bcol(B1, '客数'))})", "#,##0"), ("先月比(客数)", '=IFERROR(D3/D5,"")', "0.0%"),
+            ("予測客単価", '=IFERROR(D4/D3,"")', "#,##0")]
     for k, (lab, fml, fmt) in enumerate(kpis):
         r = 3 + k
         for col in range(1, 6):
@@ -467,12 +568,12 @@ def build(out, src1=None, src2=None, srcp=None):
         f.cell(row=3 + k, column=7, value=t).font = FNOTE
     hdr = ["日付", "曜日", "日タイプ", "営業区分\n(変更時のみ)", "適用\n営業区分", "ランチ\n基準", "ディナー\n基準",
            "前年\n同曜日", "前年\n客数", "季節\n係数", "トレンド\n係数", "日別\n補正", "予測\nランチ", "予測\nディナー",
-           "予測客数", "予測売上", "メモ"]
+           "予測客数", "予測売上", "予測\n客単価", "メモ"]
     header(f, FR0 - 1, 1, hdr)
     f.row_dimensions[FR0 - 1].height = 30
     helper_hdr = ["(計算用)前年ランチ", "(計算用)前年ディナー", "(計算用)前年タイプ", "(計算用)前年を使う"]
-    header(f, FR0 - 1, 19, helper_hdr, fill=FILL_GR, font=FG)
-    pdate, pty, pl, pdn = (rng(pcol(n)) for n in ("前年当月 日付", "タイプ", "ランチ客数", "ディナー客数"))
+    header(f, FR0 - 1, 20, helper_hdr, fill=FILL_GR, font=FG)
+    pa, pq, pk = f"'{DSP}'!$A:$A", f"'{DSP}'!$Q:$Q", f"'{DSP}'!$K:$K"
     dtype = f"集計!$A${TR}:$A${TR + 7}"
     wp, yoy, thr = S["wp"], S["yoy"], S["thr"]
     for i in range(31):
@@ -486,40 +587,43 @@ def build(out, src1=None, src2=None, srcp=None):
             5: f'=IF({A}="","",IF(D{r}<>"",D{r},IF(OR(C{r}="土",C{r}="日",C{r}="祝"),"{LD}","{DO}")))',
             6: f'=IF({A}="","",IF(E{r}="{LD}",INDEX(集計!$M${TR}:$M${TR + 7},MATCH(C{r},{dtype},0)),0))',
             7: f'=IF({A}="","",IF(E{r}="{CL_}",0,INDEX(集計!$L${TR}:$L${TR + 7},MATCH(C{r},{dtype},0))))',
-            8: f'=IF(V{r}=1,{A}-364,"")',
-            9: f'=IF(V{r}=1,IF(AND(E{r}="{LD}",S{r}>={thr}),S{r},0)+T{r},"")',
+            8: f'=IF(W{r}=1,{A}-364,"")',
+            9: f'=IF(W{r}=1,IF(AND(E{r}="{LD}",T{r}>={thr}),T{r},0)+U{r},"")',
             10: f'=IF({A}="","",{S["season"]})',
             11: f'=IF({A}="","",{S["trend"]})',
             12: 1,
-            13: (f'=IF({A}="","",IF(E{r}<>"{LD}",0,IF(AND(V{r}=1,S{r}>={thr}),(1-{wp})*F{r}*J{r}+{wp}*S{r}*{yoy},F{r}*J{r})*K{r}*N(L{r})))'),
-            14: (f'=IF({A}="","",IF(E{r}="{CL_}",0,IF(V{r}=1,(1-{wp})*G{r}*J{r}+{wp}*T{r}*{yoy},G{r}*J{r})*K{r}*N(L{r})))'),
+            13: (f'=IF({A}="","",IF(E{r}<>"{LD}",0,IF(AND(W{r}=1,T{r}>={thr}),(1-{wp})*F{r}*J{r}+{wp}*T{r}*{yoy},F{r}*J{r})*K{r}*N(L{r})))'),
+            14: (f'=IF({A}="","",IF(E{r}="{CL_}",0,IF(W{r}=1,(1-{wp})*G{r}*J{r}+{wp}*U{r}*{yoy},G{r}*J{r})*K{r}*N(L{r})))'),
             15: f'=IF({A}="","",ROUND(M{r}+N{r},0))',
-            16: f'=IF({A}="","",ROUND(O{r}*INDEX(集計!$P${TR}:$P${TR + 7},MATCH(C{r},{dtype},0)),-2))',
-            17: None,
-            19: f'=IF({A}="","",IFERROR(INDEX({pl},MATCH({A}-364,{pdate},0)),""))',
-            20: f'=IF({A}="","",IFERROR(INDEX({pdn},MATCH({A}-364,{pdate},0)),""))',
-            21: f'=IF({A}="","",IFERROR(INDEX({pty},MATCH({A}-364,{pdate},0)),""))',
-            22: (f'=IF({A}="",0,IF(AND({wp}>0,N(T{r})>0,C{r}<>"祝",U{r}<>"祝",E{r}<>"{CL_}"),1,0))'),
+            16: f"=IF({A}=\"\",\"\",'{DSO}'!S{4 + i})",
+            17: f'=IF({A}="","",IFERROR(P{r}/O{r},""))',
+            18: None,
+            20: (f'=IF({A}="","",IF(COUNTIF({pa},{A}-364)=0,"",'
+                 f'SUMIFS({pq},{pa},{A}-364,{pk},">=6",{pk},"<"&{dn})))'),
+            21: f'=IF(T{r}="","",SUMIFS({pq},{pa},{A}-364)-T{r})',
+            22: f'=IF(T{r}="","",{type_formula(f"({A}-364)")})',
+            23: (f'=IF({A}="",0,IF(AND({wp}>0,N(U{r})>0,C{r}<>"祝",V{r}<>"祝",E{r}<>"{CL_}"),1,0))'),
         }
         fmts = {1: "m/d", 6: "#,##0.0", 7: "#,##0.0", 8: "m/d(aaa)", 9: "#,##0", 10: "0.000", 11: "0.00", 12: "0.00",
-                13: "#,##0.0", 14: "#,##0.0", 15: "#,##0", 16: "#,##0"}
-        for col in list(range(1, 18)) + [19, 20, 21, 22]:
+                13: "#,##0.0", 14: "#,##0.0", 15: "#,##0", 16: "#,##0", 17: "#,##0"}
+        for col in list(range(1, 19)) + [20, 21, 22, 23]:
             val = v.get(col)
             cell = f.cell(row=r, column=col, value=val)
-            is_in = col in (4, 12, 17)
-            font = FB if col == 15 else (FIN if is_in else (FG if col >= 19 else F))
+            is_in = col in (4, 12, 18)
+            font = FB if col == 15 else (FIN if is_in else (FG if col >= 20 else F))
             style(cell, font=font, fill=FILL_IN if is_in else None, fmt=fmts.get(col),
                   align=CENTER if col in (1, 2, 3, 4, 5, 8) else None)
     r = FR1 + 1
-    for col in range(1, 18):
+    for col in range(1, 19):
         style(f.cell(row=r, column=col), font=FB, fill=FILL_SUB, fmt="#,##0")
     f.cell(row=r, column=1, value="合計")
     for col in (13, 14, 15, 16):
         L = CL(col)
         f.cell(row=r, column=col, value=f"=SUM({L}{FR0}:{L}{FR1})")
+    f.cell(row=r, column=17, value=f'=IFERROR(P{r}/O{r},"")')
     f.conditional_formatting.add(f"A{FR0}:C{FR1}", FormulaRule(formula=[f'$C{FR0}="土"'], font=Font(color="0070C0", bold=True)))
     f.conditional_formatting.add(f"A{FR0}:C{FR1}", FormulaRule(formula=[f'OR($C{FR0}="日",$C{FR0}="祝")'], font=Font(color="C00000", bold=True)))
-    f.conditional_formatting.add(f"E{FR0}:P{FR1}", FormulaRule(formula=[f'$E{FR0}="{CL_}"'], fill=PatternFill("solid", fgColor="D9D9D9")))
+    f.conditional_formatting.add(f"E{FR0}:Q{FR1}", FormulaRule(formula=[f'$E{FR0}="{CL_}"'], fill=PatternFill("solid", fgColor="D9D9D9")))
     f.conditional_formatting.add(f"E{FR0}:E{FR1}", FormulaRule(formula=[f'AND($D{FR0}<>"",$E{FR0}<>"{CL_}")'], font=Font(color="C55A11", bold=True)))
     dv = DataValidation(type="list", formula1=f'"{LD},{DO},{CL_}"', allow_blank=True)
     f.add_data_validation(dv)
@@ -530,11 +634,11 @@ def build(out, src1=None, src2=None, srcp=None):
     dv2.add(f"L{FR0}:L{FR1}")
     f.cell(row=FR0 - 1, column=12).comment = Comment("1.00=補正なし。1.20=2割増、0.80=2割減。", "tool")
     f.cell(row=FR0 - 1, column=8).comment = Comment("前年当月データの364日前（同じ曜日）。祝日が絡む日・休業日は前年の値を使わず空欄になります。", "tool")
-    widths = [8, 5, 7, 13, 13, 8, 8, 10, 7, 7, 8, 7, 8, 8, 9, 11, 24, 2, 9, 9, 9, 9]
+    widths = [8, 5, 7, 13, 13, 8, 8, 10, 7, 7, 8, 7, 8, 8, 9, 11, 8, 24, 2, 9, 9, 9, 9]
     for col, w in enumerate(widths, start=1):
         f.column_dimensions[CL(col)].width = w
     f.freeze_panes = f"D{FR0}"
-    for col in ("S", "T", "U", "V"):
+    for col in ("T", "U", "V", "W"):
         f.column_dimensions[col].hidden = True
     ch = BarChart()
     ch.type = "col"
@@ -558,8 +662,11 @@ def build(out, src1=None, src2=None, srcp=None):
     h["A2"] = "予測ランチ・予測ディナーを、同じ日タイプの時刻別構成比で配分。ディナーのみの日は夜営業開始前が0になります。小数は四捨五入表示のため合計が±数名ずれることがあります。"
     h["A2"].font = FNOTE
     header(h, 4, 1, ["日付", "タイプ", "営業区分", "日予測"])
+    h.cell(row=3, column=4, value="時間帯→").font = FG
     for j in range(nH):
         style(h.cell(row=4, column=5 + j, value=f"=集計!{CL(2 + j)}{HR}"), font=FW, fill=FILL_HD, fmt='0"時"', align=CENTER)
+        style(h.cell(row=3, column=5 + j, value=f"={band_formula(CL(5 + j) + '4')}"), font=FG, fill=FILL_GR,
+              align=Alignment(horizontal="center", shrink_to_fit=True))
     for i in range(31):
         r = 5 + i
         fr = FR0 + i
@@ -590,6 +697,86 @@ def build(out, src1=None, src2=None, srcp=None):
         h.column_dimensions[CL(5 + j)].width = 6
     h.freeze_panes = "E5"
 
+    # ---------------- 売上予測貼付用（【事前】売上予測 と同じ行・列配置） ----------------
+    o = ws_out
+    o.sheet_properties.tabColor = "C00000"
+    o["A1"] = f'=IF({S["cur"]}="","売上予測 貼り付け用",TEXT({S["cur"]},"yyyy年m月")&"　売上予測 貼り付け用")'
+    o["A1"].font = FT
+    o["V2"] = "【使い方】"
+    o["V3"] = "① このシートの F4:M34（客単価4列＋客数4列）をコピー"
+    o["V4"] = "② 【事前】売上予測 タブの F4 を選択 → 右クリック →「値の貼り付け」"
+    o["V5"] = "③ 前年欄も使う場合は A4:C34 を同様に A4 へ（前年当月データ貼付時のみ）"
+    o["V7"] = "※ 行・列の位置は【事前】売上予測と同じです（4行目＝1日）"
+    o["V8"] = "※ 客単価は10円単位に丸め。客数は時間帯ごとに四捨五入し、端数差はディナーで調整（合計＝予測客数）"
+    o["V9"] = "※ 時刻→時間帯の対応は「設定」シートの表で変更できます"
+    o["V2"].font = FB
+    for k in range(3, 10):
+        o[f"V{k}"].font = FNOTE
+    # 見出し（元シートと同じ結合）
+    for rng_, val in (("A2:A3", "日"), ("B2:C2", "前年"), ("D2:D3", "日"), ("E2:E3", "曜"), ("F2:I2", "客単価"),
+                      ("J2:M2", "時間帯別客数"), ("N2:Q2", "時間帯別売上"), ("R2:R3", "客数"), ("S2:S3", "売上"), ("T2:T3", "客単価")):
+        o.merge_cells(rng_)
+        o[rng_.split(":")[0]] = val
+    o["B3"], o["C3"] = "客数", "売上"
+    for k, band in enumerate(BANDS):
+        for c0 in (6, 10, 14):
+            o.cell(row=3, column=c0 + k, value=band)
+    for row in o.iter_rows(min_row=2, max_row=3, min_col=1, max_col=20):
+        for cc in row:
+            style(cc, font=FW, fill=FILL_HD, align=CENTER)
+    for col in range(6, 14):
+        for rr in (2, 3):
+            o.cell(row=rr, column=col).fill = PatternFill("solid", fgColor="C00000")
+    band_hdr = f"時間帯別予測!$E$3:${CL(4 + nH)}$3"
+    for i in range(31):
+        r = 4 + i
+        fr = FR0 + i
+        hr_row = 5 + i
+        d = f"予測!$A${fr}"
+        tp = f"予測!$C${fr}"
+        v = {
+            1: f'=IF({d}="","",IF(COUNTIF({pa},{d}-364)>0,DAY({d}-364),""))',
+            2: f'=IF(A{r}="","",SUMIFS({pq},{pa},{d}-364))',
+            3: f"=IF(A{r}=\"\",\"\",SUMIFS('{DSP}'!$L:$L,{pa},{d}-364))",
+            4: f'=IF({d}="","",DAY({d}))',
+            5: f'=IF({d}="","",{wd_formula(d)})',
+        }
+        for k, band in enumerate(BANDS):
+            ad = CL(2 + 3 * k + 2)
+            v[6 + k] = (f'=IF({d}="",0,ROUND(INDEX(集計!${ad}${P0}:${ad}${P0 + 7},MATCH({tp},集計!$A${P0}:$A${P0 + 7},0))'
+                        f'*{S["pseason"]}*{S["ptrend"]},-1))')
+            raw = f"SUMIF({band_hdr},\"{band}\",時間帯別予測!$E${hr_row}:${CL(4 + nH)}${hr_row})"
+            if band == "ディナー":
+                v[10 + k] = f'=IF({d}="",0,MAX(0,予測!$O${fr}-J{r}-K{r}-M{r}))'
+            else:
+                v[10 + k] = f'=IF({d}="",0,ROUND({raw},0))'
+            v[14 + k] = f"={CL(6 + k)}{r}*{CL(10 + k)}{r}"
+        v[18] = f"=SUM(J{r}:M{r})"
+        v[19] = f"=SUM(N{r}:Q{r})"
+        v[20] = f'=IFERROR(S{r}/R{r},"")'
+        for col in range(1, 21):
+            cell = o.cell(row=r, column=col, value=v[col])
+            style(cell, fmt="#,##0", align=CENTER if col in (1, 4, 5) else None,
+                  font=FB if col in (18, 19) else F,
+                  fill=PatternFill("solid", fgColor="FCE4D6") if 6 <= col <= 13 else None)
+    r = 35
+    o.cell(row=r, column=1, value="合計")
+    for col in list(range(2, 4)) + list(range(10, 20)):
+        L = CL(col)
+        o.cell(row=r, column=col, value=f"=SUM({L}4:{L}34)")
+    for k in range(4):  # 時間帯別の平均客単価
+        o.cell(row=r, column=6 + k, value=f'=IFERROR({CL(14 + k)}35/{CL(10 + k)}35,"")')
+    o.cell(row=r, column=20, value='=IFERROR(S35/R35,"")')
+    for col in range(1, 21):
+        style(o.cell(row=r, column=col), font=FB, fill=FILL_SUB, fmt="#,##0")
+    o.conditional_formatting.add("D4:E34", FormulaRule(formula=['$E4="土"'], font=Font(color="0070C0", bold=True)))
+    o.conditional_formatting.add("D4:E34", FormulaRule(formula=['$E4="日"'],
+                                                       font=Font(color="C00000", bold=True)))
+    for col, w in zip("ABCDEFGHIJKLMNOPQRST", (5, 7, 10, 5, 5, 7, 7, 7, 7, 7, 7, 7, 7, 11, 11, 12, 11, 7, 12, 8)):
+        o.column_dimensions[col].width = w
+    o.column_dimensions["V"].width = 70
+    o.freeze_panes = "F4"
+
     # ---------------- 使い方 ----------------
     u = ws_help
     u.sheet_properties.tabColor = "4472C4"
@@ -601,10 +788,11 @@ def build(out, src1=None, src2=None, srcp=None):
         ("■ 毎月の使い方", FB),
         ("① 「先月データ」シートのA1を選択 → 先月の時間帯別売上実績表（見出し行ごと）を貼り付け", F),
         ("② 「先々月データ」シートのA1に先々月分を貼り付け", F),
-        ("③ （推奨）「前年当月データ」シートのA1に、1年前の当月（例：当月が2026年10月なら2025/10/1〜10/31）を貼り付け", F),
+        ("③ （推奨）「前年当月データ」シートのA1に、1年前の当月＋翌月1日（例：当月が2026年10月なら2025/10/1〜11/1）を貼り付け", F),
         ("   ※ 貼り付け前に、前回のデータを A〜X 列ごと削除してください（Z列以降の自動計算列は消さない）", F),
         ("④ 「予測」シートで当月の営業カレンダーを確認。夏休みの平日ランチ営業・臨時休業などは黄色の「営業区分」で指定", F),
         ("⑤ 必要なら「日別補正」にイベント・天候などの倍率を入力。「時間帯別予測」はシフト作成に使えます", F),
+        ("⑥ 「売上予測貼付用」の F4:M34 をコピー →【事前】売上予測 タブの F4 に「値の貼り付け」（客単価・客数が時間帯別に入ります）", F),
         ("", F),
         ("■ 予測の考え方", FB),
         ("予測客数 ＝ 予測ランチ ＋ 予測ディナー（ランチとディナーを別々に予測して足す）", FB),
@@ -616,10 +804,18 @@ def build(out, src1=None, src2=None, srcp=None):
         ("   祝日・祝前後のずれを避けるため、当日または前年の該当日が祝日の日は前年の値を使わない", F),
         ("・トレンド係数：販促・値上げ・競合出店など全体の上げ下げを手入力　・日別補正：その日だけの要因", F),
         ("・時間帯別：予測ランチ／ディナーを、同じ日タイプの時刻別構成比で配分", F),
-        ("・予測売上：予測客数 × 日タイプ別の客単価（加重平均）", F),
+        ("・時間帯別の客数：時間帯別予測を「設定」の時刻→時間帯対応表（ランチ11〜14時／アイドル15〜17時／ディナー18〜21時／ナイト22時〜）で合計", F),
+        ("", F),
+        ("■ 客単価の予測（客数と同じ考え方）", FB),
+        ("予測客単価（時間帯別）＝ 日タイプ×時間帯の基準客単価 × 客単価の季節係数 × 客単価トレンド係数", FB),
+        ("・基準客単価：先月・先々月の『売上÷客数』を日タイプ（月〜日＋祝）×時間帯ごとに計算し、0.6:0.4 で加重平均", F),
+        ("   客数が少ない時間帯（最低客数未満）は単価がぶれるので、全曜日合算の時間帯単価 → 日タイプ全体の単価で代用", F),
+        ("・客単価の季節係数：前年当月の客単価 ÷ 前年の先月・先々月の客単価（データの「売上前年」「客数前年」から計算）", F),
+        ("・客単価トレンド係数：値上げ・メニュー改定などを手入力", F),
+        ("・予測売上：時間帯別の 予測客数 × 予測客単価 の合計（日別の客単価はそこから逆算）", F),
         ("", F),
         ("■ シート一覧", FB),
-        ("予測／時間帯別予測：結果　設定：営業時間・重み・係数（黄色が入力欄）　各データ：貼り付け先　祝日：祝日・特異日リスト　集計：内部計算", F),
+        ("予測／時間帯別予測：結果　売上予測貼付用：【事前】売上予測への貼り付け元　設定：営業時間・重み・係数（黄色が入力欄）　各データ：貼り付け先　祝日：祝日・特異日リスト　集計：内部計算", F),
         ("", F),
         ("■ 色の意味", FB),
         ("黄色背景・青字＝入力してよいセル　／　それ以外＝自動計算（触らない）", F),
