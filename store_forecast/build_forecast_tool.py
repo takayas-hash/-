@@ -39,6 +39,7 @@ DATA_ROWS = 800  # 31日×24時間=744行 + 余裕
 DS1, DS2, DSP = "先月データ", "先々月データ", "前年当月データ"
 LD, DO, CL_ = "ランチ+ディナー", "ディナーのみ", "休業"
 DSO = "売上予測貼付用"
+NOZERO = "#,##0;-#,##0;"  # 0は表示しない（値は0のまま）
 BANDS = ["ランチ", "アイドル", "ディナー", "ナイト"]  # 【事前】売上予測 の列順
 # 時刻→時間帯（基幹システムの時間帯別売上実績表の区分）
 BAND_OF_HOUR = {h: ("ナイト" if h <= 7 or h >= 22 else "モーニング" if h <= 10 else "ランチ" if h <= 14
@@ -711,10 +712,10 @@ def build(out, src1=None, src2=None, srcp=None):
     o["A1"].font = FT
     o["V2"] = "【使い方】"
     o["V3"] = "① このシートの F4:M34（客単価4列＋客数4列）をコピー"
-    o["V4"] = "② 【事前】売上予測 タブの F4 を選択 → 右クリック →「値の貼り付け」"
+    o["V4"] = "② 【事前】売上予測 タブの F4 を選択 → 右クリック →「形式を選択して貼り付け」→「値と数値の書式」"
     o["V5"] = "③ 前年欄も使う場合は A4:C34 を同様に A4 へ（前年当月データ貼付時のみ）"
     o["V7"] = "※ 行・列の位置は【事前】売上予測と同じです（4行目＝1日）"
-    o["V10"] = "※ 客数が0の時間帯（平日ランチなど営業しない時間帯）は客単価も0にしています"
+    o["V10"] = "※ 客数が0の時間帯は客単価も0（表示は空白）。貼り付け先でも0を隠すなら「値と数値の書式」で貼り付け"
     o["V8"] = "※ 客単価は10円単位に丸め。客数は時間帯ごとに四捨五入し、端数差はディナーで調整（合計＝予測客数）"
     o["V9"] = "※ 時刻→時間帯の対応は「設定」シートの表で変更できます"
     o["V2"].font = FB
@@ -764,7 +765,7 @@ def build(out, src1=None, src2=None, srcp=None):
         v[20] = f'=IFERROR(S{r}/R{r},"")'
         for col in range(1, 21):
             cell = o.cell(row=r, column=col, value=v[col])
-            style(cell, fmt="#,##0", align=CENTER if col in (1, 4, 5) else None,
+            style(cell, fmt=NOZERO if col >= 6 else "#,##0", align=CENTER if col in (1, 4, 5) else None,
                   font=FB if col in (18, 19) else F,
                   fill=PatternFill("solid", fgColor="FCE4D6") if 6 <= col <= 13 else None)
     r = 35
@@ -776,7 +777,7 @@ def build(out, src1=None, src2=None, srcp=None):
         o.cell(row=r, column=6 + k, value=f'=IFERROR({CL(14 + k)}35/{CL(10 + k)}35,"")')
     o.cell(row=r, column=20, value='=IFERROR(S35/R35,"")')
     for col in range(1, 21):
-        style(o.cell(row=r, column=col), font=FB, fill=FILL_SUB, fmt="#,##0")
+        style(o.cell(row=r, column=col), font=FB, fill=FILL_SUB, fmt=NOZERO)
     o.conditional_formatting.add("D4:E34", FormulaRule(formula=['$E4="土"'], font=Font(color="0070C0", bold=True)))
     o.conditional_formatting.add("D4:E34", FormulaRule(formula=['$E4="日"'],
                                                        font=Font(color="C00000", bold=True)))
