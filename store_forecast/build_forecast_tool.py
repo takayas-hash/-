@@ -157,6 +157,8 @@ def build(out, src1=None, src2=None, srcp=None):
         ("days", "当月の日数", None, "0", False, ""),
         ("sec", "▼ 営業時間"),
         ("dinner", "夜営業の開始時刻", 17, '0"時"', True, "この時刻以降をディナー、より前をランチ（昼〜夕方の通し営業を含む）として分けて計算"),
+        ("lunch_wd", "平日のランチ営業", "なし", None, True, "この店舗の標準。「あり」にすると平日もランチ客数・客単価を予測（日ごとの変更は「予測」シートの営業区分で）"),
+        ("lunch_we", "土日祝のランチ営業", "あり", None, True, ""),
         ("thr", "ランチ営業ありと判定する客数", 10, '0"人"', True, "過去データで、夜営業開始前の客数がこれ以上の日を「ランチ営業した日」とみなす"),
         ("sec", "▼ 重み"),
         ("w1", "先月の重み", 0.6, "0.00", True, "直近ほど重視。先々月と合計1でなくてもOK（比率で按分）"),
@@ -207,6 +209,10 @@ def build(out, src1=None, src2=None, srcp=None):
     bdv = DataValidation(type="list", formula1='"' + ",".join(["モーニング"] + BANDS) + '"', allow_blank=True)
     s.add_data_validation(bdv)
     bdv.add("F4:F27")
+    ldv = DataValidation(type="list", formula1='"あり,なし"', allow_blank=False)
+    s.add_data_validation(ldv)
+    for key in ("lunch_wd", "lunch_we"):
+        ldv.add(S[key].split("!")[1].replace("$", ""))
     s.column_dimensions["C"].width = 70
 
     def setcell(key, formula):
@@ -562,7 +568,7 @@ def build(out, src1=None, src2=None, srcp=None):
         f.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
         f.merge_cells(start_row=r, start_column=4, end_row=r, end_column=5)
     notes = ["黄色の列だけ入力します：",
-             "・営業区分（変更時のみ）… 通常は空欄＝土日祝はランチ+ディナー、平日はディナーのみ。夏休みの平日ランチ営業・臨時休業などはここで指定",
+             "・営業区分（変更時のみ）… 通常は空欄＝「設定」のランチ営業あり／なしに従う。夏休みの平日ランチ営業・臨時休業などはここで指定",
              "・日別補正 … イベント・天候・販促などの倍率（例：雨予報0.9、地域祭り1.2）"]
     for k, t in enumerate(notes):
         f.cell(row=3 + k, column=7, value=t).font = FNOTE
@@ -584,7 +590,8 @@ def build(out, src1=None, src2=None, srcp=None):
             2: f'=IF({A}="","",{wd_formula(A)})',
             3: f'=IF({A}="","",{type_formula(A)})',
             4: None,
-            5: f'=IF({A}="","",IF(D{r}<>"",D{r},IF(OR(C{r}="土",C{r}="日",C{r}="祝"),"{LD}","{DO}")))',
+            5: (f'=IF({A}="","",IF(D{r}<>"",D{r},IF(IF(OR(C{r}="土",C{r}="日",C{r}="祝"),{S["lunch_we"]},{S["lunch_wd"]})="あり",'
+                f'"{LD}","{DO}")))'),
             6: f'=IF({A}="","",IF(E{r}="{LD}",INDEX(集計!$M${TR}:$M${TR + 7},MATCH(C{r},{dtype},0)),0))',
             7: f'=IF({A}="","",IF(E{r}="{CL_}",0,INDEX(集計!$L${TR}:$L${TR + 7},MATCH(C{r},{dtype},0))))',
             8: f'=IF(W{r}=1,{A}-364,"")',
@@ -707,10 +714,11 @@ def build(out, src1=None, src2=None, srcp=None):
     o["V4"] = "② 【事前】売上予測 タブの F4 を選択 → 右クリック →「値の貼り付け」"
     o["V5"] = "③ 前年欄も使う場合は A4:C34 を同様に A4 へ（前年当月データ貼付時のみ）"
     o["V7"] = "※ 行・列の位置は【事前】売上予測と同じです（4行目＝1日）"
+    o["V10"] = "※ 客数が0の時間帯（平日ランチなど営業しない時間帯）は客単価も0にしています"
     o["V8"] = "※ 客単価は10円単位に丸め。客数は時間帯ごとに四捨五入し、端数差はディナーで調整（合計＝予測客数）"
     o["V9"] = "※ 時刻→時間帯の対応は「設定」シートの表で変更できます"
     o["V2"].font = FB
-    for k in range(3, 10):
+    for k in range(3, 11):
         o[f"V{k}"].font = FNOTE
     # 見出し（元シートと同じ結合）
     for rng_, val in (("A2:A3", "日"), ("B2:C2", "前年"), ("D2:D3", "日"), ("E2:E3", "曜"), ("F2:I2", "客単価"),
@@ -743,7 +751,7 @@ def build(out, src1=None, src2=None, srcp=None):
         }
         for k, band in enumerate(BANDS):
             ad = CL(2 + 3 * k + 2)
-            v[6 + k] = (f'=IF({d}="",0,ROUND(INDEX(集計!${ad}${P0}:${ad}${P0 + 7},MATCH({tp},集計!$A${P0}:$A${P0 + 7},0))'
+            v[6 + k] = (f'=IF(OR({d}="",{CL(10 + k)}{r}=0),0,ROUND(INDEX(集計!${ad}${P0}:${ad}${P0 + 7},MATCH({tp},集計!$A${P0}:$A${P0 + 7},0))'
                         f'*{S["pseason"]}*{S["ptrend"]},-1))')
             raw = f"SUMIF({band_hdr},\"{band}\",時間帯別予測!$E${hr_row}:${CL(4 + nH)}${hr_row})"
             if band == "ディナー":
@@ -796,7 +804,7 @@ def build(out, src1=None, src2=None, srcp=None):
         ("", F),
         ("■ 予測の考え方", FB),
         ("予測客数 ＝ 予測ランチ ＋ 予測ディナー（ランチとディナーを別々に予測して足す）", FB),
-        ("・営業区分：土日祝＝ランチ+ディナー、平日＝ディナーのみ が標準。ディナーのみの日はランチ分を0にする", F),
+        ("・営業区分：「設定」の平日／土日祝のランチ営業（あり・なし）で店舗ごとの標準を決め、日ごとの例外は「予測」シートで指定。ディナーのみの日はランチ分を0にする", F),
         ("・ディナー基準：先月・先々月の日タイプ別（月〜日＋祝）のディナー平均を重み 0.6:0.4 で加重平均（客数0の休業日は除外）", F),
         ("・ランチ基準：同じく、実際にランチ営業した日だけの平均（夏休み・お盆の平日ランチが平常月の平日に混ざらない）", F),
         ("・季節係数：前年当月データがあれば『前年当月 ÷ 前年の先月・先々月』の曜日別ディナー平均の比で自動計算（祝日除く）", F),
