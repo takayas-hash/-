@@ -11,7 +11,7 @@
 //    ※タブ名は「シート1」のままにすること(コードで名前指定しているため変更不可)
 // 3. 拡張機能 > Apps Script を開き、関数選択で installTrigger を選んで実行
 //    → 初回はGmail・カレンダー(Tasks)の権限承認画面が出るので許可する
-// 4. 以降は15分おきに autoForwardBasicRequest が自動実行される
+// 4. 以降は10分おきに autoForwardBasicRequest が自動実行される
 //
 // 【前提条件】
 // info@monogatari.co.jp 宛のメールが、このスクリプトを実行する
@@ -215,12 +215,12 @@ function logToSheet(date, store, manager, category, subject, deadline) {
   logSheet.appendRow([date, store, manager, category, subject, deadline, new Date()]);
 }
 
-// ── 初回セットアップ用: トリガー登録(15分おき) ──
+// ── 初回セットアップ用: トリガー登録(10分おき) ──
 // コピー後、Apps Scriptエディタでこの関数を一度だけ実行する。
 // 既に登録済みのトリガーがあれば削除してから登録するため、二重実行しても安全。
 function installTrigger() {
   ScriptApp.getProjectTriggers()
     .filter(function(t) { return t.getHandlerFunction() === 'autoForwardBasicRequest'; })
     .forEach(function(t) { ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger('autoForwardBasicRequest').timeBased().everyMinutes(15).create();
+  ScriptApp.newTrigger('autoForwardBasicRequest').timeBased().everyMinutes(10).create();
 }
