@@ -40,6 +40,10 @@ function autoForwardBasicRequest() {
   }
   var data = sheet.getDataRange().getValues();
 
+  // 返信文の送付先・完了報告先 = このスクリプトを実行しているエリアマネージャー本人。
+  // (テンプレートをコピーした各マネージャーのアドレスに自動で切り替わる)
+  var reportTo = Session.getEffectiveUser().getEmail();
+
   var processedLabel = GmailApp.getUserLabelByName('自動転送済み')
     || GmailApp.createLabel('自動転送済み');
 
@@ -54,10 +58,14 @@ function autoForwardBasicRequest() {
     var message = messages[messages.length - 1];
     var subject = message.getSubject();
     var body = message.getBody()
+      .replace(/\r\n?/g, '\n')
       .replace(/<[^>]*>/g, '')
       .replace(/&nbsp;/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
+    // 本部向けの定型文(「関係者各位」〜「本部のアカウントでお客様へ送信します」)を除き、
+    // 「━━━ お問い合わせ内容」以降だけを店長へ転送する。
+    body = maskCustomerEmail_(extractInquiryPart_(body));
 
     var categoryMatch = subject.match(/【(苦情|ご質問|ご要望|ご意見)】/);
     var category = categoryMatch ? categoryMatch[1] : "お問い合わせ";
@@ -100,8 +108,15 @@ function autoForwardBasicRequest() {
           if (isActionRequired) {
             forwardBody = managerName + "店長\n\n"
               + "お疲れ様です。\n\n"
-              + "要対応の" + category + "をいただきました。\n\n"
-              + deadlineStr + "の営業終了までにご対応と、完了報告をお願いいたします。\n\n"
+              + "要対応の" + category + "をいただきました。\n"
+              + deadlineStr + "の営業終了までに、以下の手順でご対応をお願いいたします。\n\n"
+              + "【対応手順】\n"
+              + "1. まずはお客様へお電話でご対応ください。\n"
+              + "2. お電話が繋がらない場合は、お客様への返信文を作成し、\n"
+              + "   " + reportTo + " 宛にお送りください。\n"
+              + "   こちらで添削のうえ、ブロック長へ送付します。\n"
+              + "※店舗からお客様へ直接メールを送ることはできません。\n"
+              + "※お電話で対応が完了した場合も、対応内容を " + reportTo + " までご報告ください。\n\n"
               + "-".repeat(30) + "\n\n"
               + sanitizedBody;
             mailSubject = "【" + deadlineStr + "まで要対応】" + subject;
@@ -125,7 +140,8 @@ function autoForwardBasicRequest() {
           var chatText = "【自動通知】\n"
             + managerName + "店長、お疲れ様です。\n\n"
             + "要対応の「" + category + "」を受信したため、店長のメール宛に転送しました。\n"
-            + "ご確認とご対応をお願いいたします。\n\n"
+            + "まずはお客様へお電話でご対応ください。\n"
+            + "繋がらない場合は返信文を作成し、" + reportTo + " 宛にお送りください。\n\n"
             + "▼件名\n" + subject + "\n"
             + "▼期限\n" + deadlineStr + "の営業終了まで";
           try {
@@ -173,6 +189,20 @@ function autoForwardBasicRequest() {
       Logger.log("店舗名マッチなし: " + subject);
     }
   }
+}
+
+// ── 本文から「━━━ お問い合わせ内容」以降だけを取り出す ──
+// 区切り線が見つからない形式のメールは、取りこぼし防止のため本文全体を返す。
+function extractInquiryPart_(body) {
+  var idx = body.indexOf('━━━');
+  return idx === -1 ? body : body.substring(idx).trim();
+}
+
+// ── お客様のメールアドレスを伏せる ──
+// 店舗からお客様へ直接メールすることはないため、店長への転送では不要。
+// (電話対応に使う電話番号はそのまま残す)
+function maskCustomerEmail_(body) {
+  return body.replace(/(●メールアドレス[：:]).*/g, '$1（店舗からの直接返信は不可のため省略）');
 }
 
 // ── 処理ログ記録 ──
