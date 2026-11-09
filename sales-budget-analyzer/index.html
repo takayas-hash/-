@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body>
+<title>予算差異アナライザー</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap">
+<style>
+/* Layout: 帳票のような左揃え一列。上から「全体→店舗一覧→店舗詳細」の順に要約から詳細へ */
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --fg: #1d1f24; --muted: #5d6068; --line: #dddcd6;
+  --accent: #23407a; --accent-ink: #ffffff; --accent-soft: #e6ebf5;
+  --neg: #d03b3b; --pos: #2a78d6; --mid: #f0efec; --neg-ink: #b42323; --pos-ink: #1d5fae;
+  --font-display: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-body: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141518; --panel: #1d1f23; --fg: #eceae4; --muted: #a7a8ad; --line: #34363c;
+  --accent: #8fb0ef; --accent-ink: #10131a; --accent-soft: #232c3e;
+  --neg: #e05252; --pos: #3987e5; --mid: #383835; --neg-ink: #ff8b84; --pos-ink: #8ab8f5; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #141518; --panel: #1d1f23; --fg: #eceae4; --muted: #a7a8ad; --line: #34363c;
+  --accent: #8fb0ef; --accent-ink: #10131a; --accent-soft: #232c3e;
+  --neg: #e05252; --pos: #3987e5; --mid: #383835; --neg-ink: #ff8b84; --pos-ink: #8ab8f5; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.65; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: 1.6rem; font-weight: 900; letter-spacing: .02em; }
+h2 { font-size: 1.15rem; font-weight: 700; }
+h3 { font-size: .98rem; font-weight: 700; }
+.num, td.n, th.n { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+.label { font-size: .75rem; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+
+header.top { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: end; justify-content: space-between; }
+header.top p { margin: 4px 0 0; max-width: 60ch; }
+.drop { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border: 2px dashed var(--line); border-radius: 10px; padding: 14px 16px; background: var(--panel); }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.btn { font: inherit; font-weight: 700; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:focus-visible, .seg button:focus-visible, tr.pick:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+#file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.status { min-height: 1.4em; }
+.status.err { color: var(--neg-ink); font-weight: 700; }
+.banner { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; font-size: .9rem; }
+
+section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.kpi { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
+.kpi .v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.neg { color: var(--neg-ink); } .pos { color: var(--pos-ink); }
+.pill { display: inline-block; font-size: .75rem; font-weight: 700; border-radius: 999px; padding: 1px 9px; white-space: nowrap; }
+.pill.ok { background: color-mix(in oklab, var(--pos) 18%, transparent); color: var(--pos-ink); }
+.pill.ng { background: color-mix(in oklab, var(--neg) 18%, transparent); color: var(--neg-ink); }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: .85rem; border: 0; background: transparent; color: var(--fg); padding: 6px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+textarea.comment { width: 100%; font: inherit; font-size: .92rem; line-height: 1.75; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; resize: vertical; min-height: 12em; }
+
+.tbl { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { font-size: .75rem; color: var(--muted); font-weight: 700; letter-spacing: .04em; }
+td.n, th.n { text-align: right; }
+tr.pick { cursor: pointer; }
+tr.pick:hover td { background: var(--accent-soft); }
+tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 700; }
+.bar { display: inline-block; height: 8px; border-radius: 0 4px 4px 0; vertical-align: middle; }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 20px; }
+.grid2 > * { min-width: 0; }
+
+.heat { display: grid; grid-template-columns: 5.5em repeat(5, minmax(64px, 1fr)); gap: 2px; font-size: .82rem; min-width: 440px; }
+.heat .h { color: var(--muted); font-weight: 700; font-size: .72rem; padding: 4px; line-height: 1.3; }
+.heat .c { border-radius: 4px; padding: 8px 6px; text-align: center; font-variant-numeric: tabular-nums; line-height: 1.3; cursor: default; }
+.heat .c b { display: block; font-size: .95rem; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: .75rem; color: var(--muted); flex-wrap: wrap; }
+.legend .ramp { width: 160px; height: 10px; border-radius: 3px; background: linear-gradient(90deg, color-mix(in oklab, var(--neg) 75%, var(--mid)), var(--mid), color-mix(in oklab, var(--pos) 75%, var(--mid))); }
+
+.chart { position: relative; overflow-x: auto; }
+.chart svg { display: block; }
+.chart text { fill: var(--muted); font-size: 10px; font-family: var(--font-body); }
+.tip { position: fixed; pointer-events: none; background: var(--fg); color: var(--bg); font-size: .8rem; padding: 6px 10px; border-radius: 6px; line-height: 1.5; z-index: 20; max-width: 260px; }
+.foot { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
+.foot p { margin: 0; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) { tr.pick td { transition: background .12s; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="label">月次 売上予算 差異分析</div>
+      <h1>予算差異アナライザー</h1>
+      <p class="muted small">毎日更新しているExcel（売上集計の .xlsm）を読み込むと、店舗ごとに曜日区分・時間帯別の予算差を分解し、報告用コメントの下書きを作ります。ファイルはこのブラウザ内だけで処理され、外部へ送信されません。</p>
+    </div>
+    <label class="drop" id="drop" for="file">
+      <span class="btn">Excelを選択</span>
+      <span class="small muted">またはここにドラッグ＆ドロップ<br>必要シート：貼①【集計表】／貼①【集計表】 (前年)</span>
+      <input type="file" id="file" accept=".xlsm,.xlsx,.xls">
+    </label>
+  </header>
+  <div class="status small" id="status" role="status"></div>
+  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の3店舗）です。実際のExcelを読み込むと置き換わります。</div>
+
+  <section class="card" id="areaCard">
+    <div class="row">
+      <div><div class="label" id="period"></div><h2>エリア全体</h2></div>
+      <div class="row" style="gap:8px">
+        <div class="seg" role="group" aria-label="コメントの長さ">
+          <button type="button" id="mShort" aria-pressed="true">簡潔版</button>
+          <button type="button" id="mLong" aria-pressed="false">詳細版</button>
+        </div>
+        <button type="button" class="btn ghost" id="copyAll">全店コメントを一括コピー</button>
+      </div>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <textarea class="comment" id="areaComment" aria-label="エリア全体コメント" spellcheck="false"></textarea>
+    <div class="row"><span class="small muted">コメントは直接編集できます。一括コピーは「店舗名⇥コメント」の形式で、Excelにそのまま貼り付けできます。</span><button type="button" class="btn ghost" id="copyArea">エリアコメントをコピー</button></div>
+  </section>
+
+  <section class="card">
+    <div class="row"><h2>店舗別 予算差と要因</h2><span class="small muted">行をクリックすると下に詳細を表示</span></div>
+    <div class="tbl"><table id="storeTbl"></table></div>
+  </section>
+
+  <section class="card" id="storeCard">
+    <div class="row">
+      <div><div class="label">店舗詳細</div><h2 id="storeName"></h2></div>
+      <select id="storeSel" aria-label="店舗を選択" class="btn ghost"></select>
+    </div>
+    <div class="kpis" id="sKpis"></div>
+    <div>
+      <div class="row" style="margin-bottom:8px"><h3>報告コメント（下書き）</h3><button type="button" class="btn ghost" id="copyStore">この店舗のコメントをコピー</button></div>
+      <textarea class="comment" id="storeComment" aria-label="店舗コメント" spellcheck="false"></textarea>
+    </div>
+    <div class="grid2">
+      <div>
+        <h3>曜日区分 × 時間帯の予算比</h3>
+        <p class="small muted" style="margin:2px 0 8px">時間帯の予算は、前年同月の同じ曜日区分の時間帯構成比で日予算を按分した値です。</p>
+        <div class="tbl"><div class="heat" id="heat"></div></div>
+        <div class="legend" style="margin-top:8px"><span>未達</span><span class="ramp"></span><span>超過</span><span>（100%＝グレー、±20%で最も濃く）</span></div>
+      </div>
+      <div>
+        <h3>日別の予算差</h3>
+        <p class="small muted" style="margin:2px 0 8px">棒の上下＝予算との差額。曜日の下の「雨」は雨天日。</p>
+        <div class="chart" id="daily"></div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div><h3>曜日区分別</h3><div class="tbl"><table id="typeTbl"></table></div></div>
+      <div><h3>時間帯別</h3><div class="tbl"><table id="bandTbl"></table></div></div>
+    </div>
+    <div><h3>曜日別</h3><div class="tbl"><table id="wdTbl"></table></div></div>
+  </section>
+
+  <div class="foot">
+    <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
+    <p>エリア共通の不振日＝営業店の7割以上が予算比85%未満だった日。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+  </div>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* ===== 分析コア（ブラウザ/Node共通） ===== */
+const SHEET_CUR = '貼①【集計表】';
+const SHEET_PREV = '貼①【集計表】 (前年)';
+const DAYTYPES = ['平日', '休前日', '土曜', '日祝日'];
+const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+// 時間帯（オーダー時刻ベース）。0時は24として扱う
+const BANDS = [
+  { key: 'lunch', name: 'ランチ', label: '11–14時', hours: [9, 10, 11, 12, 13, 14] },
+  { key: 'idle', name: 'アイドル', label: '15–16時', hours: [15, 16] },
+  { key: 'early', name: 'ディナー前半', label: '17–18時', hours: [17, 18] },
+  { key: 'peak', name: 'ディナーピーク', label: '19–20時', hours: [19, 20] },
+  { key: 'late', name: 'レイト', label: '21時以降', hours: [21, 22, 23, 24, 1, 2, 3, 4, 5, 6, 7, 8] },
+];
+const HOUR_TO_BAND = {};
+BANDS.forEach((b, i) => b.hours.forEach(h => { HOUR_TO_BAND[h] = i; }));
+
+function findSheet(wb, name) {
+  if (wb.Sheets[name]) return wb.Sheets[name];
+  const norm = s => s.replace(/[\s　]/g, '');
+  const hit = wb.SheetNames.find(n => norm(n) === norm(name));
+  return hit ? wb.Sheets[hit] : null;
+}
+
+function toDate(v) {
+  if (v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  if (typeof v === 'number') { // Excelシリアル
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  if (typeof v === 'string' && v) { const d = new Date(v); if (!isNaN(d)) return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  return null;
+}
+const num = v => (typeof v === 'number' && isFinite(v)) ? v : (typeof v === 'string' && v.trim() !== '' && isFinite(+v) ? +v : 0);
+
+/** 集計表シート → 日別レコード配列 */
+function extractRows(XLSX, ws) {
+  if (!ws) return [];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  let hr = aoa.findIndex(r => r && r.includes('店舗コード') && r.includes('営業日'));
+  if (hr < 0) throw new Error('「店舗コード」「営業日」の見出し行が見つかりません');
+  const H = aoa[hr];
+  const col = name => H.indexOf(name);
+  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)' };
+  const C = {};
+  for (const [k, n] of Object.entries(need)) C[k] = col(n);
+  for (const k of ['code', 'date', 'sales', 'budget']) if (C[k] < 0) throw new Error(`列「${need[k]}」が見つかりません`);
+  const hS = {}, hC = {};
+  for (let h = 1; h <= 24; h++) {
+    const hh = h === 24 ? 0 : h;
+    hS[h] = col(`時間別売上${hh}時(オーダー時)`);
+    hC[h] = col(`時間別客数${hh}時(オーダー時)`);
+  }
+  const out = [];
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i];
+    if (!r || r[C.code] == null || r[C.code] === '') continue;
+    const date = toDate(r[C.date]);
+    if (!date) continue;
+    const hourS = new Array(25).fill(0), hourC = new Array(25).fill(0);
+    for (let h = 1; h <= 24; h++) { hourS[h] = hS[h] >= 0 ? num(r[hS[h]]) : 0; hourC[h] = hC[h] >= 0 ? num(r[hC[h]]) : 0; }
+    let dt = C.dt >= 0 ? String(r[C.dt] || '') : '';
+    let wd = C.wd >= 0 ? String(r[C.wd] || '') : '';
+    if (!wd) wd = WEEKDAYS[(date.getDay() + 6) % 7];
+    if (!DAYTYPES.includes(dt)) dt = wd === '土' ? '土曜' : wd === '日' ? '日祝日' : wd === '金' ? '休前日' : '平日';
+    out.push({
+      code: String(r[C.code]).trim(),
+      name: String(r[C.name] || r[C.code]).replace(/^焼肉きんぐ/, ''),
+      date, wd, dt,
+      weather: C.weather >= 0 ? String(r[C.weather] || '') : '',
+      sales: num(r[C.sales]), cust: num(r[C.cust]), groups: C.groups >= 0 ? num(r[C.groups]) : 0,
+      budget: num(r[C.budget]), custBudget: C.custBudget >= 0 ? num(r[C.custBudget]) : 0,
+      disc: C.disc >= 0 ? num(r[C.disc]) : 0,
+      hourS, hourC,
+    });
+  }
+  return out;
+}
+
+const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+const isRain = w => /雨|雪/.test(w || '');
+
+function bandTotals(days, key) { // key: 'hourS' | 'hourC'
+  const t = new Array(BANDS.length).fill(0);
+  for (const d of days) for (let h = 1; h <= 24; h++) { const b = HOUR_TO_BAND[h]; if (b != null) t[b] += d[key][h]; }
+  return t;
+}
+
+function analyzeStore(cur, prev, monthDays) {
+  const act = cur.filter(d => d.sales > 0 || d.budget > 0);
+  const sales = sum(act, d => d.sales), budget = sum(act, d => d.budget);
+  const cust = sum(act, d => d.cust), custBudget = sum(act, d => d.custBudget);
+  const pSales = sum(prev, d => d.sales), pCust = sum(prev, d => d.cust);
+  const up = cust ? sales / cust : 0;
+  const bUp = custBudget ? budget / custBudget : 0;
+  const pUp = pCust ? pSales / pCust : 0;
+  const custEff = custBudget ? (cust - custBudget) * bUp : 0;
+  const upEff = custBudget ? (up - bUp) * cust : 0;
+
+  // 前年の区分別・時間帯構成比（予算を時間帯へ配分するため）
+  const pShare = {};
+  const allShare = (() => { const t = bandTotals(prev.length ? prev : act, 'hourS'); const s = t.reduce((a, b) => a + b, 0); return s ? t.map(x => x / s) : BANDS.map(() => 1 / BANDS.length); })();
+  for (const dt of DAYTYPES) {
+    const ds = prev.filter(d => d.dt === dt);
+    const t = bandTotals(ds, 'hourS'); const s = t.reduce((a, b) => a + b, 0);
+    pShare[dt] = s > 0 ? t.map(x => x / s) : allShare;
+  }
+
+  // 区分別
+  const byType = DAYTYPES.map(dt => {
+    const ds = act.filter(d => d.dt === dt), ps = prev.filter(d => d.dt === dt);
+    const s = sum(ds, d => d.sales), b = sum(ds, d => d.budget), c = sum(ds, d => d.cust), cb = sum(ds, d => d.custBudget);
+    const pss = sum(ps, d => d.sales);
+    return { key: dt, days: ds.length, pDays: ps.length, sales: s, budget: b, diff: s - b, rate: b ? s / b : null,
+      cust: c, custBudget: cb, avg: ds.length ? s / ds.length : 0, pAvg: ps.length ? pss / ps.length : 0, pSales: pss };
+  });
+  // 曜日別
+  const byWd = WEEKDAYS.map(w => {
+    const ds = act.filter(d => d.wd === w);
+    const s = sum(ds, d => d.sales), b = sum(ds, d => d.budget);
+    return { key: w, days: ds.length, sales: s, budget: b, diff: s - b, rate: b ? s / b : null };
+  });
+
+  // 時間帯別：予算を前年構成比で配分 → 区分×時間帯の予算差
+  const grid = DAYTYPES.map(() => BANDS.map(() => ({ sales: 0, budget: 0, cust: 0, pSales: 0 })));
+  act.forEach(d => {
+    const ti = DAYTYPES.indexOf(d.dt);
+    for (let h = 1; h <= 24; h++) { const b = HOUR_TO_BAND[h]; grid[ti][b].sales += d.hourS[h]; grid[ti][b].cust += d.hourC[h]; }
+    // 時間帯別売上の合計と純売上の差（端数）は構成比で按分しない。予算は構成比で配分
+    pShare[d.dt].forEach((sh, b) => { grid[ti][b].budget += d.budget * sh; });
+  });
+  prev.forEach(d => { const ti = DAYTYPES.indexOf(d.dt); for (let h = 1; h <= 24; h++) grid[ti][HOUR_TO_BAND[h]].pSales += d.hourS[h]; });
+  const byBand = BANDS.map((bd, b) => {
+    const s = sum(grid, r => r[b].sales), bu = sum(grid, r => r[b].budget), c = sum(grid, r => r[b].cust), p = sum(grid, r => r[b].pSales);
+    return { key: bd.key, name: bd.name, label: bd.label, sales: s, budget: bu, diff: s - bu, rate: bu ? s / bu : null, cust: c, pSales: p, yoy: p ? s / p : null };
+  });
+
+  // 天候
+  const rain = act.filter(d => isRain(d.weather) && d.budget > 0), fine = act.filter(d => !isRain(d.weather) && d.weather && d.budget > 0);
+  const rr = ds => { const b = sum(ds, d => d.budget); return b ? sum(ds, d => d.sales) / b : null; };
+  const weather = { rainDays: rain.length, rainRate: rr(rain), fineDays: fine.length, fineRate: rr(fine), rainDiff: sum(rain, d => d.sales - d.budget) };
+
+  // 日別（ワースト・ベスト）
+  const daily = act.filter(d => d.budget > 0).map(d => ({ date: d.date, wd: d.wd, dt: d.dt, weather: d.weather, sales: d.sales, budget: d.budget, diff: d.sales - d.budget, rate: d.sales / d.budget, cust: d.cust }))
+    .sort((a, b) => a.date - b.date);
+  const worst = [...daily].sort((a, b) => a.diff - b.diff).slice(0, 3).filter(d => d.diff < 0);
+  const best = [...daily].sort((a, b) => b.diff - a.diff).slice(0, 3).filter(d => d.diff > 0);
+  const closed = act.filter(d => d.sales === 0 && d.budget > 0);
+
+  const disc = sum(act, d => d.disc);
+  return {
+    code: cur[0].code, name: cur[0].name,
+    days: act.length, monthDays, sales, budget, diff: sales - budget, rate: budget ? sales / budget : null,
+    cust, custBudget, custRate: custBudget ? cust / custBudget : null, up, bUp, pUp,
+    custEff, upEff, pSales, pCust, yoy: pSales ? sales / pSales : null, custYoy: pCust ? cust / pCust : null,
+    discRate: (sales + disc) ? disc / (sales + disc) : 0,
+    byType, byWd, byBand, grid, weather, daily, worst, best, closed,
+    hasPrev: prev.length > 0,
+  };
+}
+
+function analyze(curRows, prevRows) {
+  if (!curRows.length) throw new Error('当月データがありません');
+  // 実績のある最終日まで
+  const lastDate = new Date(Math.max(...curRows.filter(r => r.sales > 0).map(r => +r.date)));
+  const firstDate = new Date(Math.min(...curRows.map(r => +r.date)));
+  const cur = curRows.filter(r => r.date <= lastDate);
+  const monthEnd = new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 0);
+  const isFullMonth = lastDate.getDate() === monthEnd.getDate();
+  // 前年は同じ日付範囲（月内の日）で比較
+  const prev = prevRows.filter(r => r.date.getDate() <= lastDate.getDate());
+  const fullBudget = {};
+  curRows.forEach(r => { fullBudget[r.code] = (fullBudget[r.code] || 0) + r.budget; });
+
+  const codes = [...new Set(cur.map(r => r.code))];
+  const stores = codes.map(c => {
+    const s = analyzeStore(cur.filter(r => r.code === c), prev.filter(r => r.code === c), monthEnd.getDate());
+    s.fullBudget = fullBudget[c] || 0;
+    return s;
+  }).filter(s => s.budget > 0 || s.sales > 0);
+  // エリア合計
+  const area = analyzeStore(cur.map(r => ({ ...r, code: 'AREA', name: 'エリア計' })), prev, monthEnd.getDate());
+  area.fullBudget = Object.values(fullBudget).reduce((a, b) => a + b, 0);
+  // エリア共通の不振日：営業店の7割以上が予算比85%未満
+  const byDate = {};
+  cur.forEach(r => { if (r.sales > 0 && r.budget > 0) (byDate[+r.date] = byDate[+r.date] || []).push(r); });
+  const commonWeak = Object.entries(byDate).filter(([, rs]) => rs.length >= 3 && rs.filter(r => r.sales / r.budget < 0.85).length / rs.length >= 0.7)
+    .map(([k, rs]) => ({ date: new Date(+k), wd: rs[0].wd, dt: rs[0].dt, rate: sum(rs, r => r.sales) / sum(rs, r => r.budget) }));
+  const ctx = { isFullMonth, lastDate, commonWeak };
+  stores.forEach(s => { s.lines = storeComment(s, ctx); });
+  area.lines = areaComment(area, stores, ctx);
+  return { stores, area, firstDate, lastDate, isFullMonth, commonWeak };
+}
+
+/* ===== コメント生成 ===== */
+const man = v => { const m = v / 10000; return (Math.abs(m) >= 100 ? Math.round(m).toLocaleString('ja-JP') : (Math.round(m * 10) / 10).toLocaleString('ja-JP')) + '万円'; };
+const sman = v => (v >= 0 ? '+' : '▲') + man(Math.abs(v));
+const pct = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
+const yen = v => Math.round(v).toLocaleString('ja-JP') + '円';
+const syen = v => (v >= 0 ? '+' : '▲') + Math.round(Math.abs(v)).toLocaleString('ja-JP') + '円';
+const md = d => `${d.getMonth() + 1}/${d.getDate()}`;
+
+/** コメント行の配列を返す。d:true は詳細版のみ */
+function storeComment(s, ctx) {
+  const L = [];
+  L.d = t => L.push({ t, d: true });
+  const P = L.push.bind(L);
+  L.push = t => P(typeof t === 'string' ? { t, d: false } : t);
+  const ok = s.diff >= 0;
+  const period = ctx.isFullMonth ? '' : `（${md(ctx.lastDate)}時点）`;
+  L.push(`【${ok ? '予算達成' : '予算未達'}】売上${man(s.sales)}／予算比${pct(s.rate)}（${sman(s.diff)}）${s.yoy ? `・前年比${pct(s.yoy)}` : ''}${period}`);
+
+  // 1) 客数・単価の分解
+  const main = Math.abs(s.custEff) >= Math.abs(s.upEff) ? 'cust' : 'up';
+  const custTxt = `客数${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`;
+  const upTxt = `客単価${yen(s.up)}（予算${syen(s.up - s.bUp)}）`;
+  let lead;
+  if (ok) lead = main === 'cust' ? '客数増が達成の主因' : '客単価の上振れが達成の主因';
+  else lead = main === 'cust' ? (s.custEff < 0 ? '客数不足が未達の主因' : '単価減が未達の主因') : (s.upEff < 0 ? '客単価の下振れが未達の主因' : '客数不足が未達の主因');
+  L.push(`・要因分解：客数要因${sman(s.custEff)}、単価要因${sman(s.upEff)}。${custTxt}、${upTxt}で、${lead}。`);
+
+  // 2) 曜日区分
+  const types = s.byType.filter(t => t.days > 0 && t.budget > 0);
+  const neg = types.filter(t => t.diff < 0).sort((a, b) => a.diff - b.diff);
+  const pos = types.filter(t => t.diff >= 0).sort((a, b) => b.diff - a.diff);
+  const tTxt = t => `${t.key}（${t.days}日）${pct(t.rate)}・${sman(t.diff)}`;
+  if (!ok && neg.length) {
+    const share = s.diff < 0 ? neg[0].diff / sum(neg, t => t.diff) : 0;
+    let line = `・曜日区分：${neg.slice(0, 2).map(tTxt).join('、')}が未達`;
+    if (neg.length > 1 && share >= 0.5) line += `（${neg[0].key}で未達額の${Math.round(share * 100)}%）`;
+    if (pos.length) line += `。一方${pos.map(t => `${t.key}は${pct(t.rate)}`).join('、')}と予算クリア`;
+    L.push(line + '。');
+  } else if (ok && pos.length) {
+    let line = `・曜日区分：${pos.slice(0, 2).map(tTxt).join('、')}が牽引`;
+    if (neg.length) line += `。${neg.map(t => `${t.key}は${pct(t.rate)}（${sman(t.diff)}）`).join('、')}と課題`;
+    L.push(line + '。');
+  }
+  // 曜日（最も弱い曜日）
+  const wds = s.byWd.filter(w => w.budget > 0).sort((a, b) => (a.rate ?? 9) - (b.rate ?? 9));
+  if (wds.length >= 3) L.d(`　曜日別では${wds[0].key}曜が最も低く${pct(wds[0].rate)}、最も高いのは${wds[wds.length - 1].key}曜${pct(wds[wds.length - 1].rate)}。`);
+
+  // カレンダー差（前年比較）
+  if (s.hasPrev) {
+    const cal = types.filter(t => t.pDays !== t.days && t.pDays > 0).map(t => `${t.key}${t.days - t.pDays > 0 ? '+' : ''}${t.days - t.pDays}日`);
+    if (cal.length) L.d(`　前年比の暦差：${cal.join('、')}（前年比を見る際は考慮）。`);
+  }
+
+  // 3) 時間帯
+  const bands = s.byBand.filter(b => b.budget > s.budget * 0.02);
+  const bNeg = bands.filter(b => b.diff < 0).sort((a, b) => a.diff - b.diff);
+  const bPos = bands.filter(b => b.diff >= 0).sort((a, b) => b.diff - a.diff);
+  const bTxt = b => `${b.name}(${b.label})${pct(b.rate)}・${sman(b.diff)}${b.yoy ? `／前年比${pct(b.yoy)}` : ''}`;
+  if (bands.length) {
+    let line = '・時間帯別（予算は前年の時間帯構成比で按分）：';
+    if (!ok && bNeg.length) {
+      line += `${bNeg.slice(0, 2).map(bTxt).join('、')}が未達`;
+      if (bPos.length) line += `。${bPos[0].name}は${pct(bPos[0].rate)}と好調`;
+    } else if (ok && bPos.length) {
+      line += `${bPos.slice(0, 2).map(bTxt).join('、')}が上振れ`;
+      if (bNeg.length) line += `。${bNeg[0].name}は${pct(bNeg[0].rate)}と弱含み`;
+    } else {
+      line += bands.map(b => `${b.name}${pct(b.rate)}`).join('、');
+    }
+    L.push(line + '。');
+    // 区分×時間帯で最大の未達セル
+    var worstCell = null;
+    s.grid.forEach((row, ti) => row.forEach((c, bi) => { const d = c.sales - c.budget; if (c.budget > 0 && (!worstCell || d < worstCell.d)) worstCell = { d, ti, bi, r: c.sales / c.budget }; }));
+    if (worstCell && worstCell.d < 0 && Math.abs(worstCell.d) >= Math.abs(s.diff) * 0.2)
+      L.push(`　最大の未達ポイントは「${DAYTYPES[worstCell.ti]}×${BANDS[worstCell.bi].name}」で${pct(worstCell.r)}・${sman(worstCell.d)}。`);
+  }
+
+  // 4) 天候
+  const w = s.weather;
+  if (w.rainDays > 0 && w.fineDays > 0 && w.rainRate != null && w.fineRate != null) {
+    const gap = w.rainRate - w.fineRate;
+    if (gap <= -0.03) L.push(`・天候：雨天${w.rainDays}日の予算比${pct(w.rainRate)}（晴・曇${pct(w.fineRate)}）と雨天日の落ち込みが影響（雨天日計${sman(w.rainDiff)}）。`);
+    else if (gap >= 0.03) L.push(`・天候：雨天${w.rainDays}日でも予算比${pct(w.rainRate)}と晴・曇（${pct(w.fineRate)}）を上回り、天候影響は限定的。`);
+  }
+
+  // 5) 特異日
+  const cw = (ctx.commonWeak || []).map(c => {
+    const d = s.daily.find(x => +x.date === +c.date); return d ? { ...c, diff: d.diff, srate: d.rate } : null; }).filter(Boolean);
+  if (cw.length) {
+    const cwDiff = sum(cw, c => Math.min(0, c.diff));
+    if (cwDiff < 0) L.push(`・エリア共通の不振日：${cw.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})自店${pct(c.srate)}`).join('、')}は全店的に低調で外部要因の可能性（自店影響${sman(cwDiff)}${!ok && s.diff < 0 ? `、除くと予算比${pct((s.sales - sum(cw, c => s.daily.find(x => +x.date === +c.date).sales)) / (s.budget - sum(cw, c => s.daily.find(x => +x.date === +c.date).budget)))}` : ''}）。`);
+  }
+  const cwSet = new Set(cw.map(c => +c.date));
+  const worstOwn = s.worst.filter(d => !cwSet.has(+d.date) && d.sales > 0);
+  if (!ok && worstOwn.length) L.d(`・未達が大きかった日（店舗固有）：${worstOwn.map(d => `${md(d.date)}(${d.wd}${d.weather ? '・' + d.weather : ''})${pct(d.rate)}・${sman(d.diff)}`).join('、')}。`);
+  if (ok && s.best.length) L.d(`・上振れが大きかった日：${s.best.map(d => `${md(d.date)}(${d.wd}${d.weather ? '・' + d.weather : ''})${pct(d.rate)}・${sman(d.diff)}`).join('、')}。`);
+  if (s.closed.length) {
+    const cb = sum(s.closed, d => d.budget);
+    L.push(`・売上0の日あり：${s.closed.map(d => md(d.date)).join('、')}（予算${man(cb)}が丸ごと未達計上。休業かデータ欠落か要確認。除くと予算比${pct(s.sales / (s.budget - cb))}）。`);
+  }
+
+  // 6) 次月への示唆
+  const acts = suggestions(s, ok, main, typeof worstCell !== 'undefined' ? worstCell : null, bNeg);
+  if (acts.length) L.push(`・次月の打ち手（案）：${acts.join('／')}。`);
+  return L.filter(x => x && x.t);
+}
+
+function suggestions(s, ok, main, wc, bNeg) {
+  const a = [];
+  const weak = bNeg.filter(b => b.rate != null && b.rate < 0.97).map(b => b.key);
+  if (!ok && main === 'cust' && s.custEff < 0) {
+    if (wc && wc.d < 0) {
+      const dt = DAYTYPES[wc.ti], bk = BANDS[wc.bi].key;
+      const isWeekend = dt !== '平日';
+      if (bk === 'peak' || bk === 'early') a.push(isWeekend ? `${dt}ディナーの受入数最大化（予約枠設定・ウェイティング離脱防止・バッシング短縮で回転率UP）` : '平日ディナーの来店動機づくり（平日限定訴求・アプリ/LINE配信を夕方に）');
+      else if (bk === 'lunch') a.push(isWeekend ? `${dt}ランチの集客（開店直後からの満席化・早めの案内）` : '平日ランチの集客施策（ランチ訴求・店頭/SNS告知）');
+      else a.push(`${dt}の${BANDS[wc.bi].name}帯の来店動機づくり（時間帯限定訴求）`);
+    }
+    if (weak.includes('lunch') && !a.some(x => x.includes('ランチ'))) a.push('ランチ帯の集客施策');
+    if (!a.length) a.push('客数予算比の低い曜日に販促を集中');
+  }
+  if (s.up < s.bUp * 0.98) a.push('客単価改善（上位コース提案・ドリンク/デザートの追加オーダー声掛け）');
+  if (s.weather.rainDays && s.weather.rainRate != null && s.weather.fineRate != null && s.weather.rainRate - s.weather.fineRate <= -0.05) a.push('雨天時の来店動機（雨の日施策・テイクアウト訴求）');
+  if (ok && !a.length) a.push('好調要因（時間帯・曜日）の再現と、弱い時間帯への横展開');
+  return a.slice(0, 3);
+}
+
+function areaComment(a, stores, ctx) {
+  const L = [];
+  const P = L.push.bind(L);
+  L.push = t => P({ t, d: false });
+  const okN = stores.filter(s => s.diff >= 0).length;
+  const period = ctx.isFullMonth ? '' : `（${md(ctx.lastDate)}時点）`;
+  L.push(`【エリア計】売上${man(a.sales)}／予算比${pct(a.rate)}（${sman(a.diff)}）${a.yoy ? `・前年比${pct(a.yoy)}` : ''}${period}。予算達成${okN}店／${stores.length}店。`);
+  L.push(`・要因分解：客数要因${sman(a.custEff)}（客数予算比${pct(a.custRate)}）、単価要因${sman(a.upEff)}（客単価${yen(a.up)}、予算${syen(a.up - a.bUp)}）。`);
+  const worst = [...stores].sort((x, y) => x.diff - y.diff).filter(s => s.diff < 0).slice(0, 3);
+  const best = [...stores].sort((x, y) => y.diff - x.diff).filter(s => s.diff > 0).slice(0, 3);
+  if (worst.length) L.push(`・未達額上位：${worst.map(s => `${s.name}${sman(s.diff)}（${pct(s.rate)}）`).join('、')}。`);
+  if (best.length) L.push(`・達成額上位：${best.map(s => `${s.name}${sman(s.diff)}（${pct(s.rate)}）`).join('、')}。`);
+  const t = a.byType.filter(x => x.budget > 0).sort((x, y) => x.diff - y.diff);
+  if (t.length) L.push(`・曜日区分：${t.map(x => `${x.key}${pct(x.rate)}`).join('、')}。`);
+  const b = a.byBand.filter(x => x.budget > a.budget * 0.02).sort((x, y) => x.diff - y.diff);
+  if (b.length) L.push(`・時間帯：${b.map(x => `${x.name}${pct(x.rate)}（${sman(x.diff)}）`).join('、')}。`);
+  if (ctx.commonWeak.length) L.push(`・エリア共通の不振日：${ctx.commonWeak.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})${pct(c.rate)}`).join('、')}。全店で低調のため外部要因（天候・行事・競合等）の確認を。`);
+  return L;
+}
+
+function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
+
+if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+
+</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let R = null, cur = null, detail = false;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const cls = v => v < 0 ? 'neg' : 'pos';
+  const fit = ta => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 4) + 'px'; };
+  ['areaComment', 'storeComment'].forEach(id => $(id).addEventListener('input', e => fit(e.target)));
+  addEventListener('resize', () => { fit($('areaComment')); fit($('storeComment')); });
+
+  /* ---------- サンプルデータ（架空） ---------- */
+  function sampleRows(year) {
+    let seed = year * 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const stores = [['9001', 'サンプル店A', 1.00, 0.93], ['9002', 'サンプル店B', 0.85, 1.04], ['9003', 'サンプル店C', 1.15, 0.97]];
+    const shapeWk = { 11: .04, 12: .05, 13: .03, 17: .14, 18: .2, 19: .22, 20: .17, 21: .1, 22: .05 };
+    const shapeHd = { 11: .07, 12: .1, 13: .08, 14: .05, 15: .04, 16: .06, 17: .13, 18: .16, 19: .15, 20: .1, 21: .05, 22: .01 };
+    const out = [];
+    for (const [code, name, scale, perf] of stores) for (let d = 1; d <= 31; d++) {
+      const date = new Date(year, 9, d); const wd = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
+      const dt = wd === '土' ? '土曜' : wd === '日' ? '日祝日' : wd === '金' ? '休前日' : '平日';
+      const base = { 平日: 420000, 休前日: 620000, 土曜: 1050000, 日祝日: 980000 }[dt] * scale;
+      const weather = rnd() < .2 ? '雨' : rnd() < .5 ? '曇' : '晴';
+      const budget = Math.round(base * (year === 2026 ? 1.05 : 1));
+      let p = perf * (0.9 + rnd() * 0.2) * (weather === '雨' ? 0.9 : 1);
+      if (code === '9001' && dt !== '平日') p *= 0.94;
+      const sales = Math.round(base * p);
+      const up = 3050 + (code === '9002' ? 120 : 0) + (rnd() - .5) * 150;
+      const cust = Math.round(sales / up);
+      const shape = dt === '平日' || dt === '休前日' ? shapeWk : shapeHd;
+      const hourS = new Array(25).fill(0), hourC = new Array(25).fill(0);
+      for (const h in shape) { let k = shape[h]; if (code === '9001' && (h == 19 || h == 20) && dt !== '平日') k *= 0.85; hourS[h] = Math.round(sales * k); hourC[h] = Math.round(cust * k); }
+      const tot = hourS.reduce((a, b) => a + b, 0); hourS[19] += sales - tot;
+      out.push({ code, name, date, wd, dt, weather, sales, cust, groups: Math.round(cust / 3.2), budget, custBudget: Math.round(budget / 3080), disc: Math.round(sales * .04), hourS, hourC });
+    }
+    return out;
+  }
+
+  /* ---------- 読み込み ---------- */
+  function setStatus(t, err) { const s = $('status'); s.textContent = t; s.className = 'status small' + (err ? ' err' : ''); }
+  async function handleFile(f) {
+    if (!f) return;
+    setStatus(`「${f.name}」を読み込み中…（大きいファイルは数十秒かかります）`);
+    await new Promise(r => setTimeout(r, 30));
+    try {
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true, sheets: [SHEET_CUR, SHEET_PREV] });
+      const wsC = findSheet(wb, SHEET_CUR);
+      if (!wsC) throw new Error(`シート「${SHEET_CUR}」が見つかりません。売上集計表を貼り付けたファイルを選んでください。`);
+      const curRows = extractRows(XLSX, wsC);
+      const prevRows = extractRows(XLSX, findSheet(wb, SHEET_PREV));
+      run(curRows, prevRows);
+      $('sampleBanner').hidden = true;
+      setStatus(`「${f.name}」を分析しました（${R.stores.length}店舗${prevRows.length ? '・前年データあり' : '・前年データなし'}）。`);
+    } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
+  }
+  $('file').addEventListener('change', e => handleFile(e.target.files[0]));
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+
+  function run(curRows, prevRows) {
+    R = analyze(curRows, prevRows);
+    const worst = [...R.stores].sort((a, b) => a.diff - b.diff)[0];
+    cur = worst ? worst.code : null;
+    render();
+  }
+
+  /* ---------- 描画 ---------- */
+  function kpi(label, v, sub, c) { return `<div class="kpi"><div class="label">${label}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`; }
+  const fmtD = d => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+
+  function render() {
+    const a = R.area;
+    $('period').textContent = `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
+    const okN = R.stores.filter(s => s.diff >= 0).length;
+    $('kpis').innerHTML = kpi('売上', man(a.sales), `予算 ${man(a.budget)}`) + kpi('予算比', pct(a.rate), `差額 ${sman(a.diff)}`, cls(a.diff))
+      + kpi('客数要因', sman(a.custEff), `客数予算比 ${pct(a.custRate)}`, cls(a.custEff)) + kpi('単価要因', sman(a.upEff), `客単価 ${yen(a.up)}`, cls(a.upEff))
+      + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `前年比 ${pct(a.yoy)}` : '');
+    $('areaComment').value = commentText(a.lines, detail); fit($('areaComment'));
+
+    const maxAbs = Math.max(1, ...R.stores.map(s => Math.abs(s.diff)));
+    const rows = [...R.stores].sort((x, y) => x.rate - y.rate);
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th><th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th><th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">前年比</th></tr></thead><tbody>`
+      + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td><td><span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '達成' : '未達'}</span></td>
+        <td class="n">${man(s.sales)}</td><td class="n ${cls(s.diff)}">${pct(s.rate)}</td><td class="n ${cls(s.diff)}">${sman(s.diff)}</td>
+        <td><span class="bar" style="width:${Math.round(Math.abs(s.diff) / maxAbs * 110)}px;background:var(${s.diff < 0 ? '--neg' : '--pos'})"></span></td>
+        <td class="n ${cls(s.custEff)}">${sman(s.custEff)}</td><td class="n ${cls(s.upEff)}">${sman(s.upEff)}</td><td class="n">${pct(s.custRate)}</td><td class="n">${yen(s.up)}</td><td class="n">${pct(s.yoy)}</td></tr>`).join('') + '</tbody>';
+    $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
+      const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
+      tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+    $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+    renderStore();
+  }
+
+  function renderStore() {
+    const s = R.stores.find(x => x.code === cur) || R.stores[0];
+    if (!s) return;
+    $('storeName').innerHTML = `${esc(s.name)} <span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '予算達成' : '予算未達'}</span>`;
+    $('sKpis').innerHTML = kpi('売上', man(s.sales), `予算 ${man(s.budget)}`) + kpi('予算比', pct(s.rate), `差額 ${sman(s.diff)}`, cls(s.diff))
+      + kpi('客数要因', sman(s.custEff), `客数 ${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`, cls(s.custEff))
+      + kpi('単価要因', sman(s.upEff), `客単価 ${yen(s.up)}（予算${syen(s.up - s.bUp)}）`, cls(s.upEff))
+      + kpi('前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし');
+    $('storeComment').value = commentText(s.lines, detail); fit($('storeComment'));
+
+    // ヒートマップ
+    let h = '<div></div>' + BANDS.map(b => `<div class="h">${b.name}<br><span style="font-weight:400">${b.label}</span></div>`).join('');
+    DAYTYPES.forEach((dt, ti) => {
+      const days = s.byType[ti].days;
+      h += `<div class="h">${dt}<br><span style="font-weight:400">${days}日</span></div>`;
+      s.grid[ti].forEach((c, bi) => {
+        if (!days || c.budget < 1000) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
+        const r = c.sales / c.budget, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
+        const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
+        const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}|按分予算 ${man(c.budget)}|予算比 ${pct(r)}・${sman(c.sales - c.budget)}${c.pSales ? `|前年比 ${pct(c.sales / c.pSales)}` : ''}`;
+        h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${sman(c.sales - c.budget).replace('万円', '万')}</span></div>`;
+      });
+    });
+    $('heat').innerHTML = h;
+
+    // 日別バー
+    const D = s.daily, W = Math.max(320, D.length * 22 + 50), Hh = 200, top = 14, base = 140, half = 110;
+    const mx = Math.max(1, ...D.map(d => Math.abs(d.diff)));
+    const sc = v => v / mx * (half / 2 + 10);
+    const mid = top + (base - top) / 2;
+    let svg = `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" role="img" aria-label="日別の予算差">`;
+    svg += `<line x1="40" x2="${W - 4}" y1="${mid}" y2="${mid}" stroke="var(--line)" stroke-width="1"/><text x="36" y="${mid + 3}" text-anchor="end">±0</text>`;
+    svg += `<text x="36" y="${top + 6}" text-anchor="end">${sman(mx).replace('万円', '万')}</text><text x="36" y="${base}" text-anchor="end">${sman(-mx).replace('万円', '万')}</text>`;
+    D.forEach((d, i) => {
+      const x = 46 + i * 22, hgt = Math.max(1, Math.abs(sc(d.diff)));
+      const y = d.diff >= 0 ? mid - hgt : mid;
+      const r = 3, w = 14;
+      // データ端だけ丸める
+      const path = d.diff >= 0
+        ? `M${x},${mid} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${mid} Z`
+        : `M${x},${mid} V${mid + hgt - r} Q${x},${mid + hgt} ${x + r},${mid + hgt} H${x + w - r} Q${x + w},${mid + hgt} ${x + w},${mid + hgt - r} V${mid} Z`;
+      const tipTxt = `${d.date.getMonth() + 1}/${d.date.getDate()}（${d.wd}・${d.dt}${d.weather ? '・' + d.weather : ''}）|売上 ${man(d.sales)}|予算 ${man(d.budget)}|予算比 ${pct(d.rate)}・${sman(d.diff)}|客数 ${d.cust}人`;
+      svg += `<rect x="${x - 3}" y="${top}" width="${w + 6}" height="${base - top + 50}" fill="transparent" data-tip="${esc(tipTxt)}"/>`;
+      svg += `<path d="${path}" fill="var(${d.diff < 0 ? '--neg' : '--pos'})" pointer-events="none"/>`;
+      const we = d.wd === '土' || d.wd === '日' || (d.dt === '日祝日');
+      svg += `<text x="${x + w / 2}" y="${base + 18}" text-anchor="middle">${d.date.getDate()}</text><text x="${x + w / 2}" y="${base + 31}" text-anchor="middle" style="${we ? 'font-weight:700;fill:var(--fg)' : ''}">${d.wd}</text>`;
+      if (isRain(d.weather)) svg += `<text x="${x + w / 2}" y="${base + 44}" text-anchor="middle" style="fill:var(--pos-ink)">雨</text>`;
+    });
+    $('daily').innerHTML = svg + '</svg>';
+
+    // 表
+    $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th></tr></thead><tbody>`
+      + s.byType.filter(t => t.days).map(t => `<tr><td>${t.key}</td><td class="n">${t.days}${s.hasPrev ? `<span class="muted small">（前年${t.pDays}）</span>` : ''}</td><td class="n">${man(t.sales)}</td><td class="n ${cls(t.diff)}">${pct(t.rate)}</td><td class="n ${cls(t.diff)}">${sman(t.diff)}</td><td class="n">${man(t.avg)}</td><td class="n">${t.pAvg ? man(t.pAvg) : '－'}</td></tr>`).join('') + '</tbody>';
+    $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th></tr></thead><tbody>`
+      + s.byBand.map(b => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td></tr>`).join('') + '</tbody>';
+    $('wdTbl').innerHTML = `<thead><tr><th></th>${s.byWd.map(w => `<th class="n">${w.key}</th>`).join('')}</tr></thead><tbody>`
+      + `<tr><td>日数</td>${s.byWd.map(w => `<td class="n">${w.days}</td>`).join('')}</tr>`
+      + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
+      + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr></tbody>`;
+  }
+
+  /* ---------- ツールチップ ---------- */
+  const tip = $('tip');
+  function showTip(el, x, y) { tip.innerHTML = el.dataset.tip.split('|').map((t, i) => i ? esc(t) : `<b>${esc(t)}</b>`).join('<br>'); tip.hidden = false; const r = tip.getBoundingClientRect(); tip.style.left = Math.min(innerWidth - r.width - 8, x + 12) + 'px'; tip.style.top = Math.max(8, y - r.height - 12) + 'px'; }
+  document.addEventListener('pointermove', e => { const el = e.target.closest && e.target.closest('[data-tip]'); if (el) showTip(el, e.clientX, e.clientY); else tip.hidden = true; });
+  document.addEventListener('focusin', e => { const el = e.target.closest('[data-tip]'); if (el) { const r = el.getBoundingClientRect(); showTip(el, r.left, r.top); } });
+  document.addEventListener('focusout', () => { tip.hidden = true; });
+
+  /* ---------- 操作 ---------- */
+  $('storeSel').addEventListener('change', e => { cur = e.target.value; render(); });
+  function setMode(d) { detail = d; $('mShort').setAttribute('aria-pressed', !d); $('mLong').setAttribute('aria-pressed', d); render(); }
+  $('mShort').addEventListener('click', () => setMode(false));
+  $('mLong').addEventListener('click', () => setMode(true));
+  async function copy(text, btn) {
+    const old = btn.textContent;
+    try { await navigator.clipboard.writeText(text); btn.textContent = 'コピーしました'; }
+    catch (e) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); btn.textContent = 'コピーしました'; } catch (_) { btn.textContent = '選択してコピーしてください'; } ta.remove(); }
+    setTimeout(() => { btn.textContent = old; }, 1600);
+  }
+  $('copyArea').addEventListener('click', e => copy($('areaComment').value, e.currentTarget));
+  $('copyStore').addEventListener('click', e => copy($('storeComment').value, e.currentTarget));
+  $('copyAll').addEventListener('click', e => {
+    const q = t => '"' + t.replace(/"/g, '""') + '"';
+    const lines = [['エリア計', $('areaComment').value], ...R.stores.map(s => [s.name, s.code === cur ? $('storeComment').value : commentText(s.lines, detail)])];
+    copy(lines.map(([n, c]) => `${n}\t${q(c)}`).join('\n'), e.currentTarget);
+  });
+
+  try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
+  if (typeof XLSX === 'undefined') setStatus('Excel読み込み用ライブラリを取得できませんでした。ネットワーク接続を確認して再読み込みしてください。', true);
+})();
+</script>
+
+</body></html>
