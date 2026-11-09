@@ -96,12 +96,12 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <div>
       <div class="label">月次 売上予算 差異分析</div>
       <h1>予算差異アナライザー</h1>
-      <p class="muted small">毎日更新しているExcel（売上集計の .xlsm）を読み込むと、店舗ごとに曜日区分・時間帯別の予算差を分解し、報告用コメントの下書きを作ります。ファイルはこのブラウザ内だけで処理され、外部へ送信されません。</p>
+      <p class="muted small">売上集計表（当年・前年）を読み込むと、店舗ごとに曜日区分・時間帯別の予算差を分解し、報告用コメントの下書きを作ります。ファイルはこのブラウザ内だけで処理され、外部へ送信されません。</p>
     </div>
     <label class="drop" id="drop" for="file">
-      <span class="btn">Excelを選択</span>
-      <span class="small muted">またはここにドラッグ＆ドロップ<br>必要シート：貼①【集計表】／貼①【集計表】 (前年)</span>
-      <input type="file" id="file" accept=".xlsm,.xlsx,.xls">
+      <span class="btn">ファイルを選択</span>
+      <span class="small muted">売上集計表の<b>当年・前年の2ファイル</b>をまとめて選択（ドラッグ＆ドロップ可）<br>CSV・Excelどちらも可。従来の管理用 .xlsm 1つでもOK</span>
+      <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
   <div class="status small" id="status" role="status"></div>
@@ -551,27 +551,60 @@ if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SH
 
   /* ---------- 読み込み ---------- */
   function setStatus(t, err) { const s = $('status'); s.textContent = t; s.className = 'status small' + (err ? ' err' : ''); }
-  async function handleFile(f) {
-    if (!f) return;
-    setStatus(`「${f.name}」を読み込み中…（大きいファイルは数十秒かかります）`);
+  // 1ファイルを読み、{cur, prev} または {raw} を返す
+  async function readOne(f) {
+    const buf = await f.arrayBuffer();
+    let wb;
+    if (/\.(csv|txt|tsv)$/i.test(f.name)) {
+      // CSVは UTF-8 → だめなら Shift-JIS で読む
+      let text;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) { text = new TextDecoder('shift_jis').decode(buf); }
+      wb = XLSX.read(text.replace(/^﻿/, ''), { type: 'string', cellDates: true, dense: true, raw: false });
+    } else {
+      // 管理用の大きい .xlsm は必要シートだけ読む
+      wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true, sheets: [SHEET_CUR, SHEET_PREV] });
+      if (!findSheet(wb, SHEET_CUR)) wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true });
+    }
+    const wsC = findSheet(wb, SHEET_CUR);
+    if (wsC) return { name: f.name, cur: extractRows(XLSX, wsC), prev: extractRows(XLSX, findSheet(wb, SHEET_PREV)) };
+    for (const n of wb.SheetNames) {
+      try { const rows = extractRows(XLSX, wb.Sheets[n]); if (rows.length) return { name: f.name, raw: rows }; } catch (e) { /* 次のシートへ */ }
+    }
+    throw new Error(`「${f.name}」に売上集計表の見出し（店舗コード・営業日・純売上高(合計)・売上月次予算）が見つかりません`);
+  }
+  const ym = rows => { const d = new Date(Math.max(...rows.map(r => +r.date))); return `${d.getFullYear()}年${d.getMonth() + 1}月`; };
+
+  async function handleFiles(list) {
+    const files = [...list].filter(Boolean);
+    if (!files.length) return;
+    setStatus(`${files.map(f => `「${f.name}」`).join('')}を読み込み中…`);
     await new Promise(r => setTimeout(r, 30));
     try {
-      const buf = await f.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true, sheets: [SHEET_CUR, SHEET_PREV] });
-      const wsC = findSheet(wb, SHEET_CUR);
-      if (!wsC) throw new Error(`シート「${SHEET_CUR}」が見つかりません。売上集計表を貼り付けたファイルを選んでください。`);
-      const curRows = extractRows(XLSX, wsC);
-      const prevRows = extractRows(XLSX, findSheet(wb, SHEET_PREV));
+      const got = [];
+      for (const f of files) got.push(await readOne(f));
+      let curRows, prevRows, msg;
+      const book = got.find(g => g.cur);
+      if (book) {
+        curRows = book.cur; prevRows = book.prev;
+        msg = `「${book.name}」を分析しました`;
+      } else {
+        // 元データ：日付の新しい方を当年、古い方を前年とする
+        const raws = got.filter(g => g.raw).sort((a, b) => Math.max(...b.raw.map(r => +r.date)) - Math.max(...a.raw.map(r => +r.date)));
+        curRows = raws[0].raw; prevRows = raws[1] ? raws[1].raw : [];
+        msg = `当年：「${raws[0].name}」（${ym(curRows)}）` + (raws[1] ? `／前年：「${raws[1].name}」（${ym(prevRows)}）` : '') + ' を分析しました';
+        if (raws[1] && ym(curRows) === ym(prevRows)) msg += '。※2つのファイルが同じ年月です。前年分のファイルか確認してください';
+        if (raws[1] && curRows.length && prevRows.length && sum(curRows, r => r.budget) === 0) msg += '。※当年ファイルに予算が入っていません';
+      }
       run(curRows, prevRows);
       $('sampleBanner').hidden = true;
-      setStatus(`「${f.name}」を分析しました（${R.stores.length}店舗${prevRows.length ? '・前年データあり' : '・前年データなし'}）。`);
+      setStatus(`${msg}（${R.stores.length}店舗${prevRows.length ? '' : '・前年データなし：前年比と時間帯の予算按分は当年の構成比で代用'}）。`);
     } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
   }
-  $('file').addEventListener('change', e => handleFile(e.target.files[0]));
+  $('file').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
   const drop = $('drop');
   ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
-  drop.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+  drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 
   function run(curRows, prevRows) {
     R = analyze(curRows, prevRows);
