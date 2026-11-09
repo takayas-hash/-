@@ -61,6 +61,7 @@ section.card { background: var(--panel); border: 1px solid var(--line); border-r
 
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { font: inherit; font-size: .85rem; border: 0; background: transparent; color: var(--fg); padding: 6px 12px; cursor: pointer; }
+.seg button:disabled { color: var(--muted); opacity: .5; cursor: not-allowed; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
 textarea.comment { width: 100%; font: inherit; font-size: .92rem; line-height: 1.75; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; resize: vertical; min-height: 12em; }
@@ -118,14 +119,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <p class="small muted" style="margin:6px 0 0">データはこのブラウザ内だけに保存されます。毎日の更新は当年の売上集計表だけ入れればOK（前年・値引詳細はそのまま残ります。月が変わると、月の合わないデータは外れます）。</p>
   </div>
-  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店舗）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
+  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店・FC1店）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
 
   <section class="card" id="areaCard">
     <div class="row">
       <div><div class="label" id="period"></div><h2 id="areaTitle">直営店全体</h2></div>
       <div class="row" style="gap:8px">
+        <select id="areaSel" class="btn ghost" aria-label="営業部" hidden></select>
         <div class="seg" role="group" aria-label="対象店舗">
           <button type="button" id="scDirect" aria-pressed="true">直営のみ</button>
+          <button type="button" id="scFc" aria-pressed="false">FCのみ</button>
           <button type="button" id="scAll" aria-pressed="false">全店</button>
         </div>
         <div class="seg" role="group" aria-label="コメントの長さ">
@@ -179,7 +182,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
-    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は既定で直営店のみ（売上集計表の「FC区分」が「直営」で始まる店舗）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -228,7 +231,7 @@ function extractRows(XLSX, ws) {
   if (hr < 0) throw new Error('「店舗コード」「営業日」の見出し行が見つかりません');
   const H = aoa[hr];
   const col = name => H.indexOf(name);
-  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分' };
+  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分', area: '営業部' };
   const C = {};
   for (const [k, n] of Object.entries(need)) C[k] = col(n);
   for (const k of ['code', 'date', 'sales', 'budget']) if (C[k] < 0) throw new Error(`列「${need[k]}」が見つかりません`);
@@ -259,6 +262,7 @@ function extractRows(XLSX, ws) {
       budget: num(r[C.budget]), custBudget: C.custBudget >= 0 ? num(r[C.custBudget]) : 0,
       disc: C.disc >= 0 ? num(r[C.disc]) : 0,
       fc: C.fc >= 0 ? String(r[C.fc] || '') : '',
+      area: C.area >= 0 ? String(r[C.area] || '').trim() : '',
       hourS, hourC,
     });
   }
@@ -440,7 +444,7 @@ function analyzeStore(cur, prev, monthDays) {
   return {
     groups: sum(act, d => d.groups), pGroups: sum(prev, d => d.groups),
     disc, pDisc, pDiscRate: (pSales + pDisc) ? pDisc / (pSales + pDisc) : null,
-    code: cur[0].code, name: cur[0].name,
+    code: cur[0].code, name: cur[0].name, area: cur[0].area || '',
     days: act.length, monthDays, sales, budget, diff: sales - budget, rate: budget ? sales / budget : null,
     cust, custBudget, custRate: custBudget ? cust / custBudget : null, up, bUp, pUp,
     custEff, upEff, pSales, pCust, yoy: pSales ? sales / pSales : null, custYoy: pCust ? cust / pCust : null,
@@ -450,22 +454,40 @@ function analyzeStore(cur, prev, monthDays) {
   };
 }
 
+const SCOPE_NAME = { direct: '直営', fc: 'FC', all: '全店' };
+const isDirect = r => /^直営/.test(r.fc || ''), isFcStore = r => /^FC/i.test(r.fc || '');
+/** 店舗が対象条件に合うか（FC区分がないデータは直営/FCの区別なし） */
+function matchStore(r, scope, area) {
+  if (area && r.area !== area) return false;
+  if (scope === 'all' || !r.fc) return true;
+  return scope === 'direct' ? isDirect(r) : isFcStore(r);
+}
+function listAreas(rows) { return [...new Set(rows.map(r => r.area).filter(Boolean))].sort(); }
+/** 営業部ごとの直営／FC／全店の店舗数 */
+function scopeCounts(rows, area) {
+  const cnt = sc => new Set(rows.filter(r => matchStore(r, sc, area)).map(r => r.code)).size;
+  return { direct: cnt('direct'), fc: cnt('fc'), all: cnt('all'), hasFc: rows.some(r => r.fc) };
+}
+
 function analyze(curRows, prevRows, extra) {
   extra = extra || {};
   let hourly = extra.hourly || [], pays = extra.pays || [], pPays = extra.pPays || [];
-  // 対象店舗の絞り込み（FC区分が「直営…」の店舗のみ）
-  const scope = extra.scope || 'all';
+  // 対象店舗の絞り込み：営業部、直営／FC／全店
+  const scope = extra.scope || 'all', areaSel = extra.area || '';
   const hasFc = curRows.some(r => r.fc);
-  if (scope === 'direct' && hasFc) {
-    const codes = new Set(curRows.filter(r => /^直営/.test(r.fc)).map(r => r.code));
-    if (!codes.size) throw new Error('FC区分が「直営」の店舗が見つかりません');
-    curRows = curRows.filter(r => codes.has(r.code));
-    prevRows = prevRows.filter(r => codes.has(r.code));
-    hourly = hourly.filter(r => codes.has(r.code));
-    pays = pays.filter(r => codes.has(r.code));
-    pPays = pPays.filter(r => codes.has(r.code));
-  }
-  const scopeLabel = scope === 'direct' && hasFc ? '直営計' : 'エリア計';
+  const areas = listAreas(curRows);
+  const pick = new Set(curRows.filter(r => matchStore(r, scope, areaSel)).map(r => r.code));
+  if (!pick.size) throw new Error(`${areaSel ? areaSel + 'に' : ''}${SCOPE_NAME[scope]}の店舗がありません`);
+  curRows = curRows.filter(r => pick.has(r.code));
+  prevRows = prevRows.filter(r => pick.has(r.code));
+  hourly = hourly.filter(r => pick.has(r.code));
+  pays = pays.filter(r => pick.has(r.code));
+  pPays = pPays.filter(r => pick.has(r.code));
+  const multiArea = !areaSel && areas.length > 1;
+  const areaPart = areaSel ? areaSel + '・' : multiArea ? '全営業部・' : '';
+  const scopeName = hasFc ? SCOPE_NAME[scope] : '全店';
+  const scopeLabel = `${areaPart}${scopeName}計`;
+  const titleLabel = `${areaPart}${scopeName}`;
   if (!curRows.length) throw new Error('当月データがありません');
   // 実績のある最終日まで
   const lastDate = new Date(Math.max(...curRows.filter(r => r.sales > 0).map(r => +r.date)));
@@ -505,10 +527,10 @@ function analyze(curRows, prevRows, extra) {
     enrichStore(area, [], [], pays.map(p => ({ ...p, code: 'AREA' })), lastDate, pPays.map(p => ({ ...p, code: 'AREA' })));
   }
   area.laborStores = withLabor.length;
-  const ctx = { isFullMonth, lastDate, commonWeak, areaLabor, scopeLabel };
+  const ctx = { isFullMonth, lastDate, commonWeak, areaLabor, scopeLabel, multiArea };
   stores.forEach(s => { s.lines = storeComment(s, ctx); });
   area.lines = areaComment(area, stores, ctx);
-  return { stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, scopeApplied: scope === 'direct' && hasFc, hasHourly: hourly.length > 0, hasPays: pays.length > 0 };
+  return { stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0, hasPays: pays.length > 0 };
 }
 
 /* ===== コメント生成 ===== */
@@ -656,6 +678,12 @@ function areaComment(a, stores, ctx) {
   const period = ctx.isFullMonth ? '' : `（${md(ctx.lastDate)}時点）`;
   L.push(`【${ctx.scopeLabel}】売上${man(a.sales)}／予算比${pct(a.rate)}（${sman(a.diff)}）${a.yoy ? `・前年比${pct(a.yoy)}` : ''}${period}。予算達成${okN}店／${stores.length}店。`);
   L.push(`・要因分解：客数要因${sman(a.custEff)}（客数予算比${pct(a.custRate)}）、単価要因${sman(a.upEff)}（客単価${yen(a.up)}、予算${syen(a.up - a.bUp)}）。`);
+  if (ctx.multiArea) {
+    const by = {};
+    stores.forEach(s => { const k = s.area || '（営業部なし）'; (by[k] = by[k] || { k, sales: 0, budget: 0, n: 0, ok: 0 }); by[k].sales += s.sales; by[k].budget += s.budget; by[k].n++; if (s.diff >= 0) by[k].ok++; });
+    const list = Object.values(by).sort((x, y) => x.sales / x.budget - y.sales / y.budget);
+    L.push(`・営業部別：${list.map(x => `${x.k}${pct(x.sales / x.budget)}（${sman(x.sales - x.budget)}、達成${x.ok}／${x.n}店）`).join('、')}。`);
+  }
   const worst = [...stores].sort((x, y) => x.diff - y.diff).filter(s => s.diff < 0).slice(0, 3);
   const best = [...stores].sort((x, y) => y.diff - x.diff).filter(s => s.diff > 0).slice(0, 3);
   if (worst.length) L.push(`・未達額上位：${worst.map(s => `${s.name}${sman(s.diff)}（${pct(s.rate)}）`).join('、')}。`);
@@ -675,13 +703,13 @@ function areaComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
 
 </script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  let R = null, cur = null, detail = false, scope = 'direct', last = null;
+  let R = null, cur = null, detail = false, scope = 'direct', areaSel = '', last = null;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const cls = v => v < 0 ? 'neg' : 'pos';
   const fit = ta => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 4) + 'px'; };
@@ -710,7 +738,7 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
       const hourS = new Array(25).fill(0), hourC = new Array(25).fill(0);
       for (const h in shape) { let k = shape[h]; if (code === '9001' && (h == 19 || h == 20) && dt !== '平日') k *= 0.85; hourS[h] = Math.round(sales * k); hourC[h] = Math.round(cust * k); }
       const tot = hourS.reduce((a, b) => a + b, 0); hourS[19] += sales - tot;
-      out.push({ code, name, fc: code === '9004' ? 'FC' : '直営', date, wd, dt, weather, sales, cust, groups: Math.round(cust / 3.2), budget, custBudget: Math.round(budget / 3080), disc: Math.round(sales * .04), hourS, hourC });
+      out.push({ code, name, fc: code === '9004' ? 'FC' : '直営', area: 'サンプルエリア', date, wd, dt, weather, sales, cust, groups: Math.round(cust / 3.2), budget, custBudget: Math.round(budget / 3080), disc: Math.round(sales * .04), hourS, hourC });
     }
     return out;
   }
@@ -848,7 +876,8 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
 
   function run(curRows, prevRows, extra) {
     last = [curRows, prevRows, extra || {}];
-    R = analyze(curRows, prevRows, { ...(extra || {}), scope });
+    const eff = syncControls(curRows);
+    R = analyze(curRows, prevRows, { ...(extra || {}), scope: eff.scope, area: eff.area });
     const worst = [...R.stores].sort((a, b) => a.diff - b.diff)[0];
     cur = worst ? worst.code : null;
     render();
@@ -862,7 +891,7 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
     const a = R.area;
     $('period').textContent = `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
     const okN = R.stores.filter(s => s.diff >= 0).length;
-    $('areaTitle').textContent = R.scopeApplied ? `直営店全体（${R.stores.length}店）` : `全店（${R.stores.length}店）`;
+    $('areaTitle').textContent = `${R.titleLabel}（${R.stores.length}店）`;
     $('kpis').innerHTML = kpi('売上', man(a.sales), `予算 ${man(a.budget)}`) + kpi('予算比', pct(a.rate), `差額 ${sman(a.diff)}`, cls(a.diff))
       + kpi('客数要因', sman(a.custEff), `客数予算比 ${pct(a.custRate)}`, cls(a.custEff)) + kpi('単価要因', sman(a.upEff), `客単価 ${yen(a.up)}`, cls(a.upEff))
       + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `前年比 ${pct(a.yoy)}` : '');
@@ -870,8 +899,8 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
 
     const maxAbs = Math.max(1, ...R.stores.map(s => Math.abs(s.diff)));
     const rows = [...R.stores].sort((x, y) => x.rate - y.rate);
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th><th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th><th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">前年比</th></tr></thead><tbody>`
-      + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td><td><span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '達成' : '未達'}</span></td>
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th><th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">前年比</th></tr></thead><tbody>`
+      + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}<td><span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '達成' : '未達'}</span></td>
         <td class="n">${man(s.sales)}</td><td class="n ${cls(s.diff)}">${pct(s.rate)}</td><td class="n ${cls(s.diff)}">${sman(s.diff)}</td>
         <td><span class="bar" style="width:${Math.round(Math.abs(s.diff) / maxAbs * 110)}px;background:var(${s.diff < 0 ? '--neg' : '--pos'})"></span></td>
         <td class="n ${cls(s.custEff)}">${sman(s.custEff)}</td><td class="n ${cls(s.upEff)}">${sman(s.upEff)}</td><td class="n">${pct(s.custRate)}</td><td class="n">${yen(s.up)}</td><td class="n">${pct(s.yoy)}</td></tr>`).join('') + '</tbody>';
@@ -965,12 +994,30 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
   /* ---------- 操作 ---------- */
   $('storeSel').addEventListener('change', e => { cur = e.target.value; render(); });
   function setMode(d) { detail = d; pref.set('detail', d); $('mShort').setAttribute('aria-pressed', !d); $('mLong').setAttribute('aria-pressed', d); render(); }
-  function setScope(sc) {
-    scope = sc; pref.set('scope', sc); $('scDirect').setAttribute('aria-pressed', sc === 'direct'); $('scAll').setAttribute('aria-pressed', sc === 'all');
-    try { if (last) run(...last); } catch (e) { setStatus('切り替えできませんでした：' + e.message, true); }
+  const SC_BTN = { direct: 'scDirect', fc: 'scFc', all: 'scAll' }, SC_TXT = { direct: '直営のみ', fc: 'FCのみ', all: '全店' };
+  /** データに合わせて営業部の選択肢と、直営／FC／全店ボタン（店舗数・押せるか）を整える */
+  function syncControls(rows) {
+    // 選んだ営業部・対象はそのまま覚えておき、データにない場合だけ表示を切り替える
+    const areas = listAreas(rows), sel = $('areaSel');
+    const area = areas.includes(areaSel) ? areaSel : '';
+    sel.hidden = areas.length <= 1;
+    sel.innerHTML = `<option value="">すべての営業部（${areas.length}）</option>` + areas.map(a => `<option value="${esc(a)}"${a === area ? ' selected' : ''}>${esc(a)}</option>`).join('');
+    const c = scopeCounts(rows, area);
+    let sc = scope;
+    if (!c.hasFc) sc = 'all';
+    else if (!c[sc]) sc = c.direct ? 'direct' : c.fc ? 'fc' : 'all';
+    for (const k in SC_BTN) {
+      const b = $(SC_BTN[k]);
+      b.textContent = `${SC_TXT[k]} ${c[k]}`;
+      b.disabled = !c[k] || (!c.hasFc && k !== 'all');
+      b.setAttribute('aria-pressed', k === sc);
+    }
+    return { area, scope: sc };
   }
-  $('scDirect').addEventListener('click', () => setScope('direct'));
-  $('scAll').addEventListener('click', () => setScope('all'));
+  function rerun() { try { if (last) run(...last); } catch (e) { setStatus('切り替えできませんでした：' + e.message, true); } }
+  function setScope(sc) { scope = sc; pref.set('scope', sc); rerun(); }
+  for (const k in SC_BTN) $(SC_BTN[k]).addEventListener('click', () => setScope(k));
+  $('areaSel').addEventListener('change', e => { areaSel = e.target.value; pref.set('area', areaSel); rerun(); });
   $('mShort').addEventListener('click', () => setMode(false));
   $('mLong').addEventListener('click', () => setMode(true));
   async function copy(text, btn) {
@@ -996,8 +1043,7 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
   });
 
   // 前回の表示設定
-  scope = pref.get('scope', 'direct'); detail = pref.get('detail', false);
-  $('scDirect').setAttribute('aria-pressed', scope === 'direct'); $('scAll').setAttribute('aria-pressed', scope === 'all');
+  scope = pref.get('scope', 'direct'); areaSel = pref.get('area', ''); detail = pref.get('detail', false);
   $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
   store.get().then(v => {
