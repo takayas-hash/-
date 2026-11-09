@@ -147,7 +147,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       </div>
       <div>
         <h3>日別の予算差</h3>
-        <p class="small muted" style="margin:2px 0 8px">棒の上下＝予算との差額。曜日の下の「雨」は雨天日。</p>
+        <p class="small muted" style="margin:2px 0 8px">棒の上下＝予算との差額。</p>
         <div class="chart" id="daily"></div>
       </div>
     </div>
@@ -542,13 +542,7 @@ function storeComment(s, ctx) {
     }
   }
 
-  // 4) 天候
-  const w = s.weather;
-  if (w.rainDays > 0 && w.fineDays > 0 && w.rainRate != null && w.fineRate != null) {
-    const gap = w.rainRate - w.fineRate;
-    if (gap <= -0.03) L.push(`・天候：雨天${w.rainDays}日の予算比${pct(w.rainRate)}（晴・曇${pct(w.fineRate)}）と雨天日の落ち込みが影響（雨天日計${sman(w.rainDiff)}）。`);
-    else if (gap >= 0.03) L.push(`・天候：雨天${w.rainDays}日でも予算比${pct(w.rainRate)}と晴・曇（${pct(w.fineRate)}）を上回り、天候影響は限定的。`);
-  }
+
 
   // 5) 特異日
   const cw = (ctx.commonWeak || []).map(c => {
@@ -559,16 +553,14 @@ function storeComment(s, ctx) {
   }
   const cwSet = new Set(cw.map(c => +c.date));
   const worstOwn = s.worst.filter(d => !cwSet.has(+d.date) && d.sales > 0);
-  if (!ok && worstOwn.length) L.d(`・未達が大きかった日（店舗固有）：${worstOwn.map(d => `${md(d.date)}(${d.wd}${d.weather ? '・' + d.weather : ''})${pct(d.rate)}・${sman(d.diff)}`).join('、')}。`);
-  if (ok && s.best.length) L.d(`・上振れが大きかった日：${s.best.map(d => `${md(d.date)}(${d.wd}${d.weather ? '・' + d.weather : ''})${pct(d.rate)}・${sman(d.diff)}`).join('、')}。`);
+  if (!ok && worstOwn.length) L.d(`・未達が大きかった日（店舗固有）：${worstOwn.map(d => `${md(d.date)}(${d.wd})${pct(d.rate)}・${sman(d.diff)}`).join('、')}。`);
+  if (ok && s.best.length) L.d(`・上振れが大きかった日：${s.best.map(d => `${md(d.date)}(${d.wd})${pct(d.rate)}・${sman(d.diff)}`).join('、')}。`);
   if (s.closed.length) {
     const cb = sum(s.closed, d => d.budget);
     L.push(`・売上0の日あり：${s.closed.map(d => md(d.date)).join('、')}（予算${man(cb)}が丸ごと未達計上。休業かデータ欠落か要確認。除くと予算比${pct(s.sales / (s.budget - cb))}）。`);
   }
 
   // 6) 次月への示唆
-  const acts = suggestions(s, ok, main, typeof worstCell !== 'undefined' ? worstCell : null, bNeg);
-  if (acts.length) L.push(`・次月の打ち手（案）：${acts.join('／')}。`);
   return L.filter(x => x && x.t);
 }
 
@@ -591,27 +583,6 @@ function unitPriceLines(s) {
   return out;
 }
 
-function suggestions(s, ok, main, wc, bNeg) {
-  const a = [];
-  const weak = bNeg.filter(b => b.rate != null && b.rate < 0.97).map(b => b.key);
-  if (!ok && main === 'cust' && s.custEff < 0) {
-    if (wc && wc.d < 0) {
-      const dt = DAYTYPES[wc.ti], bk = BANDS[wc.bi].key;
-      const isWeekend = dt !== '平日';
-      if (bk === 'peak' || bk === 'early') a.push(isWeekend ? `${dt}ディナーの受入数最大化（予約枠設定・ウェイティング離脱防止・バッシング短縮で回転率UP）` : '平日ディナーの来店動機づくり（平日限定訴求・アプリ/LINE配信を夕方に）');
-      else if (bk === 'lunch') a.push(isWeekend ? `${dt}ランチの集客（開店直後からの満席化・早めの案内）` : '平日ランチの集客施策（ランチ訴求・店頭/SNS告知）');
-      else a.push(`${dt}の${BANDS[wc.bi].name}帯の来店動機づくり（時間帯限定訴求）`);
-    }
-    if (weak.includes('lunch') && !a.some(x => x.includes('ランチ'))) a.push('ランチ帯の集客施策');
-    if (!a.length) a.push('客数予算比の低い曜日に販促を集中');
-  }
-  if (s.staffing === 'short') a.unshift('ピーク帯の人員配置見直し（シフトを厚く・案内/バッシング専任を配置）');
-  if (s.up < s.bUp * 0.98) a.push('客単価改善（上位コース提案・ドリンク/デザートの追加オーダー声掛け）');
-  if (s.weather.rainDays && s.weather.rainRate != null && s.weather.fineRate != null && s.weather.rainRate - s.weather.fineRate <= -0.05) a.push('雨天時の来店動機（雨の日施策・テイクアウト訴求）');
-  if (ok && !a.length) a.push('好調要因（時間帯・曜日）の再現と、弱い時間帯への横展開');
-  return a.slice(0, 3);
-}
-
 function areaComment(a, stores, ctx) {
   const L = [];
   const P = L.push.bind(L);
@@ -632,7 +603,7 @@ function areaComment(a, stores, ctx) {
     const dd = a.discDetail;
     L.push(`・値引：税込${man(dd.total)}（値引率${pct(a.discRate)}${a.pDiscRate != null ? `、前年${pct(a.pDiscRate)}` : ''}）。内訳は${dd.cats.slice(0, 4).map(c => `${c.cat}${Math.round(c.amount / dd.total * 100)}%`).join('、')}。`);
   }
-  if (ctx.commonWeak.length) L.push(`・エリア共通の不振日：${ctx.commonWeak.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})${pct(c.rate)}`).join('、')}。全店で低調のため外部要因（天候・行事・競合等）の確認を。`);
+  if (ctx.commonWeak.length) L.push(`・エリア共通の不振日：${ctx.commonWeak.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})${pct(c.rate)}`).join('、')}。全店で低調のため外部要因の確認を。`);
   return L;
 }
 
@@ -818,12 +789,11 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
       const path = d.diff >= 0
         ? `M${x},${mid} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${mid} Z`
         : `M${x},${mid} V${mid + hgt - r} Q${x},${mid + hgt} ${x + r},${mid + hgt} H${x + w - r} Q${x + w},${mid + hgt} ${x + w},${mid + hgt - r} V${mid} Z`;
-      const tipTxt = `${d.date.getMonth() + 1}/${d.date.getDate()}（${d.wd}・${d.dt}${d.weather ? '・' + d.weather : ''}）|売上 ${man(d.sales)}|予算 ${man(d.budget)}|予算比 ${pct(d.rate)}・${sman(d.diff)}|客数 ${d.cust}人`;
+      const tipTxt = `${d.date.getMonth() + 1}/${d.date.getDate()}（${d.wd}・${d.dt}）|売上 ${man(d.sales)}|予算 ${man(d.budget)}|予算比 ${pct(d.rate)}・${sman(d.diff)}|客数 ${d.cust}人`;
       svg += `<rect x="${x - 3}" y="${top}" width="${w + 6}" height="${base - top + 50}" fill="transparent" data-tip="${esc(tipTxt)}"/>`;
       svg += `<path d="${path}" fill="var(${d.diff < 0 ? '--neg' : '--pos'})" pointer-events="none"/>`;
       const we = d.wd === '土' || d.wd === '日' || (d.dt === '日祝日');
       svg += `<text x="${x + w / 2}" y="${base + 18}" text-anchor="middle">${d.date.getDate()}</text><text x="${x + w / 2}" y="${base + 31}" text-anchor="middle" style="${we ? 'font-weight:700;fill:var(--fg)' : ''}">${d.wd}</text>`;
-      if (isRain(d.weather)) svg += `<text x="${x + w / 2}" y="${base + 44}" text-anchor="middle" style="fill:var(--pos-ink)">雨</text>`;
     });
     $('daily').innerHTML = svg + '</svg>';
 
