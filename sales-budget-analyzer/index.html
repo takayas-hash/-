@@ -175,6 +175,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       <div><h3>曜日区分別</h3><div class="tbl"><table id="typeTbl"></table></div></div>
       <div><h3>時間帯別</h3><div class="tbl"><table id="bandTbl"></table></div></div>
     </div>
+    <div id="lossBox" hidden><h3>ロス（廃棄額）</h3><div class="kpis" id="lossKpis"></div></div>
     <div><h3>曜日別</h3><div class="tbl"><table id="wdTbl"></table></div></div>
     <div id="costBox" hidden>
       <h3>原価・喫食量・皿数</h3>
@@ -188,7 +189,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
-    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。原価率＝原価÷純売上高（売上集計表の「原価」列。メニュー別の予定原価×販売数の合計と一致）。原価率の平均との差は「1人あたり原価（喫食）」と「客単価」の影響に分解しています。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。ロス率＝廃棄額÷純売上高（売上集計表の「廃棄額」列）。突出日＝その店の1日平均ロスの3倍以上かつ1万円以上の日。原価率＝原価÷純売上高（売上集計表の「原価」列。メニュー別の予定原価×販売数の合計と一致）。原価率の平均との差は「1人あたり原価（喫食）」と「客単価」の影響に分解しています。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -237,7 +238,7 @@ function extractRows(XLSX, ws) {
   if (hr < 0) throw new Error('「店舗コード」「営業日」の見出し行が見つかりません');
   const H = aoa[hr];
   const col = name => H.indexOf(name);
-  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分', area: '営業部', cost: '原価' };
+  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分', area: '営業部', cost: '原価', loss: '廃棄額' };
   const C = {};
   for (const [k, n] of Object.entries(need)) C[k] = col(n);
   for (const k of ['code', 'date', 'sales', 'budget']) if (C[k] < 0) throw new Error(`列「${need[k]}」が見つかりません`);
@@ -270,6 +271,7 @@ function extractRows(XLSX, ws) {
       fc: C.fc >= 0 ? String(r[C.fc] || '') : '',
       area: C.area >= 0 ? String(r[C.area] || '').trim() : '',
       cost: C.cost >= 0 ? num(r[C.cost]) : 0,
+      loss: C.loss >= 0 ? num(r[C.loss]) : 0,
       hourS, hourC,
     });
   }
@@ -494,7 +496,7 @@ function analyzeStore(cur, prev, monthDays) {
   const weather = { rainDays: rain.length, rainRate: rr(rain), fineDays: fine.length, fineRate: rr(fine), rainDiff: sum(rain, d => d.sales - d.budget) };
 
   // 日別（ワースト・ベスト）
-  const daily = act.filter(d => d.budget > 0).map(d => ({ date: d.date, wd: d.wd, dt: d.dt, weather: d.weather, sales: d.sales, budget: d.budget, diff: d.sales - d.budget, rate: d.sales / d.budget, cust: d.cust }))
+  const daily = act.filter(d => d.budget > 0).map(d => ({ date: d.date, wd: d.wd, dt: d.dt, weather: d.weather, sales: d.sales, budget: d.budget, diff: d.sales - d.budget, rate: d.sales / d.budget, cust: d.cust, loss: d.loss }))
     .sort((a, b) => a.date - b.date);
   const worst = [...daily].sort((a, b) => a.diff - b.diff).slice(0, 3).filter(d => d.diff < 0);
   const best = [...daily].sort((a, b) => b.diff - a.diff).slice(0, 3).filter(d => d.diff > 0);
@@ -502,7 +504,15 @@ function analyzeStore(cur, prev, monthDays) {
 
   const disc = sum(act, d => d.disc), pDisc = sum(prev, d => d.disc);
   const cost = sum(act, d => d.cost), pCost = sum(prev, d => d.cost);
+  // ロス（廃棄額）：突出日（1日平均の3倍以上かつ1万円以上）と曜日の偏り
+  const loss = sum(act, d => d.loss), pLoss = sum(prev, d => d.loss);
+  const lossDays = act.filter(d => d.sales > 0);
+  const avgLoss = lossDays.length ? loss / lossDays.length : 0;
+  const lossSpikes = lossDays.filter(d => d.loss >= Math.max(avgLoss * 3, 10000)).sort((a, b) => b.loss - a.loss).slice(0, 3)
+    .map(d => ({ date: d.date, wd: d.wd, loss: d.loss, rate: d.loss / d.sales }));
+  const lossByWd = WEEKDAYS.map(w => ({ key: w, loss: sum(act.filter(d => d.wd === w), d => d.loss), days: act.filter(d => d.wd === w).length }));
   return {
+    loss, pLoss, lossRate: sales && act.some(d => d.loss) ? loss / sales : null, pLossRate: pSales && prev.some(d => d.loss) ? pLoss / pSales : null, lossSpikes, lossByWd, avgLoss,
     cost, pCost, costRate: cost && sales ? cost / sales : null, pCostRate: pCost && pSales ? pCost / pSales : null,
     groups: sum(act, d => d.groups), pGroups: sum(prev, d => d.groups),
     disc, pDisc, pDiscRate: (pSales + pDisc) ? pDisc / (pSales + pDisc) : null,
@@ -592,6 +602,8 @@ function analyze(curRows, prevRows, extra) {
   }
   area.laborStores = withLabor.length;
   // メニュー別：店舗ごとの1人あたり指標と、対象店平均（ベンチマーク）
+  const withLoss = stores.filter(s => s.lossRate != null);
+  area.benchLossRate = withLoss.length ? sum(withLoss, s => s.loss) / sum(withLoss, s => s.sales) : null;
   if (menu.length) {
     stores.forEach(s => { s.menu = menuAgg(menu.filter(r => r.code === s.code)); s.pMenuAgg = menuAgg(pMenu.filter(r => r.code === s.code)); });
     area.menu = menuAgg(menu); area.pMenuAgg = menuAgg(pMenu);
@@ -704,11 +716,28 @@ function storeComment(s, ctx) {
     L.push(`・売上0の日あり：${s.closed.map(d => md(d.date)).join('、')}（予算${man(cb)}が丸ごと未達計上。休業かデータ欠落か要確認。除くと予算比${pct(s.sales / (s.budget - cb))}）。`);
   }
 
-  // 7) 原価・喫食量・皿数
+  // 7) ロス
+  for (const x of lossLines(s, ctx)) L.push(x);
+  // 8) 原価・喫食量・皿数
   for (const x of costLines(s, ctx)) L.push(x);
   return L.filter(x => x && x.t);
 }
 
+const pct2 = v => v == null ? '－' : (v * 100).toFixed(2) + '%';
+/** ロス（廃棄額）の考察 */
+function lossLines(s, ctx) {
+  if (s.lossRate == null) return [];
+  const cmp = [];
+  const b = ctx.area && ctx.area.benchLossRate;
+  if (ctx.nStores > 1 && b != null) cmp.push(`対象店平均${pct2(b)}`);
+  if (s.pLossRate != null) cmp.push(`前年${pct2(s.pLossRate)}`);
+  let t = `・ロス：ロス額${man(s.loss)}・ロス率${pct2(s.lossRate)}${cmp.length ? `（${cmp.join('、')}）` : ''}`;
+  if (s.lossSpikes.length) t += `。突出日は${s.lossSpikes.map(d => `${md(d.date)}(${d.wd})${man(d.loss)}（売上比${pct(d.rate)}）`).join('、')}で、月間ロスの${Math.round(sum(s.lossSpikes, d => d.loss) / s.loss * 100)}%`;
+  // 曜日の偏り：1曜日に30%以上集中
+  const top = [...s.lossByWd].sort((a, b) => b.loss - a.loss)[0];
+  if (s.loss > 0 && top.loss / s.loss >= 0.3) t += `。曜日別では${top.key}曜に${Math.round(top.loss / s.loss * 100)}%が集中`;
+  return [{ t: t + '。', d: false }];
+}
 const sg = (v, d = 1) => (v >= 0 ? '+' : '▲') + Math.abs(v).toFixed(d);
 const pt = v => (v >= 0 ? '+' : '▲') + Math.abs(v * 100).toFixed(1) + 'pt';
 /** 原価率・喫食量・皿数の考察（対象店平均・前年と比較） */
@@ -831,6 +860,11 @@ function areaComment(a, stores, ctx) {
     const dd = a.discDetail;
     L.push(`・値引：税込${man(dd.total)}（値引率${pct(a.discRate)}${a.pDiscRate != null ? `、前年${pct(a.pDiscRate)}` : ''}）。内訳は${dd.cats.slice(0, 4).map(c => `${c.cat}${Math.round(c.amount / dd.total * 100)}%`).join('、')}。`);
     for (const x of discYoyLines(a)) if (!x.d) L.push(x.t);
+  }
+  if (a.lossRate != null) {
+    const hi = stores.filter(x => x.lossRate != null).sort((x, y) => y.lossRate - x.lossRate).slice(0, 3);
+    const wd = [...a.lossByWd].sort((x, y) => y.loss - x.loss).slice(0, 2);
+    L.push(`・ロス：ロス額${man(a.loss)}・ロス率${pct2(a.lossRate)}${a.pLossRate != null ? `（前年${pct2(a.pLossRate)}）` : ''}。${stores.length > 1 ? `ロス率の高い店：${hi.map(x => `${x.name}${pct2(x.lossRate)}`).join('、')}。` : ''}曜日別の上位は${wd.map(x => `${x.key}曜${Math.round(x.loss / a.loss * 100)}%`).join('、')}。`);
   }
   if (a.menu) {
     const m = a.menu, P = a.pMenuAgg;
@@ -1103,7 +1137,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
       const path = d.diff >= 0
         ? `M${x},${mid} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${mid} Z`
         : `M${x},${mid} V${mid + hgt - r} Q${x},${mid + hgt} ${x + r},${mid + hgt} H${x + w - r} Q${x + w},${mid + hgt} ${x + w},${mid + hgt - r} V${mid} Z`;
-      const tipTxt = `${d.date.getMonth() + 1}/${d.date.getDate()}（${d.wd}・${d.dt}）|売上 ${man(d.sales)}|予算 ${man(d.budget)}|予算比 ${pct(d.rate)}・${sman(d.diff)}|客数 ${d.cust}人`;
+      const tipTxt = `${d.date.getMonth() + 1}/${d.date.getDate()}（${d.wd}・${d.dt}）|売上 ${man(d.sales)}|予算 ${man(d.budget)}|予算比 ${pct(d.rate)}・${sman(d.diff)}|客数 ${d.cust}人${d.loss ? `|ロス ${yen(d.loss)}（売上比${pct(d.loss / d.sales)}）` : ''}`;
       svg += `<rect x="${x - 3}" y="${top}" width="${w + 6}" height="${base - top + 50}" fill="transparent" data-tip="${esc(tipTxt)}"/>`;
       svg += `<path d="${path}" fill="var(${d.diff < 0 ? '--neg' : '--pos'})" pointer-events="none"/>`;
       const we = d.wd === '土' || d.wd === '日' || (d.dt === '日祝日');
@@ -1121,6 +1155,14 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
     $('discBox').hidden = !dd;
     const dc = s.discCmp, pd = s.pDiscDetail;
     const dlt = (v, unit) => { v = Math.round(v); return `<span class="${v < 0 ? 'neg' : v > 0 ? 'pos' : ''}">${v > 0 ? '+' : v < 0 ? '▲' : '±'}${Math.abs(v).toLocaleString('ja-JP')}${unit}</span>`; };
+    // ロス
+    $('lossBox').hidden = s.lossRate == null;
+    if (s.lossRate != null) {
+      const p2 = v => (v * 100).toFixed(2) + '%';
+      $('lossKpis').innerHTML = kpi('ロス額', man(s.loss), `1日平均 ${yen(s.avgLoss)}`)
+        + kpi('ロス率', p2(s.lossRate), [R.stores.length > 1 && R.area.benchLossRate != null ? `平均 ${p2(R.area.benchLossRate)}` : '', s.pLossRate != null ? `前年 ${p2(s.pLossRate)}` : ''].filter(Boolean).join('・'))
+        + (s.lossSpikes.length ? kpi('突出日', s.lossSpikes.map(d => `${d.date.getMonth() + 1}/${d.date.getDate()}`).join('・'), s.lossSpikes.map(d => `${d.wd} ${man(d.loss)}`).join('・')) : '');
+    }
     // 原価・喫食
     const m = s.menu, A = R.area.menu, PM = s.pMenuAgg;
     $('costBox').hidden = !(m && A);
@@ -1148,7 +1190,8 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
     $('wdTbl').innerHTML = `<thead><tr><th></th>${s.byWd.map(w => `<th class="n">${w.key}</th>`).join('')}</tr></thead><tbody>`
       + `<tr><td>日数</td>${s.byWd.map(w => `<td class="n">${w.days}</td>`).join('')}</tr>`
       + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
-      + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr></tbody>`;
+      + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr>`
+      + (s.lossRate != null ? `<tr><td>ロス額</td>${s.lossByWd.map(w => `<td class="n">${w.days ? man(w.loss) : '－'}</td>`).join('')}</tr>` : '') + '</tbody>';
   }
 
   /* ---------- ツールチップ ---------- */
