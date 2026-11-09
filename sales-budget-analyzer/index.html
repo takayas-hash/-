@@ -410,6 +410,7 @@ function extractMenu(XLSX, ws) {
   }
   return out;
 }
+const courseType = n => String(n).replace(/[\s　]*[（(]?(大人|シニア|小学生|幼児)[）)]?[\s　]*$/, '').trim();
 /** 店舗（または複数店）のメニュー行 → 1人あたり指標 */
 function menuAgg(rows) {
   if (!rows.length) return null;
@@ -425,8 +426,9 @@ function menuAgg(rows) {
   const items = {};
   rows.filter(r => r.unitCost > 0).forEach(r => { (items[r.name] = items[r.name] || { name: r.name, cat: r.cat, qty: 0, cost: 0 }); items[r.name].qty += r.qty; items[r.name].cost += r.qty * r.unitCost; });
   Object.values(items).forEach(x => { x.costPP = x.cost / cust; x.qtyPP = x.qty / cust; });
+  // コース構成：年齢区分（大人・シニア・小学生・幼児）を外したコースの種類ごとに合算
   const courses = {};
-  rows.filter(r => r.grp === 'course' && !/飲み放題|ドリンク|アルコール/.test(r.name)).forEach(r => { courses[r.name] = (courses[r.name] || 0) + r.qty; });
+  rows.filter(r => r.grp === 'course' && !/飲み放題|ドリンク|アルコール/.test(r.name)).forEach(r => { const k = courseType(r.name); courses[k] = (courses[k] || 0) + r.qty; });
   const courseTotal = Object.values(courses).reduce((a, b) => a + b, 0);
   return {
     cust, cost: sum(rows, r => r.qty * r.unitCost), costPP: pp(r => r.qty * r.unitCost), menuSales: sum(rows, r => r.sales),
@@ -872,9 +874,13 @@ function costLines(s, ctx) {
     if (items.length) out.push({ t: `　平均より出数が多い品目：${items.map(it => `${it.name.replace(/^Ｆ/, '')}${syen(it.d)}/人`).join('、')}。`, d: true });
   }
   if (m.courses.length >= 2) {
-    const prem = m.courses.filter(c => /プレミアム/.test(c.name));
-    const ap = A.courses.filter(c => /プレミアム/.test(c.name)), pShare = sum(prem, c => c.share), aShare = sum(ap, c => c.share);
-    if (prem.length) out.push({ t: `　コース構成：プレミアム系${pct(pShare)}${bench ? `（平均${pct(aShare)}）` : ''}、最多は${m.courses[0].name}${pct(m.courses[0].share)}。`, d: true });
+    const avgOf = name => { const a = A.courses.find(c => c.name === name); return a ? a.share : 0; };
+    const prevOf = name => { const p = P && P.courses.find(c => c.name === name); return p ? p.share : null; };
+    const list = m.courses.filter(c => c.share >= 0.01).slice(0, 5).map(c => {
+      const cmp = [bench ? `平均${pct(avgOf(c.name))}` : '', prevOf(c.name) != null ? `前年${pct(prevOf(c.name))}` : ''].filter(Boolean).join('・');
+      return `${c.name}${pct(c.share)}${cmp ? `（${cmp}）` : ''}`;
+    });
+    out.push({ t: `　コース構成（年齢区分を合算）：${list.join('、')}。`, d: true });
   }
   return out;
 }
@@ -1059,6 +1065,11 @@ if (typeof module !== 'undefined') module.exports = { extractUsage, usageAgg, pa
   function setStatus(t, err) { const s = $('status'); s.textContent = t; s.className = 'status small' + (err ? ' err' : ''); }
   // 1ファイルを読み、{cur, prev} または {raw} を返す
   async function readOne(f) {
+    const r = await readOneInner(f);
+    r.file = { name: f.name, raw: await f.arrayBuffer() };
+    return r;
+  }
+  async function readOneInner(f) {
     const buf = await f.arrayBuffer();
     let wb;
     if (/\.(csv|txt|tsv)$/i.test(f.name)) {
@@ -1114,6 +1125,26 @@ if (typeof module !== 'undefined') module.exports = { extractUsage, usageAgg, pa
     set(k, v) { try { localStorage.setItem('ba.' + k, JSON.stringify(v)); } catch (e) { /* 保存できない環境では無視 */ } },
   };
   let S = null; // 保存中のデータ {cur, prev, pays, hourly, savedAt}
+  // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
+  const DATA_VERSION = 2;
+  async function reparse(v) {
+    const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly'];
+    const all = [...slots.map(k => v[k]).filter(Boolean), ...Object.values(v.usage || {})];
+    if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
+    const cache = new Map();
+    const parse = async f => { if (!cache.has(f.raw)) cache.set(f.raw, await readOneInner(new File([f.raw], f.name))); return cache.get(f.raw); };
+    const N = { ...v };
+    for (const k of slots) {
+      const x = v[k]; if (!x) continue;
+      const g = await parse(x.file);
+      const rows = k === 'cur' ? (g.cur || g.raw) : k === 'prev' ? (x.sheet === 'prev' ? g.prev : g.raw) : (g.pays || g.menu || g.hourly);
+      N[k] = { ...x, rows: rows || [] };
+    }
+    N.usage = {};
+    for (const code in v.usage || {}) { const x = v.usage[code]; const g = await parse(x.file); N.usage[code] = { ...x, rows: (g.usage || []).filter(r => r.code === code) }; }
+    N.v = DATA_VERSION;
+    return N;
+  }
   const maxD = rows => { const ds = rows.filter(r => r.date).map(r => +r.date); return ds.length ? new Date(Math.max(...ds)) : null; };
   const mKey = rows => { const d = maxD(rows); return d ? d.getFullYear() * 12 + d.getMonth() : null; };
   const fmtYM = rows => { const d = maxD(rows); return d ? `${d.getFullYear()}年${d.getMonth() + 1}月（〜${d.getMonth() + 1}/${d.getDate()}）` : ''; };
@@ -1148,17 +1179,17 @@ if (typeof module !== 'undefined') module.exports = { extractUsage, usageAgg, pa
       const book = got.find(g => g.cur);
       const raws = got.filter(g => g.raw).sort((a, b) => mKey(b.raw) - mKey(a.raw));
       if (book) {
-        N.cur = { name: book.name, rows: book.cur };
-        N.prev = book.prev.length ? { name: book.name + '（前年シート）', rows: book.prev } : null;
+        N.cur = { name: book.name, rows: book.cur, file: book.file };
+        N.prev = book.prev.length ? { name: book.name + '（前年シート）', rows: book.prev, file: book.file, sheet: 'prev' } : null;
       } else if (raws.length >= 2) {
-        N.cur = { name: raws[0].name, rows: raws[0].raw };
-        N.prev = { name: raws[1].name, rows: raws[1].raw };
+        N.cur = { name: raws[0].name, rows: raws[0].raw, file: raws[0].file };
+        N.prev = { name: raws[1].name, rows: raws[1].raw, file: raws[1].file };
         if (mKey(raws[0].raw) === mKey(raws[1].raw)) notes.push('2つの売上集計表が同じ年月です。前年分か確認してください');
       } else if (raws.length === 1) {
         const r = raws[0];
         // 保存中の当年より古い月なら前年分、それ以外は当年分として差し替え
-        if (N.cur && mKey(r.raw) < mKey(N.cur.rows)) N.prev = { name: r.name, rows: r.raw };
-        else N.cur = { name: r.name, rows: r.raw };
+        if (N.cur && mKey(r.raw) < mKey(N.cur.rows)) N.prev = { name: r.name, rows: r.raw, file: r.file };
+        else N.cur = { name: r.name, rows: r.raw, file: r.file };
       }
       if (!N.cur) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
       // 食材別（理論差）は店舗ごとに追加・差し替え
@@ -1166,21 +1197,21 @@ if (typeof module !== 'undefined') module.exports = { extractUsage, usageAgg, pa
       for (const g of got.filter(g => g.usage)) {
         const by = {};
         g.usage.forEach(r => { (by[r.code] = by[r.code] || []).push(r); });
-        for (const code in by) N.usage[code] = { name: g.name, store: by[code][0].store, rows: by[code] };
+        for (const code in by) N.usage[code] = { name: g.name, store: by[code][0].store, rows: by[code], file: g.file, code };
       }
       const pays = got.filter(g => g.pays), hourly = got.filter(g => g.hourly);
       // メニュー別も日付（期間の終了日）で当年分・前年分を判別
       for (const g of got.filter(g => g.menu)) {
-        if (mKey(g.menu) != null && mKey(g.menu) < mKey(N.cur.rows)) N.pMenu = { name: g.name, rows: g.menu };
-        else N.menu = { name: g.name, rows: g.menu };
+        if (mKey(g.menu) != null && mKey(g.menu) < mKey(N.cur.rows)) N.pMenu = { name: g.name, rows: g.menu, file: g.file };
+        else N.menu = { name: g.name, rows: g.menu, file: g.file };
       }
       // 値引詳細は日付で当年分・前年分を判別（当年より古い月なら前年分）
       for (const g of pays) {
         const k = mKey(g.pays);
-        if (k != null && k < mKey(N.cur.rows)) N.pPays = { name: g.name, rows: g.pays };
-        else N.pays = { name: g.name, rows: g.pays };
+        if (k != null && k < mKey(N.cur.rows)) N.pPays = { name: g.name, rows: g.pays, file: g.file };
+        else N.pays = { name: g.name, rows: g.pays, file: g.file };
       }
-      if (hourly.length) N.hourly = { name: hourly.map(g => g.name).join('・'), rows: hourly.flatMap(g => g.hourly) };
+      if (hourly.length) N.hourly = { name: hourly[0].name, rows: hourly[0].hourly, file: hourly[0].file };
       // 月が合わない保存データは外す
       const ck = mKey(N.cur.rows);
       if (N.prev && mKey(N.prev.rows) !== ck - 12) { notes.push(`前年データ（${fmtYM(N.prev.rows)}）が当年の前年同月ではないため外しました`); N.prev = null; }
@@ -1191,6 +1222,7 @@ if (typeof module !== 'undefined') module.exports = { extractUsage, usageAgg, pa
       if (N.hourly && mKey(N.hourly.rows) !== ck) N.hourly = null;
       for (const code in N.usage) if (mKey(N.usage[code].rows) !== ck) { notes.push(`${N.usage[code].store}の食材別データ（${fmtYM(N.usage[code].rows)}）が当年と別の月のため外しました`); delete N.usage[code]; }
       N.savedAt = Date.now();
+      N.v = DATA_VERSION;
       S = N;
       runSaved();
       let saved = true;
@@ -1479,10 +1511,16 @@ if (typeof module !== 'undefined') module.exports = { extractUsage, usageAgg, pa
   scope = pref.get('scope', 'direct'); areaSel = pref.get('area', ''); detail = pref.get('detail', false); tab = pref.get('tab', 'sales');
   $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
-  store.get().then(v => {
+  store.get().then(async v => {
     if (!v || !v.cur) return;
+    let msg = '前回保存したデータを表示しています。新しいファイルを入れると更新されます。', err = false;
+    if (v.v !== DATA_VERSION) {
+      const N = await reparse(v).catch(e => { console.error(e); return null; });
+      if (N) { v = N; try { await store.put(v); } catch (e) { /* 保存できなくても表示は続ける */ } msg = 'ツールの更新に合わせて、保存してあるファイルを読み直しました。'; }
+      else { msg = '以前の版で保存したデータのため、原価・ロスなど一部の分析が表示されません。お手数ですが、売上集計表などのファイルをもう一度読み込んでください（次回からはツールを更新しても自動で読み直します）。'; err = true; }
+    }
     S = v;
-    try { runSaved(); setStatus(`前回保存したデータを表示しています。新しいファイルを入れると更新されます。`); }
+    try { runSaved(); setStatus(msg, err); }
     catch (e) { console.error(e); setStatus('保存データを表示できませんでした：' + e.message, true); }
   });
   if (typeof XLSX === 'undefined') setStatus('Excel読み込み用ライブラリを取得できませんでした。ネットワーク接続を確認して再読み込みしてください。', true);
