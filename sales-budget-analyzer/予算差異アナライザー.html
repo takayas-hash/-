@@ -1080,6 +1080,22 @@ function areaCostComment(a, stores, ctx) {
   const L = [];
   const P = L.push.bind(L);
   L.push = t => P({ t, d: false });
+  // ブロック長向け：営業部ごとの原価指標
+  if (ctx.multiArea) {
+    const by = {};
+    stores.forEach(x => { const k = x.area || '（営業部なし）'; (by[k] = by[k] || []).push(x); });
+    const parts = Object.entries(by).map(([k, xs]) => {
+      const pre = sum(xs, x => x.preSales), f = [];
+      if (xs.some(x => x.costRate != null)) f.push(`理論原価率${pct(sum(xs, x => x.cost) / pre)}`);
+      if (xs.some(x => x.lossRate != null)) f.push(`ロス率${pct2(sum(xs, x => x.loss) / pre)}`);
+      const wi = xs.filter(x => x.inv);
+      if (wi.length) { const ip = sum(wi, x => x.inv.preSales); f.push(`ロス込理論差${pt2(sum(wi, x => x.inv.cost - x.inv.theory * x.inv.preSales - x.inv.loss) / ip)}${wi.length < xs.length ? `（原価管理表${wi.length}店）` : ''}`); }
+      const wm = xs.filter(x => x.menu);
+      if (wm.length) f.push(`フード${(sum(wm, x => x.menu.foodQty * x.menu.cust) / sum(wm, x => x.menu.cust)).toFixed(1)}皿/人`);
+      return f.length ? `${k}（${xs.length}店）${f.join('・')}` : null;
+    }).filter(Boolean);
+    if (parts.length) L.push(`・営業部別：${parts.join('、')}。`);
+  }
   if (a.lossRate != null) {
     const hi = stores.filter(x => x.lossRate != null).sort((x, y) => y.lossRate - x.lossRate).slice(0, 3);
     const wd = [...a.lossByWd].sort((x, y) => y.loss - x.loss).slice(0, 2);
