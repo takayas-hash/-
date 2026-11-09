@@ -100,7 +100,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年の2ファイル</b>をまとめて選択（ドラッグ＆ドロップ可）<br>CSV・Excelどちらも可。従来の管理用 .xlsm 1つでもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>1時間ごと詳細・値引詳細</b>も一緒に入れると人員と値引の分析が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -156,11 +156,12 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       <div><h3>時間帯別</h3><div class="tbl"><table id="bandTbl"></table></div></div>
     </div>
     <div><h3>曜日別</h3><div class="tbl"><table id="wdTbl"></table></div></div>
+    <div id="discBox" hidden><h3>値引の内訳（上位10）</h3><div class="tbl"><table id="discTbl"></table></div></div>
   </section>
 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
-    <p>エリア共通の不振日＝営業店の7割以上が予算比85%未満だった日。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+    <p>エリア共通の不振日＝営業店の7割以上が予算比85%未満だった日。人時売上＝時間帯の売上÷労働時間（1時間ごと詳細を読み込んだ場合。労働時間が記録されている店舗のみ）。最大の未達時間帯で、人時売上が直営平均より10%以上高ければ「人員が手薄」、10%以上低ければ「人員は足りていて集客側の課題」と判定します。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -245,6 +246,82 @@ function extractRows(XLSX, ws) {
   return out;
 }
 
+/* ===== 追加データ（1時間ごと詳細・値引詳細） ===== */
+function headerIndex(aoa, must) {
+  for (let i = 0; i < Math.min(aoa.length, 10); i++) { const r = aoa[i]; if (r && must.every(m => r.includes(m))) return i; }
+  return -1;
+}
+/** シートの種類を判定：summary（売上集計表）／hourly（1時間ごと詳細）／payment（値引・受取内訳） */
+function sheetKind(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 10 });
+  if (headerIndex(aoa, ['店舗コード', '営業日', '純売上高(合計)']) >= 0) return 'summary';
+  if (headerIndex(aoa, ['店舗コード', '時刻', '売上当年']) >= 0) return 'hourly';
+  if (headerIndex(aoa, ['店舗コード', '受取内訳', '金額']) >= 0) return 'payment';
+  return null;
+}
+function extractHourly(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const hr = headerIndex(aoa, ['店舗コード', '時刻', '売上当年']); const H = aoa[hr];
+  const c = n => H.indexOf(n);
+  const C = { code: c('店舗コード'), date: c('営業指定開始日') >= 0 ? c('営業指定開始日') : c('営業日'), hour: c('時刻'), sales: c('売上当年'), disc: c('値引額'), cust: c('客数当年'), labor: c('労働時間') };
+  const out = [];
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || r[C.code] == null) continue;
+    const date = toDate(r[C.date]); if (!date) continue;
+    let h = num(r[C.hour]); if (h === 0) h = 24;
+    out.push({ code: String(r[C.code]).trim(), date, hour: h, sales: num(r[C.sales]), disc: C.disc >= 0 ? num(r[C.disc]) : 0, cust: C.cust >= 0 ? num(r[C.cust]) : 0, labor: C.labor >= 0 ? num(r[C.labor]) : 0 });
+  }
+  return out;
+}
+function discCategory(name) {
+  if (/従食/.test(name)) return '従業員食事';
+  if (/ﾁﾗｼ|チラシ/.test(name)) return 'チラシ';
+  if (/SNS/i.test(name)) return 'SNS';
+  if (/優待|株主|オーナー/.test(name)) return '優待券';
+  if (/アプリ|警|巡査/.test(name)) return 'アプリ会員';
+  if (/個店/.test(name)) return '個店販促';
+  return 'その他';
+}
+function extractPayments(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const hr = headerIndex(aoa, ['店舗コード', '受取内訳', '金額']); const H = aoa[hr];
+  const c = n => H.indexOf(n);
+  const C = { code: c('店舗コード'), date: c('営業日'), kind: c('受取内訳'), detail: c('内訳詳細'), count: c('件数'), amount: c('金額') };
+  const out = [];
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || r[C.code] == null || String(r[C.kind]) !== '値引') continue;
+    const full = String(r[C.detail] || '不明');
+    const name = full.split('_')[0].trim();
+    out.push({ code: String(r[C.code]).trim(), date: toDate(r[C.date]), name, cat: discCategory(full), count: num(r[C.count]), amount: num(r[C.amount]) });
+  }
+  return out;
+}
+
+/** 追加データを店舗分析に付け足す */
+function enrichStore(s, curRows, hourly, pays, lastDate) {
+  // 値引内訳
+  const ps = pays.filter(p => p.code === s.code && (!p.date || p.date <= lastDate));
+  if (ps.length) {
+    const total = sum(ps, p => p.amount);
+    const byCat = {}, byName = {};
+    ps.forEach(p => {
+      (byCat[p.cat] = byCat[p.cat] || { cat: p.cat, amount: 0, count: 0 }); byCat[p.cat].amount += p.amount; byCat[p.cat].count += p.count;
+      (byName[p.name] = byName[p.name] || { name: p.name, cat: p.cat, amount: 0, count: 0 }); byName[p.name].amount += p.amount; byName[p.name].count += p.count;
+    });
+    s.discDetail = { total, cats: Object.values(byCat).sort((a, b) => b.amount - a.amount), items: Object.values(byName).sort((a, b) => b.amount - a.amount) };
+  }
+  // 時間帯別の労働時間（人時売上）
+  const hs = hourly.filter(h => h.code === s.code && h.date <= lastDate);
+  if (hs.length && sum(hs, h => h.labor) > 0) {
+    const dtOf = {}; curRows.filter(r => r.code === s.code).forEach(r => { dtOf[+r.date] = r.dt; });
+    const g = DAYTYPES.map(() => BANDS.map(() => ({ sales: 0, labor: 0, disc: 0 })));
+    hs.forEach(h => { const ti = DAYTYPES.indexOf(dtOf[+h.date]); const bi = HOUR_TO_BAND[h.hour]; if (ti < 0 || bi == null) return; g[ti][bi].sales += h.sales; g[ti][bi].labor += h.labor; g[ti][bi].disc += h.disc; });
+    s.laborGrid = g;
+    s.laborBand = BANDS.map((b, bi) => ({ sales: sum(g, r => r[bi].sales), labor: sum(g, r => r[bi].labor) }));
+  }
+}
+const mhOf = c => c && c.labor > 0 ? c.sales / (c.labor / 60) : null;
+
 const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
 const isRain = w => /雨|雪/.test(w || '');
 
@@ -315,8 +392,9 @@ function analyzeStore(cur, prev, monthDays) {
   const best = [...daily].sort((a, b) => b.diff - a.diff).slice(0, 3).filter(d => d.diff > 0);
   const closed = act.filter(d => d.sales === 0 && d.budget > 0);
 
-  const disc = sum(act, d => d.disc);
+  const disc = sum(act, d => d.disc), pDisc = sum(prev, d => d.disc);
   return {
+    disc, pDisc, pDiscRate: (pSales + pDisc) ? pDisc / (pSales + pDisc) : null,
     code: cur[0].code, name: cur[0].name,
     days: act.length, monthDays, sales, budget, diff: sales - budget, rate: budget ? sales / budget : null,
     cust, custBudget, custRate: custBudget ? cust / custBudget : null, up, bUp, pUp,
@@ -327,7 +405,9 @@ function analyzeStore(cur, prev, monthDays) {
   };
 }
 
-function analyze(curRows, prevRows) {
+function analyze(curRows, prevRows, extra) {
+  extra = extra || {};
+  const hourly = extra.hourly || [], pays = extra.pays || [];
   if (!curRows.length) throw new Error('当月データがありません');
   // 実績のある最終日まで
   const lastDate = new Date(Math.max(...curRows.filter(r => r.sales > 0).map(r => +r.date)));
@@ -354,10 +434,20 @@ function analyze(curRows, prevRows) {
   cur.forEach(r => { if (r.sales > 0 && r.budget > 0) (byDate[+r.date] = byDate[+r.date] || []).push(r); });
   const commonWeak = Object.entries(byDate).filter(([, rs]) => rs.length >= 3 && rs.filter(r => r.sales / r.budget < 0.85).length / rs.length >= 0.7)
     .map(([k, rs]) => ({ date: new Date(+k), wd: rs[0].wd, dt: rs[0].dt, rate: sum(rs, r => r.sales) / sum(rs, r => r.budget) }));
-  const ctx = { isFullMonth, lastDate, commonWeak };
+  stores.forEach(s => enrichStore(s, cur, hourly, pays, lastDate));
+  // エリア直営平均の人時売上（区分×時間帯）
+  const withLabor = stores.filter(s => s.laborGrid);
+  const areaLabor = withLabor.length ? DAYTYPES.map((_, ti) => BANDS.map((_, bi) => ({ sales: sum(withLabor, s => s.laborGrid[ti][bi].sales), labor: sum(withLabor, s => s.laborGrid[ti][bi].labor) }))) : null;
+  if (pays.length) {
+    const fake = { code: 'AREA' };
+    enrichStore(fake, [], [], pays.map(p => ({ ...p, code: 'AREA' })), lastDate);
+    area.discDetail = fake.discDetail;
+  }
+  area.laborStores = withLabor.length;
+  const ctx = { isFullMonth, lastDate, commonWeak, areaLabor };
   stores.forEach(s => { s.lines = storeComment(s, ctx); });
   area.lines = areaComment(area, stores, ctx);
-  return { stores, area, firstDate, lastDate, isFullMonth, commonWeak };
+  return { stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, hasHourly: hourly.length > 0, hasPays: pays.length > 0 };
 }
 
 /* ===== コメント生成 ===== */
@@ -386,6 +476,10 @@ function storeComment(s, ctx) {
   if (ok) lead = main === 'cust' ? '客数増が達成の主因' : '客単価の上振れが達成の主因';
   else lead = main === 'cust' ? (s.custEff < 0 ? '客数不足が未達の主因' : '単価減が未達の主因') : (s.upEff < 0 ? '客単価の下振れが未達の主因' : '客数不足が未達の主因');
   L.push(`・要因分解：客数要因${sman(s.custEff)}、単価要因${sman(s.upEff)}。${custTxt}、${upTxt}で、${lead}。`);
+  if (s.bUp && s.pUp && Math.abs(s.bUp - s.pUp) / s.pUp >= 0.12)
+    L.push(`　※予算の想定客単価${yen(s.bUp)}は前年実績${yen(s.pUp)}と${syen(s.bUp - s.pUp)}乖離しており、客数予算・売上予算の前提確認が必要。`);
+  const upMatters = s.upEff < 0 || main === 'up';
+  for (const t of unitPriceLines(s)) upMatters ? L.push(t) : L.d(t);
 
   // 2) 曜日区分
   const types = s.byType.filter(t => t.days > 0 && t.budget > 0);
@@ -435,6 +529,17 @@ function storeComment(s, ctx) {
     s.grid.forEach((row, ti) => row.forEach((c, bi) => { const d = c.sales - c.budget; if (c.budget > 0 && (!worstCell || d < worstCell.d)) worstCell = { d, ti, bi, r: c.sales / c.budget }; }));
     if (worstCell && worstCell.d < 0 && Math.abs(worstCell.d) >= Math.abs(s.diff) * 0.2)
       L.push(`　最大の未達ポイントは「${DAYTYPES[worstCell.ti]}×${BANDS[worstCell.bi].name}」で${pct(worstCell.r)}・${sman(worstCell.d)}。`);
+    if (worstCell && worstCell.d < 0 && s.laborGrid && ctx.areaLabor) {
+      const mh = mhOf(s.laborGrid[worstCell.ti][worstCell.bi]), amh = mhOf(ctx.areaLabor[worstCell.ti][worstCell.bi]);
+      if (mh && amh) {
+        const ratio = mh / amh;
+        s.staffing = ratio >= 1.1 ? 'short' : ratio <= 0.9 ? 'enough' : 'normal';
+        const head = `　同時間帯の人時売上は${yen(mh)}（エリア直営平均${yen(amh)}）`;
+        if (s.staffing === 'short') L.push(`${head}と高く、人員が手薄で案内・提供が追いつかず機会損失した可能性。`);
+        else if (s.staffing === 'enough') L.push(`${head}と人員は確保できており、来店数（集客）側の課題。`);
+        else L.d(`${head}で人員配置は平均並み。`);
+      }
+    }
   }
 
   // 4) 天候
@@ -447,7 +552,7 @@ function storeComment(s, ctx) {
 
   // 5) 特異日
   const cw = (ctx.commonWeak || []).map(c => {
-    const d = s.daily.find(x => +x.date === +c.date); return d ? { ...c, diff: d.diff, srate: d.rate } : null; }).filter(Boolean);
+    const d = s.daily.find(x => +x.date === +c.date); return d ? { ...c, diff: d.diff, srate: d.rate } : null; }).filter(c => c && c.srate < 0.9);
   if (cw.length) {
     const cwDiff = sum(cw, c => Math.min(0, c.diff));
     if (cwDiff < 0) L.push(`・エリア共通の不振日：${cw.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})自店${pct(c.srate)}`).join('、')}は全店的に低調で外部要因の可能性（自店影響${sman(cwDiff)}${!ok && s.diff < 0 ? `、除くと予算比${pct((s.sales - sum(cw, c => s.daily.find(x => +x.date === +c.date).sales)) / (s.budget - sum(cw, c => s.daily.find(x => +x.date === +c.date).budget)))}` : ''}）。`);
@@ -467,6 +572,25 @@ function storeComment(s, ctx) {
   return L.filter(x => x && x.t);
 }
 
+/** 客単価の前年差を「値引前単価」と「値引」に分解し、値引内訳を添える */
+function unitPriceLines(s) {
+  const out = [];
+  if (s.hasPrev && s.pCust && s.cust) {
+    const preUp = (s.sales + s.disc) / s.cust, pPreUp = (s.pSales + s.pDisc) / s.pCust;
+    const dpc = s.disc / s.cust, pDpc = s.pDisc / s.pCust;
+    const discEff = -(dpc - pDpc), preEff = preUp - pPreUp;
+    if (Math.abs(discEff) >= 15 || Math.abs(preEff) >= 30)
+      out.push(`　客単価は前年比${syen(s.up - s.pUp)}：値引前単価${syen(preEff)}、値引${discEff < 0 ? '増加' : '減少'}で${syen(discEff)}（値引率${pct(s.pDiscRate)}→${pct(s.discRate)}）。`);
+  }
+  const dd = s.discDetail;
+  if (dd && dd.total > 0) {
+    const cats = dd.cats.slice(0, 3).map(c => `${c.cat}${Math.round(c.amount / dd.total * 100)}%${c.cat === 'チラシ' ? `（利用${c.count}件）` : ''}`).join('、');
+    const top = dd.items[0];
+    out.push(`　値引内訳（税込${man(dd.total)}）：${cats}。最大は「${top.name}」${man(top.amount)}・${top.count}件。`);
+  }
+  return out;
+}
+
 function suggestions(s, ok, main, wc, bNeg) {
   const a = [];
   const weak = bNeg.filter(b => b.rate != null && b.rate < 0.97).map(b => b.key);
@@ -481,6 +605,7 @@ function suggestions(s, ok, main, wc, bNeg) {
     if (weak.includes('lunch') && !a.some(x => x.includes('ランチ'))) a.push('ランチ帯の集客施策');
     if (!a.length) a.push('客数予算比の低い曜日に販促を集中');
   }
+  if (s.staffing === 'short') a.unshift('ピーク帯の人員配置見直し（シフトを厚く・案内/バッシング専任を配置）');
   if (s.up < s.bUp * 0.98) a.push('客単価改善（上位コース提案・ドリンク/デザートの追加オーダー声掛け）');
   if (s.weather.rainDays && s.weather.rainRate != null && s.weather.fineRate != null && s.weather.rainRate - s.weather.fineRate <= -0.05) a.push('雨天時の来店動機（雨の日施策・テイクアウト訴求）');
   if (ok && !a.length) a.push('好調要因（時間帯・曜日）の再現と、弱い時間帯への横展開');
@@ -503,13 +628,17 @@ function areaComment(a, stores, ctx) {
   if (t.length) L.push(`・曜日区分：${t.map(x => `${x.key}${pct(x.rate)}`).join('、')}。`);
   const b = a.byBand.filter(x => x.budget > a.budget * 0.02).sort((x, y) => x.diff - y.diff);
   if (b.length) L.push(`・時間帯：${b.map(x => `${x.name}${pct(x.rate)}（${sman(x.diff)}）`).join('、')}。`);
+  if (a.discDetail) {
+    const dd = a.discDetail;
+    L.push(`・値引：税込${man(dd.total)}（値引率${pct(a.discRate)}${a.pDiscRate != null ? `、前年${pct(a.pDiscRate)}` : ''}）。内訳は${dd.cats.slice(0, 4).map(c => `${c.cat}${Math.round(c.amount / dd.total * 100)}%`).join('、')}。`);
+  }
   if (ctx.commonWeak.length) L.push(`・エリア共通の不振日：${ctx.commonWeak.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})${pct(c.rate)}`).join('、')}。全店で低調のため外部要因（天候・行事・競合等）の確認を。`);
   return L;
 }
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
 
 </script>
 <script>
@@ -568,9 +697,12 @@ if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SH
     const wsC = findSheet(wb, SHEET_CUR);
     if (wsC) return { name: f.name, cur: extractRows(XLSX, wsC), prev: extractRows(XLSX, findSheet(wb, SHEET_PREV)) };
     for (const n of wb.SheetNames) {
-      try { const rows = extractRows(XLSX, wb.Sheets[n]); if (rows.length) return { name: f.name, raw: rows }; } catch (e) { /* 次のシートへ */ }
+      const ws = wb.Sheets[n], k = sheetKind(XLSX, ws);
+      if (k === 'summary') return { name: f.name, raw: extractRows(XLSX, ws) };
+      if (k === 'hourly') return { name: f.name, hourly: extractHourly(XLSX, ws) };
+      if (k === 'payment') return { name: f.name, pays: extractPayments(XLSX, ws) };
     }
-    throw new Error(`「${f.name}」に売上集計表の見出し（店舗コード・営業日・純売上高(合計)・売上月次予算）が見つかりません`);
+    throw new Error(`「${f.name}」の種類が判別できません（売上集計表・1時間ごと詳細・値引詳細のいずれかを選んでください）`);
   }
   const ym = rows => { const d = new Date(Math.max(...rows.map(r => +r.date))); return `${d.getFullYear()}年${d.getMonth() + 1}月`; };
 
@@ -589,13 +721,17 @@ if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SH
         msg = `「${book.name}」を分析しました`;
       } else {
         // 元データ：日付の新しい方を当年、古い方を前年とする
+        if (!got.some(g => g.raw)) throw new Error('売上集計表（当年）が含まれていません。1時間ごと詳細・値引詳細は売上集計表と一緒に選んでください');
         const raws = got.filter(g => g.raw).sort((a, b) => Math.max(...b.raw.map(r => +r.date)) - Math.max(...a.raw.map(r => +r.date)));
         curRows = raws[0].raw; prevRows = raws[1] ? raws[1].raw : [];
         msg = `当年：「${raws[0].name}」（${ym(curRows)}）` + (raws[1] ? `／前年：「${raws[1].name}」（${ym(prevRows)}）` : '') + ' を分析しました';
         if (raws[1] && ym(curRows) === ym(prevRows)) msg += '。※2つのファイルが同じ年月です。前年分のファイルか確認してください';
         if (raws[1] && curRows.length && prevRows.length && sum(curRows, r => r.budget) === 0) msg += '。※当年ファイルに予算が入っていません';
       }
-      run(curRows, prevRows);
+      const hourly = got.filter(g => g.hourly).flatMap(g => g.hourly), pays = got.filter(g => g.pays).flatMap(g => g.pays);
+      const extras = [hourly.length ? '1時間ごと詳細' : '', pays.length ? '値引詳細' : ''].filter(Boolean);
+      if (extras.length) msg = msg.replace(/ ?を分析しました/, `＋${extras.join('・')} を分析しました`);
+      run(curRows, prevRows, { hourly, pays });
       $('sampleBanner').hidden = true;
       setStatus(`${msg}（${R.stores.length}店舗${prevRows.length ? '' : '・前年データなし：前年比と時間帯の予算按分は当年の構成比で代用'}）。`);
     } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
@@ -606,8 +742,8 @@ if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SH
   ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 
-  function run(curRows, prevRows) {
-    R = analyze(curRows, prevRows);
+  function run(curRows, prevRows, extra) {
+    R = analyze(curRows, prevRows, extra);
     const worst = [...R.stores].sort((a, b) => a.diff - b.diff)[0];
     cur = worst ? worst.code : null;
     render();
@@ -660,7 +796,7 @@ if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SH
         if (!days || c.budget < 1000) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
         const r = c.sales / c.budget, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
         const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
-        const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}|按分予算 ${man(c.budget)}|予算比 ${pct(r)}・${sman(c.sales - c.budget)}${c.pSales ? `|前年比 ${pct(c.sales / c.pSales)}` : ''}`;
+        const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}|按分予算 ${man(c.budget)}|予算比 ${pct(r)}・${sman(c.sales - c.budget)}${c.pSales ? `|前年比 ${pct(c.sales / c.pSales)}` : ''}${s.laborGrid && mhOf(s.laborGrid[ti][bi]) ? `|人時売上 ${yen(mhOf(s.laborGrid[ti][bi]))}${R.areaLabor && mhOf(R.areaLabor[ti][bi]) ? `（直営平均 ${yen(mhOf(R.areaLabor[ti][bi]))}）` : ''}` : ''}`;
         h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${sman(c.sales - c.budget).replace('万円', '万')}</span></div>`;
       });
     });
@@ -694,8 +830,14 @@ if (typeof module !== 'undefined') module.exports = { commentText, SHEET_CUR, SH
     // 表
     $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th></tr></thead><tbody>`
       + s.byType.filter(t => t.days).map(t => `<tr><td>${t.key}</td><td class="n">${t.days}${s.hasPrev ? `<span class="muted small">（前年${t.pDays}）</span>` : ''}</td><td class="n">${man(t.sales)}</td><td class="n ${cls(t.diff)}">${pct(t.rate)}</td><td class="n ${cls(t.diff)}">${sman(t.diff)}</td><td class="n">${man(t.avg)}</td><td class="n">${t.pAvg ? man(t.pAvg) : '－'}</td></tr>`).join('') + '</tbody>';
-    $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th></tr></thead><tbody>`
-      + s.byBand.map(b => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td></tr>`).join('') + '</tbody>';
+    $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th>${s.laborBand ? '<th class="n">人時売上</th><th class="n">直営平均</th>' : ''}</tr></thead><tbody>`
+      + s.byBand.map((b, bi) => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td>${s.laborBand ? `<td class="n">${mhOf(s.laborBand[bi]) ? yen(mhOf(s.laborBand[bi])) : '－'}</td><td class="n muted">${R.areaLabor ? yen(mhOf({ sales: sum(R.areaLabor, r => r[bi].sales), labor: sum(R.areaLabor, r => r[bi].labor) }) || 0) : '－'}</td>` : ''}</tr>`).join('') + '</tbody>';
+    // 値引内訳
+    const dd = s.discDetail;
+    $('discBox').hidden = !dd;
+    if (dd) $('discTbl').innerHTML = `<thead><tr><th>値引の種類</th><th>分類</th><th class="n">件数</th><th class="n">金額（税込）</th><th class="n">構成比</th></tr></thead><tbody>`
+      + dd.items.slice(0, 10).map(it => `<tr><td>${esc(it.name)}</td><td class="muted">${esc(it.cat)}</td><td class="n">${it.count.toLocaleString('ja-JP')}</td><td class="n">${yen(it.amount)}</td><td class="n">${pct(it.amount / dd.total)}</td></tr>`).join('')
+      + `<tr><td><b>合計</b></td><td></td><td class="n">${sum(dd.items, i => i.count).toLocaleString('ja-JP')}</td><td class="n"><b>${yen(dd.total)}</b></td><td class="n">1人あたり ${yen(dd.total / s.cust)}</td></tr></tbody>`;
     $('wdTbl').innerHTML = `<thead><tr><th></th>${s.byWd.map(w => `<th class="n">${w.key}</th>`).join('')}</tr></thead><tbody>`
       + `<tr><td>日数</td>${s.byWd.map(w => `<td class="n">${w.days}</td>`).join('')}</tr>`
       + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
