@@ -44,6 +44,9 @@ header.top p { margin: 4px 0 0; max-width: 60ch; }
 #file { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .status { min-height: 1.4em; }
 .status.err { color: var(--neg-ink); font-weight: 700; }
+.saved { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+.saved ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; font-size: .88rem; }
+.saved li { overflow-wrap: anywhere; }
 .banner { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; font-size: .9rem; }
 
 section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
@@ -105,7 +108,17 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </label>
   </header>
   <div class="status small" id="status" role="status"></div>
-  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店舗）です。実際のExcelを読み込むと置き換わります。</div>
+  <div class="saved" id="saved" hidden>
+    <div class="row" style="align-items:flex-start">
+      <div style="min-width:0"><div class="label">保存中のデータ <span id="savedAt" class="muted" style="letter-spacing:0;font-weight:400"></span></div><ul id="savedList"></ul></div>
+      <div class="row" style="gap:8px">
+        <button type="button" class="btn ghost" id="clearBtn">保存データを削除</button>
+        <span id="clearAsk" hidden class="small">削除しますか？ <button type="button" class="btn" id="clearYes">削除する</button> <button type="button" class="btn ghost" id="clearNo">やめる</button></span>
+      </div>
+    </div>
+    <p class="small muted" style="margin:6px 0 0">データはこのブラウザ内だけに保存されます。毎日の更新は当年の売上集計表だけ入れればOK（前年・値引詳細はそのまま残ります。値引詳細は月が変わると外れます）。</p>
+  </div>
+  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店舗）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
 
   <section class="card" id="areaCard">
     <div class="row">
@@ -687,6 +700,53 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
   }
   const ym = rows => { const d = new Date(Math.max(...rows.map(r => +r.date))); return `${d.getFullYear()}年${d.getMonth() + 1}月`; };
 
+  /* ---------- 保存（このブラウザの IndexedDB。外部には送信しない） ---------- */
+  const store = {
+    db: null,
+    open() {
+      if (this.db) return Promise.resolve(this.db);
+      return new Promise((res, rej) => {
+        try {
+          const q = indexedDB.open('budget-analyzer', 1);
+          q.onupgradeneeded = () => q.result.createObjectStore('kv');
+          q.onsuccess = () => { this.db = q.result; res(this.db); };
+          q.onerror = () => rej(q.error);
+        } catch (e) { rej(e); }
+      });
+    },
+    async tx(mode, fn) {
+      const db = await this.open();
+      return new Promise((res, rej) => { const x = db.transaction('kv', mode); const r = fn(x.objectStore('kv')); x.oncomplete = () => res(r && r.result); x.onerror = () => rej(x.error); });
+    },
+    get() { return this.tx('readonly', s => s.get('data')).catch(() => null); },
+    put(v) { return this.tx('readwrite', s => s.put(v, 'data')); },
+    clear() { return this.tx('readwrite', s => s.delete('data')); },
+  };
+  const pref = {
+    get(k, d) { try { const v = localStorage.getItem('ba.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('ba.' + k, JSON.stringify(v)); } catch (e) { /* 保存できない環境では無視 */ } },
+  };
+  let S = null; // 保存中のデータ {cur, prev, pays, hourly, savedAt}
+  const maxD = rows => { const ds = rows.filter(r => r.date).map(r => +r.date); return ds.length ? new Date(Math.max(...ds)) : null; };
+  const mKey = rows => { const d = maxD(rows); return d ? d.getFullYear() * 12 + d.getMonth() : null; };
+  const fmtYM = rows => { const d = maxD(rows); return d ? `${d.getFullYear()}年${d.getMonth() + 1}月（〜${d.getMonth() + 1}/${d.getDate()}）` : ''; };
+  const fmtTime = d => `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  function renderSaved() {
+    const box = $('saved');
+    if (!S || !S.cur) { box.hidden = true; return; }
+    const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
+    $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細', S.pays);
+    $('savedAt').textContent = `保存日時 ${fmtTime(new Date(S.savedAt))}`;
+    $('clearAsk').hidden = true; $('clearBtn').hidden = false;
+    box.hidden = false;
+  }
+  function runSaved() {
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [] });
+    $('sampleBanner').hidden = true;
+    renderSaved();
+  }
+
   async function handleFiles(list) {
     const files = [...list].filter(Boolean);
     if (!files.length) return;
@@ -695,26 +755,38 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
     try {
       const got = [];
       for (const f of files) got.push(await readOne(f));
-      let curRows, prevRows, msg;
+      const N = S ? { ...S } : {};
+      const notes = [];
       const book = got.find(g => g.cur);
+      const raws = got.filter(g => g.raw).sort((a, b) => mKey(b.raw) - mKey(a.raw));
       if (book) {
-        curRows = book.cur; prevRows = book.prev;
-        msg = `「${book.name}」を分析しました`;
-      } else {
-        // 元データ：日付の新しい方を当年、古い方を前年とする
-        if (!got.some(g => g.raw)) throw new Error('売上集計表（当年）が含まれていません。1時間ごと詳細・値引詳細は売上集計表と一緒に選んでください');
-        const raws = got.filter(g => g.raw).sort((a, b) => Math.max(...b.raw.map(r => +r.date)) - Math.max(...a.raw.map(r => +r.date)));
-        curRows = raws[0].raw; prevRows = raws[1] ? raws[1].raw : [];
-        msg = `当年：「${raws[0].name}」（${ym(curRows)}）` + (raws[1] ? `／前年：「${raws[1].name}」（${ym(prevRows)}）` : '') + ' を分析しました';
-        if (raws[1] && ym(curRows) === ym(prevRows)) msg += '。※2つのファイルが同じ年月です。前年分のファイルか確認してください';
-        if (raws[1] && curRows.length && prevRows.length && sum(curRows, r => r.budget) === 0) msg += '。※当年ファイルに予算が入っていません';
+        N.cur = { name: book.name, rows: book.cur };
+        N.prev = book.prev.length ? { name: book.name + '（前年シート）', rows: book.prev } : null;
+      } else if (raws.length >= 2) {
+        N.cur = { name: raws[0].name, rows: raws[0].raw };
+        N.prev = { name: raws[1].name, rows: raws[1].raw };
+        if (mKey(raws[0].raw) === mKey(raws[1].raw)) notes.push('2つの売上集計表が同じ年月です。前年分か確認してください');
+      } else if (raws.length === 1) {
+        const r = raws[0];
+        // 保存中の当年より古い月なら前年分、それ以外は当年分として差し替え
+        if (N.cur && mKey(r.raw) < mKey(N.cur.rows)) N.prev = { name: r.name, rows: r.raw };
+        else N.cur = { name: r.name, rows: r.raw };
       }
-      const hourly = got.filter(g => g.hourly).flatMap(g => g.hourly), pays = got.filter(g => g.pays).flatMap(g => g.pays);
-      const extras = [pays.length ? '値引詳細' : ''].filter(Boolean);
-      if (extras.length) msg = msg.replace(/ ?を分析しました/, `＋${extras.join('・')} を分析しました`);
-      run(curRows, prevRows, { hourly, pays });
-      $('sampleBanner').hidden = true;
-      setStatus(`${msg}（${R.stores.length}店舗${prevRows.length ? '' : '・前年データなし：前年比と時間帯の予算按分は当年の構成比で代用'}）。`);
+      if (!N.cur) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
+      const pays = got.filter(g => g.pays), hourly = got.filter(g => g.hourly);
+      if (pays.length) N.pays = { name: pays.map(g => g.name).join('・'), rows: pays.flatMap(g => g.pays) };
+      if (hourly.length) N.hourly = { name: hourly.map(g => g.name).join('・'), rows: hourly.flatMap(g => g.hourly) };
+      // 月が合わない保存データは外す
+      const ck = mKey(N.cur.rows);
+      if (N.prev && mKey(N.prev.rows) !== ck - 12) { notes.push(`前年データ（${fmtYM(N.prev.rows)}）が当年の前年同月ではないため外しました`); N.prev = null; }
+      if (N.pays && mKey(N.pays.rows) !== ck) { notes.push(`値引詳細（${fmtYM(N.pays.rows)}）が当年と別の月のため外しました`); N.pays = null; }
+      if (N.hourly && mKey(N.hourly.rows) !== ck) N.hourly = null;
+      N.savedAt = Date.now();
+      S = N;
+      runSaved();
+      let saved = true;
+      try { await store.put(S); } catch (e) { saved = false; }
+      setStatus(`${files.length}ファイルを読み込みました（${R.stores.length}店舗）。` + (saved ? 'このブラウザに保存したので、次回はファイルなしで表示されます。' : '※この環境ではブラウザに保存できませんでした。') + (notes.length ? '　' + notes.join('。') + '。' : ''));
     } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
   }
   $('file').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
@@ -835,9 +907,9 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
 
   /* ---------- 操作 ---------- */
   $('storeSel').addEventListener('change', e => { cur = e.target.value; render(); });
-  function setMode(d) { detail = d; $('mShort').setAttribute('aria-pressed', !d); $('mLong').setAttribute('aria-pressed', d); render(); }
+  function setMode(d) { detail = d; pref.set('detail', d); $('mShort').setAttribute('aria-pressed', !d); $('mLong').setAttribute('aria-pressed', d); render(); }
   function setScope(sc) {
-    scope = sc; $('scDirect').setAttribute('aria-pressed', sc === 'direct'); $('scAll').setAttribute('aria-pressed', sc === 'all');
+    scope = sc; pref.set('scope', sc); $('scDirect').setAttribute('aria-pressed', sc === 'direct'); $('scAll').setAttribute('aria-pressed', sc === 'all');
     try { if (last) run(...last); } catch (e) { setStatus('切り替えできませんでした：' + e.message, true); }
   }
   $('scDirect').addEventListener('click', () => setScope('direct'));
@@ -858,7 +930,25 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
     copy(lines.map(([n, c]) => `${n}\t${q(c)}`).join('\n'), e.currentTarget);
   });
 
+  $('clearBtn').addEventListener('click', () => { $('clearBtn').hidden = true; $('clearAsk').hidden = false; });
+  $('clearNo').addEventListener('click', () => { $('clearAsk').hidden = true; $('clearBtn').hidden = false; });
+  $('clearYes').addEventListener('click', async () => {
+    try { await store.clear(); } catch (e) { /* なし */ }
+    S = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
+    setStatus('保存データを削除しました。');
+  });
+
+  // 前回の表示設定
+  scope = pref.get('scope', 'direct'); detail = pref.get('detail', false);
+  $('scDirect').setAttribute('aria-pressed', scope === 'direct'); $('scAll').setAttribute('aria-pressed', scope === 'all');
+  $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
+  store.get().then(v => {
+    if (!v || !v.cur) return;
+    S = v;
+    try { runSaved(); setStatus(`前回保存したデータを表示しています。新しいファイルを入れると更新されます。`); }
+    catch (e) { console.error(e); setStatus('保存データを表示できませんでした：' + e.message, true); }
+  });
   if (typeof XLSX === 'undefined') setStatus('Excel読み込み用ライブラリを取得できませんでした。ネットワーク接続を確認して再読み込みしてください。', true);
 })();
 </script>
