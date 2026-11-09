@@ -100,7 +100,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>1時間ごと詳細・値引詳細</b>も一緒に入れると人員と値引の分析が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>も一緒に入れると値引内訳の分析が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -161,7 +161,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
-    <p>エリア共通の不振日＝営業店の7割以上が予算比85%未満だった日。人時売上＝時間帯の売上÷労働時間（1時間ごと詳細を読み込んだ場合。労働時間が記録されている店舗のみ）。最大の未達時間帯で、人時売上が直営平均より10%以上高ければ「人員が手薄」、10%以上低ければ「人員は足りていて集客側の課題」と判定します。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+    <p>エリア共通の不振日＝営業店の7割以上が予算比85%未満だった日。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -529,17 +529,6 @@ function storeComment(s, ctx) {
     s.grid.forEach((row, ti) => row.forEach((c, bi) => { const d = c.sales - c.budget; if (c.budget > 0 && (!worstCell || d < worstCell.d)) worstCell = { d, ti, bi, r: c.sales / c.budget }; }));
     if (worstCell && worstCell.d < 0 && Math.abs(worstCell.d) >= Math.abs(s.diff) * 0.2)
       L.push(`　最大の未達ポイントは「${DAYTYPES[worstCell.ti]}×${BANDS[worstCell.bi].name}」で${pct(worstCell.r)}・${sman(worstCell.d)}。`);
-    if (worstCell && worstCell.d < 0 && s.laborGrid && ctx.areaLabor) {
-      const mh = mhOf(s.laborGrid[worstCell.ti][worstCell.bi]), amh = mhOf(ctx.areaLabor[worstCell.ti][worstCell.bi]);
-      if (mh && amh) {
-        const ratio = mh / amh;
-        s.staffing = ratio >= 1.1 ? 'short' : ratio <= 0.9 ? 'enough' : 'normal';
-        const head = `　同時間帯の人時売上は${yen(mh)}（エリア直営平均${yen(amh)}）`;
-        if (s.staffing === 'short') L.push(`${head}と高く、人員が手薄で案内・提供が追いつかず機会損失した可能性。`);
-        else if (s.staffing === 'enough') L.push(`${head}と人員は確保できており、来店数（集客）側の課題。`);
-        else L.d(`${head}で人員配置は平均並み。`);
-      }
-    }
   }
 
 
@@ -700,7 +689,7 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
         if (raws[1] && curRows.length && prevRows.length && sum(curRows, r => r.budget) === 0) msg += '。※当年ファイルに予算が入っていません';
       }
       const hourly = got.filter(g => g.hourly).flatMap(g => g.hourly), pays = got.filter(g => g.pays).flatMap(g => g.pays);
-      const extras = [hourly.length ? '1時間ごと詳細' : '', pays.length ? '値引詳細' : ''].filter(Boolean);
+      const extras = [pays.length ? '値引詳細' : ''].filter(Boolean);
       if (extras.length) msg = msg.replace(/ ?を分析しました/, `＋${extras.join('・')} を分析しました`);
       run(curRows, prevRows, { hourly, pays });
       $('sampleBanner').hidden = true;
@@ -767,7 +756,7 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
         if (!days || c.budget < 1000) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
         const r = c.sales / c.budget, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
         const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
-        const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}|按分予算 ${man(c.budget)}|予算比 ${pct(r)}・${sman(c.sales - c.budget)}${c.pSales ? `|前年比 ${pct(c.sales / c.pSales)}` : ''}${s.laborGrid && mhOf(s.laborGrid[ti][bi]) ? `|人時売上 ${yen(mhOf(s.laborGrid[ti][bi]))}${R.areaLabor && mhOf(R.areaLabor[ti][bi]) ? `（直営平均 ${yen(mhOf(R.areaLabor[ti][bi]))}）` : ''}` : ''}`;
+        const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}|按分予算 ${man(c.budget)}|予算比 ${pct(r)}・${sman(c.sales - c.budget)}${c.pSales ? `|前年比 ${pct(c.sales / c.pSales)}` : ''}`;
         h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${sman(c.sales - c.budget).replace('万円', '万')}</span></div>`;
       });
     });
@@ -800,8 +789,8 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
     // 表
     $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th></tr></thead><tbody>`
       + s.byType.filter(t => t.days).map(t => `<tr><td>${t.key}</td><td class="n">${t.days}${s.hasPrev ? `<span class="muted small">（前年${t.pDays}）</span>` : ''}</td><td class="n">${man(t.sales)}</td><td class="n ${cls(t.diff)}">${pct(t.rate)}</td><td class="n ${cls(t.diff)}">${sman(t.diff)}</td><td class="n">${man(t.avg)}</td><td class="n">${t.pAvg ? man(t.pAvg) : '－'}</td></tr>`).join('') + '</tbody>';
-    $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th>${s.laborBand ? '<th class="n">人時売上</th><th class="n">直営平均</th>' : ''}</tr></thead><tbody>`
-      + s.byBand.map((b, bi) => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td>${s.laborBand ? `<td class="n">${mhOf(s.laborBand[bi]) ? yen(mhOf(s.laborBand[bi])) : '－'}</td><td class="n muted">${R.areaLabor ? yen(mhOf({ sales: sum(R.areaLabor, r => r[bi].sales), labor: sum(R.areaLabor, r => r[bi].labor) }) || 0) : '－'}</td>` : ''}</tr>`).join('') + '</tbody>';
+    $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th></tr></thead><tbody>`
+      + s.byBand.map((b, bi) => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td></tr>`).join('') + '</tbody>';
     // 値引内訳
     const dd = s.discDetail;
     $('discBox').hidden = !dd;
