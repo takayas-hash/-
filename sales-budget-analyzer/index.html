@@ -103,7 +103,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>も一緒に入れると値引内訳の分析が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細（当年・前年）</b>も一緒に入れると値引内訳と前年比較が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -116,7 +116,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         <span id="clearAsk" hidden class="small">削除しますか？ <button type="button" class="btn" id="clearYes">削除する</button> <button type="button" class="btn ghost" id="clearNo">やめる</button></span>
       </div>
     </div>
-    <p class="small muted" style="margin:6px 0 0">データはこのブラウザ内だけに保存されます。毎日の更新は当年の売上集計表だけ入れればOK（前年・値引詳細はそのまま残ります。値引詳細は月が変わると外れます）。</p>
+    <p class="small muted" style="margin:6px 0 0">データはこのブラウザ内だけに保存されます。毎日の更新は当年の売上集計表だけ入れればOK（前年・値引詳細はそのまま残ります。月が変わると、月の合わないデータは外れます）。</p>
   </div>
   <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店舗）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
 
@@ -173,12 +173,13 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       <div><h3>時間帯別</h3><div class="tbl"><table id="bandTbl"></table></div></div>
     </div>
     <div><h3>曜日別</h3><div class="tbl"><table id="wdTbl"></table></div></div>
+    <div id="discCatBox" hidden><h3>値引の前年比較（分類別）</h3><p class="small muted" style="margin:2px 0 8px">利用件数＝値引が使われた会計の数。客単価への影響＝1人あたり値引（税抜換算）の前年差で、値引が増えるとマイナス。</p><div class="tbl"><table id="discCatTbl"></table></div></div>
     <div id="discBox" hidden><h3>値引の内訳（上位10）</h3><div class="tbl"><table id="discTbl"></table></div></div>
   </section>
 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
-    <p>共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は既定で直営店のみ（売上集計表の「FC区分」が「直営」で始まる店舗）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は既定で直営店のみ（売上集計表の「FC区分」が「直営」で始まる店舗）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -316,18 +317,43 @@ function extractPayments(XLSX, ws) {
 }
 
 /** 追加データを店舗分析に付け足す */
-function enrichStore(s, curRows, hourly, pays, lastDate) {
-  // 値引内訳
+function discAgg(ps) {
+  if (!ps.length) return null;
+  const total = sum(ps, p => p.amount), count = sum(ps, p => p.count);
+  const byCat = {}, byName = {};
+  ps.forEach(p => {
+    (byCat[p.cat] = byCat[p.cat] || { cat: p.cat, amount: 0, count: 0 }); byCat[p.cat].amount += p.amount; byCat[p.cat].count += p.count;
+    (byName[p.name] = byName[p.name] || { name: p.name, cat: p.cat, amount: 0, count: 0 }); byName[p.name].amount += p.amount; byName[p.name].count += p.count;
+  });
+  return { total, count, cats: Object.values(byCat).sort((a, b) => b.amount - a.amount), items: Object.values(byName).sort((a, b) => b.amount - a.amount) };
+}
+/** 値引の前年比較：分類ごとの件数差・金額差・1人あたり値引差（税抜換算） */
+function discCompare(s) {
+  const c = s.discDetail, p = s.pDiscDetail;
+  if (!c || !p || !s.cust || !s.pCust) return null;
+  // 税込の値引額を、売上集計表の税抜値引に合わせて換算
+  const kC = c.total ? s.disc / c.total : 1, kP = p.total ? s.pDisc / p.total : 1;
+  const cats = [...new Set([...c.cats.map(x => x.cat), ...p.cats.map(x => x.cat)])].map(cat => {
+    const a = c.cats.find(x => x.cat === cat) || { amount: 0, count: 0 }, b = p.cats.find(x => x.cat === cat) || { amount: 0, count: 0 };
+    return { cat, count: a.count, pCount: b.count, dCount: a.count - b.count, amount: a.amount, pAmount: b.amount, dAmount: a.amount - b.amount,
+      // 客単価への影響（値引が増えるとマイナス）
+      upEff: -(a.amount * kC / s.cust - b.amount * kP / s.pCust) };
+  });
+  const gp = s.groups ? s.cust / s.groups : null; // 1組あたり人数
+  // 従業員食事は来店につながらないため誘客の件数から除く
+  cats.forEach(x => { x.lure = x.cat !== '従業員食事'; });
+  const lure = cats.filter(x => x.lure);
+  const count = sum(lure, x => x.count), pCount = sum(lure, x => x.pCount);
+  return { cats, count, pCount, dCount: count - pCount, gp };
+}
+
+function enrichStore(s, curRows, hourly, pays, lastDate, pPays) {
+  // 値引内訳（当年・前年）
   const ps = pays.filter(p => p.code === s.code && (!p.date || p.date <= lastDate));
-  if (ps.length) {
-    const total = sum(ps, p => p.amount);
-    const byCat = {}, byName = {};
-    ps.forEach(p => {
-      (byCat[p.cat] = byCat[p.cat] || { cat: p.cat, amount: 0, count: 0 }); byCat[p.cat].amount += p.amount; byCat[p.cat].count += p.count;
-      (byName[p.name] = byName[p.name] || { name: p.name, cat: p.cat, amount: 0, count: 0 }); byName[p.name].amount += p.amount; byName[p.name].count += p.count;
-    });
-    s.discDetail = { total, cats: Object.values(byCat).sort((a, b) => b.amount - a.amount), items: Object.values(byName).sort((a, b) => b.amount - a.amount) };
-  }
+  if (ps.length) s.discDetail = discAgg(ps);
+  const pps = (pPays || []).filter(p => p.code === s.code && (!p.date || p.date.getDate() <= lastDate.getDate()));
+  if (pps.length) s.pDiscDetail = discAgg(pps);
+  s.discCmp = discCompare(s);
   // 時間帯別の労働時間（人時売上）
   const hs = hourly.filter(h => h.code === s.code && h.date <= lastDate);
   if (hs.length && sum(hs, h => h.labor) > 0) {
@@ -412,6 +438,7 @@ function analyzeStore(cur, prev, monthDays) {
 
   const disc = sum(act, d => d.disc), pDisc = sum(prev, d => d.disc);
   return {
+    groups: sum(act, d => d.groups), pGroups: sum(prev, d => d.groups),
     disc, pDisc, pDiscRate: (pSales + pDisc) ? pDisc / (pSales + pDisc) : null,
     code: cur[0].code, name: cur[0].name,
     days: act.length, monthDays, sales, budget, diff: sales - budget, rate: budget ? sales / budget : null,
@@ -425,7 +452,7 @@ function analyzeStore(cur, prev, monthDays) {
 
 function analyze(curRows, prevRows, extra) {
   extra = extra || {};
-  let hourly = extra.hourly || [], pays = extra.pays || [];
+  let hourly = extra.hourly || [], pays = extra.pays || [], pPays = extra.pPays || [];
   // 対象店舗の絞り込み（FC区分が「直営…」の店舗のみ）
   const scope = extra.scope || 'all';
   const hasFc = curRows.some(r => r.fc);
@@ -436,6 +463,7 @@ function analyze(curRows, prevRows, extra) {
     prevRows = prevRows.filter(r => codes.has(r.code));
     hourly = hourly.filter(r => codes.has(r.code));
     pays = pays.filter(r => codes.has(r.code));
+    pPays = pPays.filter(r => codes.has(r.code));
   }
   const scopeLabel = scope === 'direct' && hasFc ? '直営計' : 'エリア計';
   if (!curRows.length) throw new Error('当月データがありません');
@@ -468,14 +496,13 @@ function analyze(curRows, prevRows, extra) {
       && rs.filter(r => r.sales / r.budget < 0.85).length / rs.length >= 0.85
       && sum(rs, r => r.sales) / sum(rs, r => r.budget) <= typeRate[rs[0].dt] - 0.15)
     .map(([k, rs]) => ({ date: new Date(+k), wd: rs[0].wd, dt: rs[0].dt, rate: sum(rs, r => r.sales) / sum(rs, r => r.budget) }));
-  stores.forEach(s => enrichStore(s, cur, hourly, pays, lastDate));
+  stores.forEach(s => enrichStore(s, cur, hourly, pays, lastDate, pPays));
   // エリア直営平均の人時売上（区分×時間帯）
   const withLabor = stores.filter(s => s.laborGrid);
   const areaLabor = withLabor.length ? DAYTYPES.map((_, ti) => BANDS.map((_, bi) => ({ sales: sum(withLabor, s => s.laborGrid[ti][bi].sales), labor: sum(withLabor, s => s.laborGrid[ti][bi].labor) }))) : null;
   if (pays.length) {
-    const fake = { code: 'AREA' };
-    enrichStore(fake, [], [], pays.map(p => ({ ...p, code: 'AREA' })), lastDate);
-    area.discDetail = fake.discDetail;
+    area.code = 'AREA';
+    enrichStore(area, [], [], pays.map(p => ({ ...p, code: 'AREA' })), lastDate, pPays.map(p => ({ ...p, code: 'AREA' })));
   }
   area.laborStores = withLabor.length;
   const ctx = { isFullMonth, lastDate, commonWeak, areaLabor, scopeLabel };
@@ -513,7 +540,7 @@ function storeComment(s, ctx) {
   if (s.bUp && s.pUp && Math.abs(s.bUp - s.pUp) / s.pUp >= 0.12)
     L.push(`　※予算の想定客単価${yen(s.bUp)}は前年実績${yen(s.pUp)}と${syen(s.bUp - s.pUp)}乖離しており、客数予算・売上予算の前提確認が必要。`);
   const upMatters = s.upEff < 0 || main === 'up';
-  for (const t of unitPriceLines(s)) upMatters ? L.push(t) : L.d(t);
+  for (const t of unitPriceLines(s)) typeof t === 'object' ? L.push(t) : upMatters ? L.push(t) : L.d(t);
 
   // 2) 曜日区分
   const types = s.byType.filter(t => t.days > 0 && t.budget > 0);
@@ -603,6 +630,21 @@ function unitPriceLines(s) {
     const top = dd.items[0];
     out.push(`　値引内訳（税込${man(dd.total)}）：${cats}。最大は「${top.name}」${man(top.amount)}・${top.count}件。`);
   }
+  return out.concat(discYoyLines(s));
+}
+
+/** 値引の前年差（誘客の差と客単価への影響） */
+function discYoyLines(s) {
+  const d = s.discCmp; if (!d) return [];
+  const out = [];
+  const movers = [...d.cats].filter(c => c.lure && c.dCount !== 0).sort((a, b) => Math.abs(b.dCount) - Math.abs(a.dCount)).slice(0, 3)
+    .map(c => `${c.cat}${c.dCount > 0 ? '+' : '▲'}${Math.abs(c.dCount).toLocaleString('ja-JP')}件`);
+  let line = `・値引による誘客（従業員食事を除く）：利用${d.count.toLocaleString('ja-JP')}件（前年${d.pCount.toLocaleString('ja-JP')}件、${d.dCount >= 0 ? '+' : '▲'}${Math.abs(d.dCount).toLocaleString('ja-JP')}件）`;
+  if (movers.length) line += `。増減の大きい分類：${movers.join('、')}`;
+  if (d.gp && d.dCount) line += `。1組${d.gp.toFixed(1)}人換算で客数${d.dCount > 0 ? '+' : '▲'}${Math.round(Math.abs(d.dCount) * d.gp).toLocaleString('ja-JP')}人相当（推計）`;
+  out.push({ t: line + '。', d: false });
+  const eff = [...d.cats].filter(c => Math.abs(c.upEff) >= 3).sort((a, b) => Math.abs(b.upEff) - Math.abs(a.upEff)).slice(0, 3);
+  if (eff.length) out.push({ t: `　客単価への影響（1人あたり値引の前年差）：${eff.map(c => `${c.cat}${syen(c.upEff)}`).join('、')}。`, d: true });
   return out;
 }
 
@@ -625,6 +667,7 @@ function areaComment(a, stores, ctx) {
   if (a.discDetail) {
     const dd = a.discDetail;
     L.push(`・値引：税込${man(dd.total)}（値引率${pct(a.discRate)}${a.pDiscRate != null ? `、前年${pct(a.pDiscRate)}` : ''}）。内訳は${dd.cats.slice(0, 4).map(c => `${c.cat}${Math.round(c.amount / dd.total * 100)}%`).join('、')}。`);
+    for (const x of discYoyLines(a)) if (!x.d) L.push(x.t);
   }
   if (ctx.commonWeak.length) L.push(`・共通の不振日：${ctx.commonWeak.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})${pct(c.rate)}`).join('、')}。対象店の大半が低調のため外部要因の確認を。`);
   return L;
@@ -715,8 +758,10 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
       });
     },
     async tx(mode, fn) {
-      const db = await this.open();
-      return new Promise((res, rej) => { const x = db.transaction('kv', mode); const r = fn(x.objectStore('kv')); x.oncomplete = () => res(r && r.result); x.onerror = () => rej(x.error); });
+      // 環境によっては応答が返らないため3秒で打ち切る
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000));
+      const db = await Promise.race([this.open(), timeout]);
+      return Promise.race([timeout, new Promise((res, rej) => { const x = db.transaction('kv', mode); const r = fn(x.objectStore('kv')); x.oncomplete = () => res(r && r.result); x.onerror = () => rej(x.error); })]);
     },
     get() { return this.tx('readonly', s => s.get('data')).catch(() => null); },
     put(v) { return this.tx('readwrite', s => s.put(v, 'data')); },
@@ -736,13 +781,13 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
     const box = $('saved');
     if (!S || !S.cur) { box.hidden = true; return; }
     const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
-    $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細', S.pays);
+    $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays);
     $('savedAt').textContent = `保存日時 ${fmtTime(new Date(S.savedAt))}`;
     $('clearAsk').hidden = true; $('clearBtn').hidden = false;
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [] });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [] });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -774,12 +819,18 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
       }
       if (!N.cur) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
       const pays = got.filter(g => g.pays), hourly = got.filter(g => g.hourly);
-      if (pays.length) N.pays = { name: pays.map(g => g.name).join('・'), rows: pays.flatMap(g => g.pays) };
+      // 値引詳細は日付で当年分・前年分を判別（当年より古い月なら前年分）
+      for (const g of pays) {
+        const k = mKey(g.pays);
+        if (k != null && k < mKey(N.cur.rows)) N.pPays = { name: g.name, rows: g.pays };
+        else N.pays = { name: g.name, rows: g.pays };
+      }
       if (hourly.length) N.hourly = { name: hourly.map(g => g.name).join('・'), rows: hourly.flatMap(g => g.hourly) };
       // 月が合わない保存データは外す
       const ck = mKey(N.cur.rows);
       if (N.prev && mKey(N.prev.rows) !== ck - 12) { notes.push(`前年データ（${fmtYM(N.prev.rows)}）が当年の前年同月ではないため外しました`); N.prev = null; }
       if (N.pays && mKey(N.pays.rows) !== ck) { notes.push(`値引詳細（${fmtYM(N.pays.rows)}）が当年と別の月のため外しました`); N.pays = null; }
+      if (N.pPays && mKey(N.pPays.rows) !== ck - 12) { notes.push(`前年の値引詳細（${fmtYM(N.pPays.rows)}）が前年同月ではないため外しました`); N.pPays = null; }
       if (N.hourly && mKey(N.hourly.rows) !== ck) N.hourly = null;
       N.savedAt = Date.now();
       S = N;
@@ -889,9 +940,15 @@ if (typeof module !== 'undefined') module.exports = { sheetKind, extractHourly, 
     // 値引内訳
     const dd = s.discDetail;
     $('discBox').hidden = !dd;
-    if (dd) $('discTbl').innerHTML = `<thead><tr><th>値引の種類</th><th>分類</th><th class="n">件数</th><th class="n">金額（税込）</th><th class="n">構成比</th></tr></thead><tbody>`
-      + dd.items.slice(0, 10).map(it => `<tr><td>${esc(it.name)}</td><td class="muted">${esc(it.cat)}</td><td class="n">${it.count.toLocaleString('ja-JP')}</td><td class="n">${yen(it.amount)}</td><td class="n">${pct(it.amount / dd.total)}</td></tr>`).join('')
-      + `<tr><td><b>合計</b></td><td></td><td class="n">${sum(dd.items, i => i.count).toLocaleString('ja-JP')}</td><td class="n"><b>${yen(dd.total)}</b></td><td class="n">1人あたり ${yen(dd.total / s.cust)}</td></tr></tbody>`;
+    const dc = s.discCmp, pd = s.pDiscDetail;
+    const dlt = (v, unit) => { v = Math.round(v); return `<span class="${v < 0 ? 'neg' : v > 0 ? 'pos' : ''}">${v > 0 ? '+' : v < 0 ? '▲' : '±'}${Math.abs(v).toLocaleString('ja-JP')}${unit}</span>`; };
+    $('discCatBox').hidden = !dc;
+    if (dc) $('discCatTbl').innerHTML = `<thead><tr><th>分類</th><th class="n">利用件数</th><th class="n">前年</th><th class="n">件数差</th><th class="n">値引額（税込）</th><th class="n">前年</th><th class="n">客単価への影響</th></tr></thead><tbody>`
+      + [...dc.cats].sort((x, y) => y.amount - x.amount).map(c => `<tr><td>${esc(c.cat)}${c.lure ? '' : ' <span class="muted small">誘客対象外</span>'}</td><td class="n">${c.count.toLocaleString('ja-JP')}</td><td class="n muted">${c.pCount.toLocaleString('ja-JP')}</td><td class="n">${c.lure ? dlt(c.dCount, '件') : '<span class="muted">－</span>'}</td><td class="n">${yen(c.amount)}</td><td class="n muted">${yen(c.pAmount)}</td><td class="n">${dlt(c.upEff, '円')}</td></tr>`).join('')
+      + `<tr><td><b>誘客計</b> <span class="muted small">従食除く</span></td><td class="n"><b>${dc.count.toLocaleString('ja-JP')}</b></td><td class="n muted">${dc.pCount.toLocaleString('ja-JP')}</td><td class="n">${dlt(dc.dCount, '件')}</td><td class="n"><b>${yen(dd.total)}</b><div class="small muted">全分類</div></td><td class="n muted">${yen(pd.total)}</td><td class="n">${dlt(sum(dc.cats, c => c.upEff), '円')}</td></tr></tbody>`;
+    if (dd) $('discTbl').innerHTML = `<thead><tr><th>値引の種類</th><th>分類</th><th class="n">件数</th>${pd ? '<th class="n">前年件数</th>' : ''}<th class="n">金額（税込）</th><th class="n">構成比</th></tr></thead><tbody>`
+      + dd.items.slice(0, 10).map(it => { const pi = pd && pd.items.find(x => x.name === it.name); return `<tr><td>${esc(it.name)}</td><td class="muted">${esc(it.cat)}</td><td class="n">${it.count.toLocaleString('ja-JP')}</td>${pd ? `<td class="n muted">${pi ? pi.count.toLocaleString('ja-JP') : '－'}</td>` : ''}<td class="n">${yen(it.amount)}</td><td class="n">${pct(it.amount / dd.total)}</td></tr>`; }).join('')
+      + `<tr><td><b>合計</b></td><td></td><td class="n">${dd.count.toLocaleString('ja-JP')}</td>${pd ? `<td class="n muted">${pd.count.toLocaleString('ja-JP')}</td>` : ''}<td class="n"><b>${yen(dd.total)}</b></td><td class="n">1人あたり ${yen(dd.total / s.cust)}</td></tr></tbody>`;
     $('wdTbl').innerHTML = `<thead><tr><th></th>${s.byWd.map(w => `<th class="n">${w.key}</th>`).join('')}</tr></thead><tbody>`
       + `<tr><td>日数</td>${s.byWd.map(w => `<td class="n">${w.days}</td>`).join('')}</tr>`
       + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
