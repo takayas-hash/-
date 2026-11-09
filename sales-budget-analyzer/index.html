@@ -129,7 +129,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年も入れると、値引・原価・喫食量・コース構成の分析が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -217,6 +217,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <div id="discBox" hidden><h3>値引の内訳（上位10）</h3><div class="tbl"><table id="discTbl"></table></div></div>
     </div>
     <div class="stack" data-tab="cost" hidden>
+    <div id="invBox">
+      <h3>原価率理論差の推移（原価管理表）</h3>
+      <div id="invBody"></div>
+    </div>
     <div id="yoyBox">
       <div class="row"><h3>皿数・喫食量の前年比較（食べ放題フード・1人あたり）</h3>
         <div class="seg" role="group" aria-label="指標"><button type="button" id="yQty" aria-pressed="true">皿数</button><button type="button" id="yG" aria-pressed="false">喫食量</button><button type="button" id="yCost" aria-pressed="false">原価</button></div></div>
@@ -240,7 +244,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
-    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。理論差（概算）＝仕入率（仕入高÷純売上高）−理論原価率。月末在庫の増減を含むため月ごとにぶれます。ロス率＝廃棄額÷純売上高（売上集計表の「廃棄額」列）。突出日＝その店の1日平均ロスの3倍以上かつ1万円以上の日。原価率＝原価÷純売上高（売上集計表の「原価」列。メニュー別の予定原価×販売数の合計と一致）。原価率の平均との差は「1人あたり原価（喫食）」と「客単価」の影響に分解しています。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。原価分析の率はすべて値引前売上高（純売上高＋値引）が分母で、社内の原価管理表と同じ基準です。原価管理表を読み込むと、原価率理論差（値引前原価率−理論原価率）とロス込原価率理論差（さらに値引前ロス率を引いた値）は原価管理表の数字を使います。読み込んでいない場合の理論差（概算）＝仕入率−理論原価率。月末在庫の増減を含むため月ごとにぶれます。ロス率＝廃棄額÷純売上高（売上集計表の「廃棄額」列）。突出日＝その店の1日平均ロスの3倍以上かつ1万円以上の日。原価率＝原価÷純売上高（売上集計表の「原価」列。メニュー別の予定原価×販売数の合計と一致）。原価率の平均との差は「1人あたり原価（喫食）」と「客単価」の影響に分解しています。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -338,6 +342,7 @@ function headerIndex(aoa, must) {
 /** シートの種類を判定：summary（売上集計表）／hourly（1時間ごと詳細）／payment（値引・受取内訳） */
 function sheetKind(XLSX, ws) {
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 10 });
+  if (headerIndex(aoa, ['値引後売上高', '理論原価率', '原価率理論差']) >= 0) return 'inventory';
   if (headerIndex(aoa, ['店舗コード', '営業日', '純売上高(合計)']) >= 0) return 'summary';
   if (headerIndex(aoa, ['店舗コード', '時刻', '売上当年']) >= 0) return 'hourly';
   if (headerIndex(aoa, ['店舗コード', '受取内訳', '金額']) >= 0) return 'payment';
@@ -359,6 +364,49 @@ function extractHourly(XLSX, ws) {
   }
   return out;
 }
+/* ===== 原価管理表（店舗ごとのシート：棚卸・原価率理論差・13か月推移） ===== */
+function isInventorySheet(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 10 });
+  return headerIndex(aoa, ['値引後売上高', '理論原価率', '原価率理論差']) >= 0;
+}
+function extractInventory(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const hr = headerIndex(aoa, ['値引後売上高', '理論原価率', '原価率理論差']); if (hr < 0) return null;
+  const H = aoa[hr].map(h => String(h || '').replace(/\s/g, '')), V = aoa[hr + 1] || [];
+  const g = k => { const i = H.indexOf(k); return i >= 0 && typeof V[i] === 'number' ? V[i] : null; };
+  if (g('値引後売上高') == null || !g('値引後売上高')) return null; // 空のテンプレート
+  const label = k => aoa.find(r => r && r.some(v => String(v || '').trim() === k));
+  const storeRow = label('店舗：'), monthRow = label('年月：');
+  const valAfter = (row, k) => { if (!row) return null; const i = row.findIndex(v => String(v || '').trim() === k); return row.slice(i + 1).find(v => v != null && v !== ''); };
+  const storeTxt = String(valAfter(storeRow, '店舗：') || '');
+  const m = storeTxt.match(/^\s*0*(\d+)\s*(.*)$/);
+  const month = toDate(valAfter(monthRow, '年月：'));
+  // 大分類別の仕入・原価（「食材費」ブロック）
+  const cats = [];
+  const fi = aoa.findIndex(r => r && r.some(v => String(v || '').trim() === '食材費'));
+  if (fi >= 0) {
+    const names = aoa[fi + 1] || [];
+    const rowOf = k => aoa.slice(fi + 1, fi + 8).find(r => r && r.some(v => String(v || '').trim() === k));
+    const buyR = rowOf('仕入金額'), costR = rowOf('原価金額');
+    names.forEach((n, j) => { if (n && typeof n === 'string' && !/^(食材費|仕入金額)$/.test(n)) { const b = buyR ? num(buyR[j]) : 0, c = costR ? num(costR[j]) : 0; if (b || c) cats.push({ cat: n.trim(), buy: b, cost: c }); } });
+  }
+  // 13か月の推移（「原価推移」ブロック）
+  const trend = [];
+  const ti = aoa.findIndex(r => r && r.some(v => String(v || '').trim() === '原価推移'));
+  if (ti >= 0) {
+    const months = aoa[ti + 1] || [];
+    const rowOf = k => aoa.slice(ti + 1, ti + 9).find(r => r && r.some(v => String(v || '').trim() === k));
+    const rT = rowOf('理論原価率'), rP = rowOf('値引前原価率'), rL = rowOf('値引前ロス率'), rG = rowOf('ロス込原価率理論差'), rI = rowOf('棚卸高');
+    months.forEach((mv, j) => { const d = toDate(mv); if (d && rT && typeof rT[j] === 'number') trend.push({ date: d, theory: rT[j], pre: rP ? rP[j] : null, loss: rL ? rL[j] : null, gapExLoss: rG ? rG[j] : null, inv: rI ? rI[j] : null }); });
+  }
+  return {
+    code: m ? m[1] : storeTxt.trim(), store: m ? m[2].replace(/^焼肉きんぐ/, '').trim() : '', date: month ? new Date(month.getFullYear(), month.getMonth() + 1, 0) : null,
+    sales: g('値引後売上高'), preSales: g('値引前売上高'), open: g('前月棚卸高'), buy: g('当月仕入高'), close: g('当月棚卸高'), cost: g('原価'),
+    realRate: g('実質原価率'), preRate: g('値引前原価率'), loss: g('ロス金額'), lossPre: g('値引前ロス率'), theory: g('理論原価率'),
+    gap: g('原価率理論差'), gapAmt: g('原価理論差'), gapExLoss: g('ロス込原価率理論差'), lend: g('貸出食材費'), borrow: g('借入食材費'), cats, trend,
+  };
+}
+
 /* ===== メニュー別（原価・喫食量・皿数） ===== */
 /** 中分類 → 区分：食べ放題フード／食べ放題ドリンク／単品／コース／対象外 */
 function menuGroup(cat) {
@@ -567,9 +615,11 @@ function analyzeStore(cur, prev, monthDays) {
     .map(d => ({ date: d.date, wd: d.wd, loss: d.loss, rate: d.loss / d.sales }));
   const lossByWd = WEEKDAYS.map(w => ({ key: w, loss: sum(act.filter(d => d.wd === w), d => d.loss), days: act.filter(d => d.wd === w).length }));
   return {
-    buy, pBuy, buyRate: buy && sales ? buy / sales : null, pBuyRate: pBuy && pSales ? pBuy / pSales : null,
-    loss, pLoss, lossRate: sales && act.some(d => d.loss) ? loss / sales : null, pLossRate: pSales && prev.some(d => d.loss) ? pLoss / pSales : null, lossSpikes, lossByWd, avgLoss,
-    cost, pCost, costRate: cost && sales ? cost / sales : null, pCostRate: pCost && pSales ? pCost / pSales : null,
+    // 原価分析は社内の原価管理表に合わせて「値引前売上高（純売上高＋値引）」を基準にする
+    preSales: sales + disc, pPreSales: pSales + pDisc,
+    buy, pBuy, buyRate: buy && sales ? buy / (sales + disc) : null, pBuyRate: pBuy && pSales ? pBuy / (pSales + pDisc) : null,
+    loss, pLoss, lossRate: sales && act.some(d => d.loss) ? loss / (sales + disc) : null, pLossRate: pSales && prev.some(d => d.loss) ? pLoss / (pSales + pDisc) : null, lossSpikes, lossByWd, avgLoss,
+    cost, pCost, costRate: cost && sales ? cost / (sales + disc) : null, pCostRate: pCost && pSales ? pCost / (pSales + pDisc) : null,
     groups: sum(act, d => d.groups), pGroups: sum(prev, d => d.groups),
     disc, pDisc, pDiscRate: (pSales + pDisc) ? pDisc / (pSales + pDisc) : null,
     code: cur[0].code, name: cur[0].name, area: cur[0].area || '',
@@ -599,7 +649,7 @@ function scopeCounts(rows, area) {
 
 function analyze(curRows, prevRows, extra) {
   extra = extra || {};
-  let hourly = extra.hourly || [], pays = extra.pays || [], pPays = extra.pPays || [], menu = extra.menu || [], pMenu = extra.pMenu || [];
+  let hourly = extra.hourly || [], pays = extra.pays || [], pPays = extra.pPays || [], menu = extra.menu || [], pMenu = extra.pMenu || [], inv = extra.inv || [];
   // 対象店舗の絞り込み：営業部、直営／FC／全店
   const scope = extra.scope || 'all', areaSel = extra.area || '';
   const hasFc = curRows.some(r => r.fc);
@@ -612,6 +662,7 @@ function analyze(curRows, prevRows, extra) {
   pays = pays.filter(r => pick.has(r.code));
   pPays = pPays.filter(r => pick.has(r.code));
   menu = menu.filter(r => pick.has(r.code));
+  inv = inv.filter(r => pick.has(r.code));
   pMenu = pMenu.filter(r => pick.has(r.code));
   const multiArea = !areaSel && areas.length > 1;
   const areaPart = areaSel ? areaSel + '・' : multiArea ? '全営業部・' : '';
@@ -658,21 +709,32 @@ function analyze(curRows, prevRows, extra) {
   }
   area.laborStores = withLabor.length;
   // メニュー別：店舗ごとの1人あたり指標と、対象店平均（ベンチマーク）
+  // 原価管理表（正式な原価率理論差）
+  stores.forEach(s => { s.inv = inv.find(r => r.code === s.code) || null; });
+  const withInv = stores.filter(s => s.inv);
+  if (withInv.length) {
+    const T = (f) => sum(withInv, s => f(s.inv));
+    const pre = T(i => i.preSales), cost = T(i => i.cost), th = T(i => i.theory * i.preSales), loss = T(i => i.loss);
+    area.inv = { preSales: pre, cost, preRate: cost / pre, theory: th / pre, gap: (cost - th) / pre, gapAmt: cost - th, lossPre: loss / pre, gapExLoss: (cost - th - loss) / pre, open: T(i => i.open), close: T(i => i.close), n: withInv.length };
+    const catSum = {}; withInv.forEach(s => s.inv.cats.forEach(c => { catSum[c.cat] = (catSum[c.cat] || 0) + c.cost; }));
+    area.inv.catRate = Object.fromEntries(Object.entries(catSum).map(([k, v]) => [k, v / pre]));
+  }
   // 理論差（概算）＝仕入率−理論原価率
   stores.concat([area]).forEach(s => { s.gapRate = s.buyRate != null && s.costRate != null ? s.buyRate - s.costRate : null; s.pGapRate = s.pBuyRate != null && s.pCostRate != null ? s.pBuyRate - s.pCostRate : null; });
   const withGap = stores.filter(s => s.gapRate != null);
-  area.benchGapRate = withGap.length ? (sum(withGap, s => s.buy) - sum(withGap, s => s.cost)) / sum(withGap, s => s.sales) : null;
+  area.benchGapRate = withGap.length ? (sum(withGap, s => s.buy) - sum(withGap, s => s.cost)) / sum(withGap, s => s.preSales) : null;
   const withLoss = stores.filter(s => s.lossRate != null);
-  area.benchLossRate = withLoss.length ? sum(withLoss, s => s.loss) / sum(withLoss, s => s.sales) : null;
+  area.benchLossRate = withLoss.length ? sum(withLoss, s => s.loss) / sum(withLoss, s => s.preSales) : null;
   if (menu.length) {
     stores.forEach(s => { s.menu = menuAgg(menu.filter(r => r.code === s.code)); s.pMenuAgg = menuAgg(pMenu.filter(r => r.code === s.code)); });
     area.menu = menuAgg(menu); area.pMenuAgg = menuAgg(pMenu);
     const withMenu = stores.filter(s => s.menu && s.costRate != null);
-    area.benchCostRate = withMenu.length ? sum(withMenu, s => s.cost) / sum(withMenu, s => s.sales) : null;
-    area.benchUp = withMenu.length ? sum(withMenu, s => s.sales) / sum(withMenu, s => s.menu.cust) : null;
+    area.benchCostRate = withMenu.length ? sum(withMenu, s => s.cost) / sum(withMenu, s => s.preSales) : null;
+    area.benchUp = withMenu.length ? sum(withMenu, s => s.preSales) / sum(withMenu, s => s.menu.cust) : null;
   }
   const ctx = { isFullMonth, lastDate, commonWeak, areaLabor, scopeLabel, multiArea, area, nStores: stores.length };
   stores.forEach(s => { s.lines = storeComment(s, ctx); s.costLines = costComment(s, ctx); });
+  area.hasInv = withInv.length > 0;
   area.lines = areaComment(area, stores, ctx);
   area.costLines = areaCostComment(area, stores, ctx);
   return { stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0,  hasPays: pays.length > 0 };
@@ -804,7 +866,7 @@ function costLines(s, ctx) {
   const bench = ctx.nStores > 1;
   const bRate = ctx.area.benchCostRate, bUp = ctx.area.benchUp;
   if (s.costRate != null) {
-    let t = `・原価：原価率${pct(s.costRate)}`;
+    let t = `・原価：理論原価率${pct(s.costRate)}`;
     const cmp = [];
     if (bench && bRate != null) cmp.push(`対象店平均${pct(bRate)}・${pt(s.costRate - bRate)}`);
     if (s.pCostRate != null) cmp.push(`前年${pct(s.pCostRate)}・${pt(s.costRate - s.pCostRate)}`);
@@ -812,15 +874,16 @@ function costLines(s, ctx) {
     t += `。1人あたり原価${yen(m.costPP)}`;
     // 平均との差を「1人あたり原価（喫食）」と「客単価」に分解
     if (bench && bRate != null && bUp) {
-      const up = s.sales / m.cust, cppA = bRate * bUp;
+      const up = s.preSales / m.cust, cppA = bRate * bUp;
       const effEat = (m.costPP - cppA) / bUp, effUp = m.costPP / up - m.costPP / bUp;
       if (Math.abs(s.costRate - bRate) >= 0.003) t += `。平均との差は、喫食（1人あたり原価）で${pt(effEat)}、客単価で${pt(effUp)}`;
     }
     // 前年差も同様に分解（売上集計表の前年の原価・客数から）
     if (s.pCostRate != null && s.pCust && s.cust && Math.abs(s.costRate - s.pCostRate) >= 0.003) {
       const cpp = s.cost / s.cust, pCpp = s.pCost / s.pCust;
-      const effEat = (cpp - pCpp) / s.pUp, effUp = cpp / s.up - cpp / s.pUp;
-      t += `。前年差は、1人あたり原価${syen(cpp - pCpp)}で${pt(effEat)}、客単価${syen(s.up - s.pUp)}で${pt(effUp)}`;
+      const up = s.preSales / s.cust, pUp = s.pPreSales / s.pCust;
+      const effEat = (cpp - pCpp) / pUp, effUp = cpp / up - cpp / pUp;
+      t += `。前年差は、1人あたり原価${syen(cpp - pCpp)}で${pt(effEat)}、値引前客単価${syen(up - pUp)}で${pt(effUp)}`;
     }
     out.push({ t: t + '。', d: false });
   }
@@ -930,18 +993,53 @@ function areaComment(a, stores, ctx) {
 function costComment(s, ctx) {
   const L = [];
   const head = [];
-  if (s.costRate != null) head.push(`原価率${pct(s.costRate)}`);
+  if (s.inv) head.push(`値引前原価率${pct2(s.inv.preRate)}`);
+  if (s.costRate != null) head.push(`理論原価率${pct(s.costRate)}`);
   if (s.lossRate != null) head.push(`ロス率${pct2(s.lossRate)}`);
-  if (s.buyRate != null) head.push(`仕入率${pct(s.buyRate)}`);
+  if (s.inv) head.push(`ロス込原価率理論差${pt2(s.inv.gapExLoss)}`);
+  else if (s.buyRate != null) head.push(`仕入率${pct(s.buyRate)}`);
   if (!head.length) return [{ t: '原価のデータがありません（売上集計表の「原価」「仕入高」「廃棄額」列とメニュー別データを読み込むと表示されます）。', d: false }];
   L.push({ t: `【原価】${head.join('／')}`, d: false });
   for (const x of costLines(s, ctx)) L.push(x);
   for (const x of lossLines(s, ctx)) L.push(x);
-  for (const x of gapLines(s, ctx)) L.push(x);
+  for (const x of (s.inv ? invLines(s, ctx) : gapLines(s, ctx))) L.push(x);
   return L;
 }
 const shortItem = n => n.replace(/\s+/g, ' ').trim();
 const unitTxt = (q, u) => `${(Math.round(q * 10) / 10).toLocaleString('ja-JP')}${u}`;
+const pt2 = v => Math.abs(v) < 0.00005 ? '±0.00pt' : (v >= 0 ? '+' : '▲') + Math.abs(v * 100).toFixed(2) + 'pt';
+const avgOf = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+/** 原価管理表による原価率理論差（正式） */
+function invLines(s, ctx) {
+  const i = s.inv, A = ctx.area && ctx.area.inv;
+  const out = [];
+  const g3 = avgOf(i.trend.slice(-3).map(x => x.gapExLoss).filter(v => v != null));
+  const g12 = avgOf(i.trend.slice(0, -1).map(x => x.gapExLoss).filter(v => v != null));
+  const cmp = [g3 != null ? `直近3か月平均${pt2(g3)}` : '', ctx.nStores > 1 && A ? `対象店${pt2(A.gapExLoss)}` : ''].filter(Boolean).join('、');
+  let t = `・原価率理論差：値引前原価率${pct2(i.preRate)}−理論原価率${pct2(i.theory)}＝${pt2(i.gap)}（${sman(i.gapAmt)}）。ロス率${pct2(i.lossPre)}を除いたロス込原価率理論差は${pt2(i.gapExLoss)}${cmp ? `（${cmp}）` : ''}`;
+  if (i.gapExLoss <= -0.005) t += '。理論より使用が少ない（盛り付け不足・仕入や移動の計上漏れ・棚卸の過大計上などの可能性）';
+  else if (i.gapExLoss >= 0.005) t += '。理論より使用が多い（盛り付け過多・未計上のロス・棚卸の過少計上などの可能性）';
+  out.push({ t: t + '。', d: false });
+  // 推移：前年同月から当月までの傾向
+  if (i.trend.length >= 6 && g12 != null) {
+    const neg = i.trend.filter(x => x.gapExLoss != null && x.gapExLoss <= -0.005).length, posN = i.trend.filter(x => x.gapExLoss != null && x.gapExLoss >= 0.005).length;
+    let tr = `　推移：過去${i.trend.length - 1}か月平均${pt2(g12)}`;
+    if (neg >= i.trend.length * 0.75) tr += `。${i.trend.length}か月中${neg}か月で▲0.5pt以下と、理論より少ない状態が続いており、単月の棚卸のぶれではなく恒常的な傾向`;
+    else if (posN >= i.trend.length * 0.75) tr += `。${i.trend.length}か月中${posN}か月で+0.5pt以上と、理論より多い状態が続いている`;
+    else if (Math.abs(i.gapExLoss - g12) >= 0.008) tr += `。今月は平時より${i.gapExLoss < g12 ? 'マイナス' : 'プラス'}に${Math.abs((i.gapExLoss - g12) * 100).toFixed(2)}pt振れている`;
+    out.push({ t: tr + '。', d: false });
+  }
+  if (i.open && i.close) {
+    const ch = (i.close - i.open) / i.open;
+    out.push({ t: `　棚卸高${man(i.close)}（前月${man(i.open)}・${sman(i.close - i.open)}）${Math.abs(ch) >= 0.1 ? '。棚卸の増減が大きく、単月の理論差がぶれやすい月' : ''}。`, d: Math.abs(ch) < 0.1 });
+  }
+  if (A && A.catRate && ctx.nStores > 1 && i.preSales) {
+    const diffs = i.cats.map(c => ({ cat: c.cat, r: c.cost / i.preSales, a: A.catRate[c.cat] })).filter(c => c.a != null && Math.abs(c.r - c.a) >= 0.003).sort((x, y) => (y.r - y.a) - (x.r - x.a));
+    if (diffs.length) out.push({ t: `　大分類別の原価比（値引前売上比）で平均との差が大きい：${diffs.slice(0, 3).map(c => `${c.cat}${pct(c.r)}（平均${pct(c.a)}）`).join('、')}。`, d: true });
+  }
+  if ((i.lend || 0) !== 0 || (i.borrow || 0) !== 0) out.push({ t: `　店舗間の食材の貸し借り：貸出${man(Math.abs(i.lend || 0))}・借入${man(i.borrow || 0)}。`, d: true });
+  return out;
+}
 /** 理論差（概算）：仕入率−理論原価率。ロスとそれ以外（在庫の増減・使用量の差など）に分ける */
 function gapLines(s, ctx) {
   if (s.gapRate == null) return [];
@@ -964,12 +1062,17 @@ function areaCostComment(a, stores, ctx) {
   }
   if (a.menu) {
     const m = a.menu, P = a.pMenuAgg;
-    const yoyTxt = a.pCostRate != null && a.pCust ? `（前年${pct(a.pCostRate)}・${pt(a.costRate - a.pCostRate)}。1人あたり原価${syen(a.cost / a.cust - a.pCost / a.pCust)}、客単価${syen(a.up - a.pUp)}）` : '';
-    L.push(`・原価：原価率${pct(a.costRate)}${yoyTxt}。1人あたり食べ放題フード${m.foodQty.toFixed(1)}皿・${Math.round(m.foodG).toLocaleString('ja-JP')}g${P ? `（前年${P.foodQty.toFixed(1)}皿・${Math.round(P.foodG).toLocaleString('ja-JP')}g）` : ''}、精肉${m.meatQty.toFixed(2)}皿、原価${yen(m.costPP)}。`);
+    const yoyTxt = a.pCostRate != null && a.pCust ? `（前年${pct(a.pCostRate)}・${pt(a.costRate - a.pCostRate)}。1人あたり原価${syen(a.cost / a.cust - a.pCost / a.pCust)}、値引前客単価${syen(a.preSales / a.cust - a.pPreSales / a.pCust)}）` : '';
+    L.push(`・原価：理論原価率${pct(a.costRate)}${yoyTxt}。1人あたり食べ放題フード${m.foodQty.toFixed(1)}皿・${Math.round(m.foodG).toLocaleString('ja-JP')}g${P ? `（前年${P.foodQty.toFixed(1)}皿・${Math.round(P.foodG).toLocaleString('ja-JP')}g）` : ''}、精肉${m.meatQty.toFixed(2)}皿、原価${yen(m.costPP)}。`);
     const hi = stores.filter(x => x.costRate != null).sort((x, y) => y.costRate - x.costRate).slice(0, 3);
-    if (stores.length > 1) L.push(`　原価率の高い店：${hi.map(x => `${x.name}${pct(x.costRate)}${x.menu ? `（${x.menu.foodQty.toFixed(1)}皿/人）` : ''}`).join('、')}。`);
+    if (stores.length > 1) L.push(`　理論原価率の高い店：${hi.map(x => `${x.name}${pct(x.costRate)}${x.menu ? `（${x.menu.foodQty.toFixed(1)}皿/人）` : ''}`).join('、')}。`);
   }
-  if (a.gapRate != null) {
+  if (a.inv) {
+    const v = stores.filter(x => x.inv).sort((x, y) => x.inv.gapExLoss - y.inv.gapExLoss);
+    L.push(`・原価率理論差（原価管理表）：値引前原価率${pct2(a.inv.preRate)}−理論原価率${pct2(a.inv.theory)}＝${pt2(a.inv.gap)}、ロス込${pt2(a.inv.gapExLoss)}。${v.length > 1 ? `ロス込理論差のマイナスが大きい店：${v.slice(0, 3).map(x => `${x.name}${pt2(x.inv.gapExLoss)}`).join('、')}／プラス寄りの店：${v.slice(-2).reverse().map(x => `${x.name}${pt2(x.inv.gapExLoss)}`).join('、')}。` : ''}`);
+    const chronic = v.filter(x => x.inv.trend.length >= 6 && x.inv.trend.filter(t => t.gapExLoss != null && t.gapExLoss <= -0.005).length >= x.inv.trend.length * 0.75);
+    if (chronic.length) L.push(`　1年を通して理論より少ない状態が続く店：${chronic.map(x => x.name).join('、')}（理論登録・盛り付け基準・棚卸方法の確認を）。`);
+  } else if (a.gapRate != null) {
     const g = stores.filter(x => x.gapRate != null).sort((x, y) => y.gapRate - x.gapRate);
     L.push(`・理論差（概算＝仕入率−理論原価率）：${pt(a.gapRate)}${a.pGapRate != null ? `（前年${pt(a.pGapRate)}）` : ''}。${stores.length > 1 ? `差の大きい店：${g.slice(0, 3).map(x => `${x.name}${pt(x.gapRate)}（うちロス${pt(x.lossRate || 0)}）`).join('、')}。` : ''}`);
   }
@@ -983,7 +1086,7 @@ function areaCostComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
 
 </script>
 <script>
@@ -1044,6 +1147,9 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
       wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true, sheets: [SHEET_CUR, SHEET_PREV] });
       if (!findSheet(wb, SHEET_CUR)) wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true });
     }
+    // 原価管理表：店舗ごとのシートをまとめて読む
+    const invs = wb.SheetNames.filter(n => isInventorySheet(XLSX, wb.Sheets[n])).map(n => extractInventory(XLSX, wb.Sheets[n])).filter(Boolean);
+    if (invs.length) return { name: f.name, inv: invs };
     const wsC = findSheet(wb, SHEET_CUR);
     if (wsC) return { name: f.name, cur: extractRows(XLSX, wsC), prev: extractRows(XLSX, findSheet(wb, SHEET_PREV)) };
     for (const n of wb.SheetNames) {
@@ -1091,7 +1197,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
   const DATA_VERSION = 3;
   async function reparse(v) {
     const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly'];
-    const all = slots.map(k => v[k]).filter(Boolean);
+    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || [])];
     if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
     const cache = new Map();
     const parse = async f => { if (!cache.has(f.raw)) cache.set(f.raw, await readOneInner(new File([f.raw], f.name))); return cache.get(f.raw); };
@@ -1103,6 +1209,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
       N[k] = { ...x, rows: rows || [] };
     }
     delete N.usage;
+    if (v.invFiles) { N.invFiles = []; for (const x of v.invFiles) { const g = await parse(x.file); const keep = new Set(x.rows.map(r => r.code)); N.invFiles.push({ ...x, rows: (g.inv || []).filter(r => keep.has(r.code)) }); } }
     N.v = DATA_VERSION;
     return N;
   }
@@ -1115,13 +1222,14 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
     const box = $('saved');
     if (!S || !S.cur) { box.hidden = true; return; }
     const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
-    $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu);
+    $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
+      + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = `保存日時 ${fmtTime(new Date(S.savedAt))}`;
     $('clearAsk').hidden = true; $('clearBtn').hidden = false;
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [] });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -1152,6 +1260,12 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
         else N.cur = { name: r.name, rows: r.raw, file: r.file };
       }
       if (!N.cur) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
+      // 原価管理表：ファイルごとに保持し、同じ店舗は新しいファイルで差し替え
+      for (const g of got.filter(g => g.inv)) {
+        const codes = g.inv.map(r => r.code);
+        N.invFiles = (N.invFiles || []).map(x => ({ ...x, rows: x.rows.filter(r => !codes.includes(r.code)) })).filter(x => x.rows.length);
+        N.invFiles.push({ name: g.name, rows: g.inv, file: g.file });
+      }
       // 食材別の理論差データは使わない
       delete N.usage;
       if (got.some(g => g.usage)) notes.push('食材別の理論差データは分析に使わないため読み込みませんでした');
@@ -1176,6 +1290,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
       if (N.pMenu && mKey(N.pMenu.rows) !== ck - 12) { notes.push(`前年のメニュー別（${fmtYM(N.pMenu.rows)}）が前年同月ではないため外しました`); N.pMenu = null; }
       if (N.pPays && mKey(N.pPays.rows) !== ck - 12) { notes.push(`前年の値引詳細（${fmtYM(N.pPays.rows)}）が前年同月ではないため外しました`); N.pPays = null; }
       if (N.hourly && mKey(N.hourly.rows) !== ck) N.hourly = null;
+      if (N.invFiles) N.invFiles = N.invFiles.filter(x => { const ok = mKey(x.rows) === ck; if (!ok) notes.push(`原価管理表（${fmtYM(x.rows)}）が当年と別の月のため外しました`); return ok; });
       N.savedAt = Date.now();
       N.v = DATA_VERSION;
       S = N;
@@ -1312,19 +1427,24 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
   const ptx = v => v == null ? '－' : (v >= 0 ? '+' : '▲') + Math.abs(v * 100).toFixed(1) + 'pt';
   function renderCost() {
     const a = R.area;
-    $('kpis').innerHTML = kpi('原価率', pct(a.costRate), a.pCostRate != null ? `前年 ${pct(a.pCostRate)}（${ptx(a.costRate - a.pCostRate)}）` : '')
-      + kpi('ロス率', p2(a.lossRate), a.pLossRate != null ? `前年 ${p2(a.pLossRate)}` : '')
+    $('kpis').innerHTML = kpi('理論原価率', pct(a.costRate), a.pCostRate != null ? `前年 ${pct(a.pCostRate)}（${ptx(a.costRate - a.pCostRate)}）` : '')
+      + kpi('ロス率（値引前）', p2(a.lossRate), a.pLossRate != null ? `前年 ${p2(a.pLossRate)}` : '')
       + (a.menu ? kpi('食べ放題フード', a.menu.foodQty.toFixed(1) + '皿/人', `${Math.round(a.menu.foodG).toLocaleString('ja-JP')}g/人`) + kpi('1人あたり原価', yen(a.menu.costPP), `精肉 ${a.menu.meatQty.toFixed(2)}皿`) : '')
-      + kpi('理論差（概算）', ptx(a.gapRate), `仕入率 ${pct(a.buyRate)}${a.pGapRate != null ? `・前年 ${ptx(a.pGapRate)}` : ''}`);
+      + (a.inv ? kpi('原価率理論差', pt2(a.inv.gap), `値引前原価率 ${pct2(a.inv.preRate)}`) + kpi('ロス込理論差', pt2(a.inv.gapExLoss), `原価管理表 ${a.inv.n}店`)
+        : kpi('理論差（概算）', ptx(a.gapRate), `仕入率 ${pct(a.buyRate)}${a.pGapRate != null ? `・前年 ${ptx(a.pGapRate)}` : ''}`));
     $('areaComment').value = commentText(a.costLines, detail); fit($('areaComment'));
-    $('storeTblTitle').textContent = '店舗別 原価・ロス・理論差（概算）';
+    $('storeTblTitle').textContent = R.stores.some(s => s.inv) ? '店舗別 原価・ロス・原価率理論差' : '店舗別 原価・ロス・理論差（概算）';
     const rows = [...R.stores].sort((x, y) => (y.costRate || 0) - (x.costRate || 0));
     const bR = a.benchCostRate != null ? a.benchCostRate : a.costRate;
     const premOf = s => s.menu ? sum(s.menu.courses.filter(c => /プレミアム/.test(c.name)), c => c.share) : null;
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">原価率</th><th class="n">平均差</th><th class="n">前年差</th><th class="n">仕入率</th><th class="n">理論差（概算）</th><th class="n">ロス率</th><th class="n">1人あたり原価</th><th class="n">フード皿/人</th><th class="n">プレミアム比率</th></tr></thead><tbody>`
+    const hasInv = R.stores.some(s => s.inv);
+    const g3 = s => s.inv && s.inv.trend.length ? avgOf(s.inv.trend.slice(-3).map(x => x.gapExLoss).filter(v => v != null)) : null;
+    const gapCols = hasInv ? '<th class="n">値引前原価率</th><th class="n">原価率理論差</th><th class="n">ロス込理論差</th><th class="n">直近3か月</th>' : '<th class="n">仕入率</th><th class="n">理論差（概算）</th>';
+    const gapCells = s => hasInv ? (s.inv ? `<td class="n">${pct2(s.inv.preRate)}</td><td class="n">${pt2(s.inv.gap)}</td><td class="n"><b>${pt2(s.inv.gapExLoss)}</b></td><td class="n">${g3(s) != null ? pt2(g3(s)) : '－'}</td>` : '<td class="n muted" colspan="4">原価管理表なし</td>') : `<td class="n">${pct(s.buyRate)}</td><td class="n">${ptx(s.gapRate)}</td>`;
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">理論原価率</th><th class="n">平均差</th><th class="n">前年差</th>${gapCols}<th class="n">ロス率</th><th class="n">1人あたり原価</th><th class="n">フード皿/人</th><th class="n">プレミアム比率</th></tr></thead><tbody>`
       + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}
         <td class="n">${pct(s.costRate)}</td><td class="n ${s.costRate - bR > 0 ? 'neg' : 'pos'}">${s.costRate != null && bR != null ? ptx(s.costRate - bR) : '－'}</td><td class="n">${s.pCostRate != null ? ptx(s.costRate - s.pCostRate) : '－'}</td>
-        <td class="n">${pct(s.buyRate)}</td><td class="n">${ptx(s.gapRate)}</td><td class="n">${p2(s.lossRate)}</td>
+        ${gapCells(s)}<td class="n">${p2(s.lossRate)}</td>
         <td class="n">${s.menu ? yen(s.menu.costPP) : '－'}</td><td class="n">${s.menu ? s.menu.foodQty.toFixed(1) : '－'}</td><td class="n">${premOf(s) != null ? pct(premOf(s)) : '－'}</td></tr>`).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
@@ -1336,10 +1456,12 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
   }
   function renderStoreCost(s) {
     $('storeName').textContent = s.name;
-    $('sKpis').innerHTML = kpi('原価率', pct(s.costRate), [R.area.benchCostRate != null && R.stores.length > 1 ? `平均 ${pct(R.area.benchCostRate)}` : '', s.pCostRate != null ? `前年 ${pct(s.pCostRate)}` : ''].filter(Boolean).join('・'))
-      + kpi('仕入率', pct(s.buyRate), s.pBuyRate != null ? `前年 ${pct(s.pBuyRate)}` : '')
-      + kpi('理論差（概算）', ptx(s.gapRate), `うちロス ${ptx(s.lossRate || 0)}${s.pGapRate != null ? `・前年 ${ptx(s.pGapRate)}` : ''}`)
-      + kpi('ロス率', p2(s.lossRate), s.loss ? `ロス額 ${man(s.loss)}` : '');
+    const I = s.inv;
+    $('sKpis').innerHTML = (I ? kpi('値引前原価率', pct2(I.preRate), `実質原価率 ${pct2(I.realRate)}`) : '')
+      + kpi('理論原価率', I ? pct2(I.theory) : pct(s.costRate), [R.area.benchCostRate != null && R.stores.length > 1 ? `平均 ${pct(R.area.benchCostRate)}` : '', s.pCostRate != null ? `前年 ${pct(s.pCostRate)}` : ''].filter(Boolean).join('・'))
+      + (I ? kpi('原価率理論差', pt2(I.gap), sman(I.gapAmt)) + kpi('ロス込理論差', pt2(I.gapExLoss), `ロス率 ${p2(I.lossPre)}`)
+        : kpi('仕入率', pct(s.buyRate), s.pBuyRate != null ? `前年 ${pct(s.pBuyRate)}` : '') + kpi('理論差（概算）', ptx(s.gapRate), `うちロス ${ptx(s.lossRate || 0)}`))
+      + (I ? '' : kpi('ロス率', p2(s.lossRate), s.loss ? `ロス額 ${man(s.loss)}` : ''));
     $('storeComment').value = commentText(s.costLines, detail); fit($('storeComment'));
     // ロス
     $('lossBox').hidden = s.lossRate == null;
@@ -1369,8 +1491,63 @@ if (typeof module !== 'undefined') module.exports = { extractMenu, menuAgg, scop
           return `<tr><td>${esc(c.cat)}</td><td class="n">${c.qtyPP.toFixed(2)}</td>${one ? '' : `<td class="n muted">${a ? a.qtyPP.toFixed(2) : '－'}</td>`}${PM ? `<td class="n muted">${pc ? pc.qtyPP.toFixed(2) : '－'}</td>` : ''}<td class="n">${Math.round(c.gPP)}</td><td class="n">${yen(c.costPP)}</td>${one ? '' : `<td class="n ${d > 0 ? 'neg' : d < 0 ? 'pos' : ''}">${Math.round(d) === 0 ? '±0円' : syen(d)}</td>`}</tr>`; }).join('')
         + `<tr><td><b>合計</b></td><td class="n"><b>${m.foodQty.toFixed(2)}</b></td>${one ? '' : `<td class="n muted">${A.foodQty.toFixed(2)}</td>`}${PM ? `<td class="n muted">${PM.foodQty.toFixed(2)}</td>` : ''}<td class="n">${Math.round(m.foodG).toLocaleString('ja-JP')}</td><td class="n"><b>${yen(m.foodCost)}</b></td>${one ? '' : `<td class="n">${syen(m.foodCost - A.foodCost)}</td>`}</tr></tbody>`;
     }
-    renderYoy(s); renderCourseStore(s);
+    renderInv(s); renderYoy(s); renderCourseStore(s);
   }
+  /* ---------- 原価管理表のグラフ ---------- */
+  function renderInv(s) {
+    const box = $('invBody'), I = s.inv;
+    if (!I) { box.innerHTML = '<p class="note">原価管理表（店舗別の棚卸・原価率理論差のExcel）を読み込むと、正式な原価率理論差と13か月の推移を表示します。読み込むまでは、仕入率から計算した概算を表示しています。</p>'; return; }
+    const T = I.trend.filter(x => x.theory != null);
+    let html = '';
+    if (T.length >= 2) {
+      const W = Math.max(600, T.length * 46 + 150), H1 = 170, H2 = 130, L0 = 52, R0 = 96, IN = 22;
+      const xs = i => L0 + IN + i * ((W - L0 - R0 - IN) / (T.length - 1));
+      const vals = T.flatMap(x => [x.theory, x.pre]).filter(v => v != null);
+      let lo = Math.min(...vals), hi = Math.max(...vals); const pad = Math.max(0.002, (hi - lo) * 0.15); lo -= pad; hi += pad;
+      const ys = v => 14 + (1 - (v - lo) / (hi - lo)) * (H1 - 40);
+      const ticks = [lo + pad, (lo + hi) / 2, hi - pad];
+      const path = k => T.map((x, i) => x[k] == null ? '' : `${i && T[i - 1][k] != null ? 'L' : 'M'}${xs(i).toFixed(1)},${ys(x[k]).toFixed(1)}`).join('');
+      const mlab = d => `${d.getMonth() + 1}月`;
+      let svg = `<svg width="${W}" height="${H1}" viewBox="0 0 ${W} ${H1}" role="img" aria-label="理論原価率と値引前原価率の推移">`;
+      ticks.forEach(v => { svg += `<line x1="${L0}" x2="${W - R0}" y1="${ys(v)}" y2="${ys(v)}" stroke="var(--line)"/><text x="${L0 - 6}" y="${ys(v) + 3}" text-anchor="end">${(v * 100).toFixed(1)}%</text>`; });
+      svg += `<path d="${path('theory')}" fill="none" stroke="var(--c1)" stroke-width="2"/><path d="${path('pre')}" fill="none" stroke="var(--c2)" stroke-width="2"/>`;
+      T.forEach((x, i) => {
+        if (x.theory != null) svg += `<circle cx="${xs(i)}" cy="${ys(x.theory)}" r="4" fill="var(--c1)" stroke="var(--panel)" stroke-width="2"/>`;
+        if (x.pre != null) svg += `<circle cx="${xs(i)}" cy="${ys(x.pre)}" r="4" fill="var(--c2)" stroke="var(--panel)" stroke-width="2"/>`;
+        svg += `<text x="${xs(i)}" y="${H1 - 6}" text-anchor="middle"${i === T.length - 1 ? ' style="font-weight:700;fill:var(--fg)"' : ''}>${x.date.getMonth() === 0 || i === 0 ? `${String(x.date.getFullYear()).slice(2)}/` : ''}${mlab(x.date)}</text>`;
+        svg += `<rect x="${xs(i) - 18}" y="0" width="36" height="${H1}" fill="transparent" data-tip="${esc(`${x.date.getFullYear()}年${x.date.getMonth() + 1}月|理論原価率 ${pct2(x.theory)}|値引前原価率 ${pct2(x.pre)}|値引前ロス率 ${pct2(x.loss)}|ロス込理論差 ${x.gapExLoss != null ? pt2(x.gapExLoss) : '－'}${x.inv ? `|棚卸高 ${man(x.inv)}` : ''}`)}"/>`;
+      });
+      const last = T[T.length - 1];
+      svg += `<text x="${xs(T.length - 1) + 8}" y="${ys(last.theory) + 4}" style="fill:var(--fg)">理論 ${(last.theory * 100).toFixed(2)}%</text><text x="${xs(T.length - 1) + 8}" y="${ys(last.pre) + (last.pre > last.theory ? -6 : 14)}" style="fill:var(--fg)">実 ${(last.pre * 100).toFixed(2)}%</text></svg>`;
+      // ロス込理論差の棒
+      // 縦の範囲はデータに合わせる（0と±0.5ptは必ず入れる）
+      const G = T.map(x => x.gapExLoss ?? 0), gHi = Math.max(0.005, ...G), gLo = Math.min(-0.005, ...G), mx = Math.max(gHi, -gLo);
+      const top = 16, bot = H2 - 16, k = (bot - top) / (gHi - gLo), z = top + gHi * k, sc = v => v * k;
+      let svg2 = `<svg width="${W}" height="${H2}" viewBox="0 0 ${W} ${H2}" role="img" aria-label="ロス込原価率理論差の推移">`;
+      svg2 += `<line x1="${L0}" x2="${W - R0}" y1="${z}" y2="${z}" stroke="var(--muted)"/><text x="${L0 - 6}" y="${z + 3}" text-anchor="end">±0</text>`;
+      if (gHi > 0.0055) svg2 += `<text x="${L0 - 6}" y="${z - sc(gHi) + 3}" text-anchor="end">+${(gHi * 100).toFixed(1)}</text>`;
+      if (gLo < -0.0055) svg2 += `<text x="${L0 - 6}" y="${z - sc(gLo) + 3}" text-anchor="end">▲${(-gLo * 100).toFixed(1)}</text>`;
+      T.forEach((x, i) => {
+        const v = x.gapExLoss; if (v == null) return;
+        const h = Math.max(1, Math.abs(sc(v))), y = v >= 0 ? z - h : z, w = 18;
+        svg2 += `<rect x="${xs(i) - w / 2}" y="${y}" width="${w}" height="${h}" rx="3" fill="${i === T.length - 1 ? 'var(--c1)' : 'var(--prev)'}" data-tip="${esc(`${x.date.getFullYear()}年${x.date.getMonth() + 1}月|ロス込理論差 ${pt2(v)}`)}"/>`;
+        svg2 += `<text x="${xs(i)}" y="${v >= 0 ? y - 4 : y + h + 11}" text-anchor="middle"${i === T.length - 1 ? ' style="font-weight:700;fill:var(--fg)"' : ''}>${(v >= 0 ? '+' : '▲') + Math.abs(v * 100).toFixed(1)}</text>`;
+      });
+      svg2 += `<line x1="${L0}" x2="${W - R0}" y1="${z - sc(0.005)}" y2="${z - sc(0.005)}" stroke="var(--line)" stroke-dasharray="3 3"/><line x1="${L0}" x2="${W - R0}" y1="${z + sc(0.005)}" y2="${z + sc(0.005)}" stroke="var(--line)" stroke-dasharray="3 3"/>`
+        + `<text x="${W - R0 + 16}" y="${z - sc(0.005) + 3}">+0.5</text><text x="${W - R0 + 16}" y="${z + sc(0.005) + 3}">▲0.5</text></svg>`;
+      html += `<div class="lg"><span><i style="background:var(--c1)"></i>理論原価率</span><span><i style="background:var(--c2)"></i>値引前原価率（実際）</span><span>点にカーソルを当てるとロス率・棚卸高も表示</span></div><div class="chart">${svg}</div>`
+        + `<h3 style="font-size:.9rem;margin-top:8px">ロス込原価率理論差（pt）</h3><p class="small muted" style="margin:2px 0 4px">マイナス＝理論より使用が少ない、プラス＝多い。点線は±0.5pt。青が当月。</p><div class="chart">${svg2}</div>`;
+    }
+    // 大分類別
+    const A = R.area.inv;
+    if (I.cats.length && I.preSales) {
+      html += `<h3 style="font-size:.9rem;margin-top:12px">大分類別の仕入・原価（食材）</h3><div class="tbl"><table><thead><tr><th>大分類</th><th class="n">仕入</th><th class="n">原価</th><th class="n">原価比</th>${A && R.stores.length > 1 ? '<th class="n">平均</th><th class="n">差</th>' : ''}</tr></thead><tbody>`
+        + [...I.cats].sort((a, b) => b.cost - a.cost).map(c => { const r = c.cost / I.preSales, av = A && A.catRate[c.cat]; return `<tr><td>${esc(c.cat)}</td><td class="n">${yen(c.buy)}</td><td class="n">${yen(c.cost)}</td><td class="n">${pct2(r)}</td>${A && R.stores.length > 1 ? `<td class="n muted">${av != null ? pct2(av) : '－'}</td><td class="n">${av != null ? pt2(r - av) : '－'}</td>` : ''}</tr>`; }).join('')
+        + `</tbody></table></div><p class="small muted" style="margin:4px 0 0">原価比＝原価÷値引前売上高。棚卸高 ${man(I.close)}（前月 ${man(I.open)}）</p>`;
+    }
+    box.innerHTML = html;
+  }
+
   /* ---------- 原価タブのグラフ ---------- */
   let yMetric = 'qty';
   // コースの色：表示中の対象店全体で多い順に上位5種へ固定の色、残りは「その他」
