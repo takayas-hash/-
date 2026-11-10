@@ -232,7 +232,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       </div>
       <div>
         <h3>個人別の労働時間・残業見込み</h3>
-        <p class="small muted" style="margin:2px 0 8px">残業＝1日8時間を超えた分（予定も同じ基準で計算）。月の残業見込みが30h以上は注意、45h以上は要対応。雑給はパートのみ（残業・深夜は25%割増）。</p>
+        <p class="small muted" style="margin:2px 0 8px">残業＝1日8時間を超えた分（予定も同じ基準で計算）。月の残業見込みが45h以上は注意、60h以上は要対応。雑給はパートのみ（割増は残業25%・深夜25%、重なる時間は50%）。</p>
         <div class="tbl" style="max-height:480px;overflow-y:auto"><table id="peopleTbl"></table></div>
       </div>
     </div>
@@ -265,7 +265,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
     <p>着地見込み（月の途中のみ）＝実績＋残り日の日予算×ここまでの曜日区分別の予算比（売上0の日は除く。実績が2日未満の曜日区分は全体の予算比）。必要日販＝(月予算−実績)÷残り日数、残り期間の必要予算比＝(月予算−実績)÷残り日の予算合計。売上集計表に月末までの予算がない日は、同じ曜日区分の平均日予算で補います。</p>
-    <p>労働時間・雑給：確定日（タイムカードの実績がその日の予定人数の半分以上ある最後の日）までは実績、それ以降は勤務スケジュール表の予定労働時間（休憩を除く）。勤務スケジュール表がない場合はタイムカードの勤務予定から「拘束8時間以上は休憩1時間」で見込みます。予定の合計が同じ曜日区分の実績平均の半分に満たない日は予定未作成とみなし、実績平均で補います。雑給＝パートの労働時間×時給（＋繁忙手当）、残業（1日8時間超）と深夜（22–5時）は25%割増。時給データにない人は店舗のパート平均時給で計算します。</p>
+    <p>労働時間・雑給：確定日（タイムカードの実績がその日の予定人数の半分以上ある最後の日）までは実績、それ以降は勤務スケジュール表の予定労働時間（休憩を除く）。勤務スケジュール表がない場合はタイムカードの勤務予定から「拘束8時間以上は休憩1時間」で見込みます。予定の合計が同じ曜日区分の実績平均の半分に満たない日は予定未作成とみなし、実績平均で補います。雑給＝パートの労働時間×時給。割増は残業（1日8時間超）25%・深夜（22–5時）25%、重なる時間は50%。時給データにない人は店舗のパート平均時給で計算します。</p>
     <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。原価分析の率はすべて値引前売上高（純売上高＋値引）が分母で、社内の原価管理表と同じ基準です。原価管理表を読み込むと、原価率理論差（値引前原価率−理論原価率）とロス込原価率理論差（さらに値引前ロス率を引いた値）は原価管理表の数字を使います。読み込んでいない場合の理論差（概算）＝仕入率−理論原価率。月末在庫の増減を含むため月ごとにぶれます。ロス率＝廃棄額÷純売上高（売上集計表の「廃棄額」列）。突出日＝その店の1日平均ロスの3倍以上かつ1万円以上の日。原価率＝原価÷純売上高（売上集計表の「原価」列。メニュー別の予定原価×販売数の合計と一致）。原価率の平均との差は「1人あたり原価（喫食）」と「客単価」の影響に分解しています。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
@@ -726,8 +726,9 @@ function extractWage(XLSX, ws) {
   return out;
 }
 
-// 残業アラートの基準（月の残業時間）
-const OT_WARN = 30 * 60, OT_LIMIT = 45 * 60;
+// 残業アラートの基準（月の残業時間。利用者確認済み：45h注意・60h要対応）
+// 割増：残業25%・深夜25%、残業かつ深夜は50%（足し合わせで50%になる）。繁忙手当はなし
+const OT_WARN = 45 * 60, OT_LIMIT = 60 * 60;
 const PREMIUM_OT = 0.25, PREMIUM_NIGHT = 0.25;
 /**
  * 当月の労働時間・雑給（パート）・残業の見込み
@@ -758,10 +759,10 @@ function analyzeLabor(tc, ws, wage, opt) {
     const pl = plan[code] || [];
     const name = (act[0] || pl[0] || all.find(r => r.code === code)).store;
     // パートの時給：時給データ。なければ店舗のパート平均
-    const partW = [...new Set(act.concat(pl).filter(r => !r.staff).map(r => r.emp))].map(e => wageOf[e]).filter(Boolean).map(w => w.wage + (w.busy || 0));
+    const partW = [...new Set(act.concat(pl).filter(r => !r.staff).map(r => r.emp))].map(e => wageOf[e]).filter(Boolean).map(w => w.wage);
     const avgW = partW.length ? partW.reduce((a, b) => a + b, 0) / partW.length : null;
     const noWage = new Set();
-    const cost = (r, mins) => { if (r.staff) return 0; const w = wageOf[r.emp]; if (!w) noWage.add(r.emp); const h = w ? w.wage + (w.busy || 0) : avgW || 0; return mins / 60 * h + (r.ot / 60) * h * PREMIUM_OT + (r.night / 60) * h * PREMIUM_NIGHT; };
+    const cost = (r, mins) => { if (r.staff) return 0; const w = wageOf[r.emp]; if (!w) noWage.add(r.emp); const h = w ? w.wage : avgW || 0; return mins / 60 * h + (r.ot / 60) * h * PREMIUM_OT + (r.night / 60) * h * PREMIUM_NIGHT; };
     // 日別
     const days = [];
     for (let d = 1; d <= N; d++) {
@@ -810,7 +811,7 @@ function laborLines(s, L, f, sales, ctx) {
     const landSales = f ? f.landing : null;
     let t = `・雑給（パート）：実績${man(s.cost)}${land ? `、着地見込み${man(s.landCost)}` : ''}`;
     if (sales) t += `。雑給率${pct(s.cost / sales)}（実績）${landSales ? `／${pct(s.landCost / landSales)}（売上・雑給とも着地見込み）` : ''}`;
-    push(t + `。残業・深夜は25%割増で計算${s.wageless ? `（時給データのない${s.wagelessNames.join('・')}を除く）` : ''}。`);
+    push(t + `。割増は残業25%・深夜25%（重なる時間は50%）で計算${s.wageless ? `（時給データのない${s.wagelessNames.join('・')}を除く）` : ''}。`);
     if (s.noWage) push(`　時給データにない${s.noWage}名（新規入社など）は店舗のパート平均時給${s.avgWage ? yen(s.avgWage) : ''}で計算しています。`, true);
   }
   if (s.alerts && s.alerts.length) {
@@ -1841,15 +1842,15 @@ if (typeof module !== 'undefined') module.exports = { extractTimecard, extractSc
       + (land ? kpi('労働時間（着地見込み）', hrs0(a.landMins), `残り予定 ${hrs0(a.planMins)}${a.estDays ? `・未作成${a.estDays}日を補完` : ''}`) : '')
       + (L.hasWage ? kpi('雑給（着地見込み）', man(a.landCost), `実績 ${man(a.cost)}${a.wageless ? `・${a.wageless}店除く` : ''}`) : '')
       + (L.hasWage && full && R.area.fc ? kpi('雑給率（見込み）', pct(a.landCost / R.area.fc.landing), `売上見込み ${man(R.area.fc.landing)}`) : '')
-      + kpi('残業アラート', `${a.alerts.length}名`, `45h以上 ${a.alerts.filter(p => p.totalOt >= 45 * 60).length}名`, a.alerts.some(p => p.totalOt >= 45 * 60) ? 'neg' : '');
+      + kpi('残業アラート', `${a.alerts.length}名`, `60h以上 ${a.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, a.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '');
     $('areaComment').value = commentText(R.area.laborLines, detail); fit($('areaComment'));
     const rows = [...R.stores].sort((x, y) => (lRate(y) ?? -1) - (lRate(x) ?? -1));
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}<th class="n">雑給率（見込み）</th><th class="n">時給なし</th>` : ''}<th class="n">残業30h以上</th></tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}<th class="n">雑給率（見込み）</th><th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th></tr></thead><tbody>`
       + rows.map(s => { const l = s.labor; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
         + (!l ? `<td class="n muted" colspan="9">勤怠データなし</td></tr>` :
         `<td class="n">${hrs0(l.mins)}</td><td class="n muted">${hrs0(l.staffMins)}</td>${land ? `<td class="n">${hrs0(l.planMins)}</td><td class="n"><b>${hrs0(l.landMins)}</b></td><td class="n ${l.estDays ? 'neg' : ''}">${l.estDays ? l.estDays + '日' : '－'}</td>` : ''}`
         + (L.hasWage ? (l.wageless ? `<td class="n muted" colspan="${land ? 4 : 3}">時給データなし</td>` : `<td class="n">${man(l.cost)}</td>${land ? `<td class="n"><b>${man(l.landCost)}</b></td>` : ''}<td class="n">${pct(lRate(s))}</td><td class="n ${l.noWage ? 'neg' : 'muted'}">${l.noWage ? l.noWage + '名' : '－'}</td>`) : '')
-        + `<td class="n ${l.alerts.some(p => p.totalOt >= 45 * 60) ? 'neg' : ''}">${l.alerts.length ? l.alerts.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
+        + `<td class="n ${l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : ''}">${l.alerts.length ? l.alerts.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
       tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -1865,7 +1866,7 @@ if (typeof module !== 'undefined') module.exports = { extractTimecard, extractSc
     $('sKpis').innerHTML = kpi('労働時間（実績）', hrs0(l.mins), `${L.mo + 1}/${L.cut}時点・社員 ${hrs0(l.staffMins)}`)
       + (land ? kpi('労働時間（着地見込み）', hrs0(l.landMins), `残り予定 ${hrs0(l.planMins)}`) : '')
       + (L.hasWage && !l.wageless ? kpi('雑給（着地見込み）', man(l.landCost), `実績 ${man(l.cost)}`) + (lRate(s) != null ? kpi('雑給率（見込み）', pct(lRate(s)), `売上見込み ${man(s.fc.landing)}`) : '') : '')
-      + kpi('残業アラート', `${l.alerts.length}名`, `45h以上 ${l.alerts.filter(p => p.totalOt >= 45 * 60).length}名`, l.alerts.some(p => p.totalOt >= 45 * 60) ? 'neg' : '');
+      + kpi('残業アラート', `${l.alerts.length}名`, `60h以上 ${l.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '');
     $('storeComment').value = commentText(s.laborLines, detail); fit($('storeComment'));
     $('laborNote').textContent = `${L.mo + 1}/${L.cut}までは実績、${L.cut + 1}日以降は${L.hasSchedule ? '勤務スケジュール表' : 'タイムカードの勤務予定'}の予定労働時間です。`;
     // 日別の棒
@@ -1887,7 +1888,7 @@ if (typeof module !== 'undefined') module.exports = { extractTimecard, extractSc
     $('laborDaily').innerHTML = svg + '</svg>';
     // 個人別
     const ps = [...l.people].sort((a, b) => b.totalOt - a.totalOt || b.totalMins - a.totalMins);
-    const flag = p => p.totalOt >= 45 * 60 ? '<span class="pill ng">45h以上</span>' : p.totalOt >= 30 * 60 ? '<span class="flag">30h以上</span>' : '';
+    const flag = p => p.totalOt >= OT_LIMIT ? '<span class="pill ng">60h以上</span>' : p.totalOt >= OT_WARN ? '<span class="flag">45h以上</span>' : '';
     $('peopleTbl').innerHTML = `<thead><tr><th>氏名</th><th>区分</th><th class="n">実績</th>${land ? '<th class="n">予定</th><th class="n">月合計</th>' : ''}<th class="n">残業（実績）</th>${land ? '<th class="n">残業（予定）</th>' : ''}<th class="n">残業見込み</th><th></th><th class="n">深夜</th>${R.labor.hasWage ? '<th class="n">時給</th><th class="n">雑給見込み</th>' : ''}</tr></thead><tbody>`
       + ps.map(p => `<tr><td>${esc(p.name)}</td><td class="muted">${p.staff ? '社員' : 'パート'}</td><td class="n">${hrs(p.mins)}</td>${land ? `<td class="n">${hrs(p.planMins)}</td><td class="n">${hrs(p.totalMins)}</td>` : ''}<td class="n">${hrs(p.ot)}</td>${land ? `<td class="n">${hrs(p.planOt)}</td>` : ''}<td class="n"><b>${hrs(p.totalOt)}</b></td><td>${flag(p)}</td><td class="n muted">${hrs(p.night)}</td>${R.labor.hasWage ? `<td class="n">${p.staff ? '－' : p.wage ? yen(p.wage) : '<span class="muted">平均で計算</span>'}</td><td class="n">${p.staff ? '－' : yen(p.cost)}</td>` : ''}</tr>`).join('') + '</tbody>';
   }

@@ -451,8 +451,9 @@ function extractWage(XLSX, ws) {
   return out;
 }
 
-// 残業アラートの基準（月の残業時間）
-const OT_WARN = 30 * 60, OT_LIMIT = 45 * 60;
+// 残業アラートの基準（月の残業時間。利用者確認済み：45h注意・60h要対応）
+// 割増：残業25%・深夜25%、残業かつ深夜は50%（足し合わせで50%になる）。繁忙手当はなし
+const OT_WARN = 45 * 60, OT_LIMIT = 60 * 60;
 const PREMIUM_OT = 0.25, PREMIUM_NIGHT = 0.25;
 /**
  * 当月の労働時間・雑給（パート）・残業の見込み
@@ -483,10 +484,10 @@ function analyzeLabor(tc, ws, wage, opt) {
     const pl = plan[code] || [];
     const name = (act[0] || pl[0] || all.find(r => r.code === code)).store;
     // パートの時給：時給データ。なければ店舗のパート平均
-    const partW = [...new Set(act.concat(pl).filter(r => !r.staff).map(r => r.emp))].map(e => wageOf[e]).filter(Boolean).map(w => w.wage + (w.busy || 0));
+    const partW = [...new Set(act.concat(pl).filter(r => !r.staff).map(r => r.emp))].map(e => wageOf[e]).filter(Boolean).map(w => w.wage);
     const avgW = partW.length ? partW.reduce((a, b) => a + b, 0) / partW.length : null;
     const noWage = new Set();
-    const cost = (r, mins) => { if (r.staff) return 0; const w = wageOf[r.emp]; if (!w) noWage.add(r.emp); const h = w ? w.wage + (w.busy || 0) : avgW || 0; return mins / 60 * h + (r.ot / 60) * h * PREMIUM_OT + (r.night / 60) * h * PREMIUM_NIGHT; };
+    const cost = (r, mins) => { if (r.staff) return 0; const w = wageOf[r.emp]; if (!w) noWage.add(r.emp); const h = w ? w.wage : avgW || 0; return mins / 60 * h + (r.ot / 60) * h * PREMIUM_OT + (r.night / 60) * h * PREMIUM_NIGHT; };
     // 日別
     const days = [];
     for (let d = 1; d <= N; d++) {
@@ -535,7 +536,7 @@ function laborLines(s, L, f, sales, ctx) {
     const landSales = f ? f.landing : null;
     let t = `・雑給（パート）：実績${man(s.cost)}${land ? `、着地見込み${man(s.landCost)}` : ''}`;
     if (sales) t += `。雑給率${pct(s.cost / sales)}（実績）${landSales ? `／${pct(s.landCost / landSales)}（売上・雑給とも着地見込み）` : ''}`;
-    push(t + `。残業・深夜は25%割増で計算${s.wageless ? `（時給データのない${s.wagelessNames.join('・')}を除く）` : ''}。`);
+    push(t + `。割増は残業25%・深夜25%（重なる時間は50%）で計算${s.wageless ? `（時給データのない${s.wagelessNames.join('・')}を除く）` : ''}。`);
     if (s.noWage) push(`　時給データにない${s.noWage}名（新規入社など）は店舗のパート平均時給${s.avgWage ? yen(s.avgWage) : ''}で計算しています。`, true);
   }
   if (s.alerts && s.alerts.length) {
