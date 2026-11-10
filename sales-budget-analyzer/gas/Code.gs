@@ -168,7 +168,7 @@ const ARCHIVE_NAME = '過去';
  * 各エリアのフォルダ直下で、最終更新が「前月1日より前」のファイルを「エリア/過去/YYYY-MM」へ移す。
  * 例：12月1日に実行 → 10月以前に更新されたファイルを移す（11月・12月に入れたものは残る）。
  * 「共通」「履歴データ」とフォルダの中のフォルダには触らない。
- * dryRun=true なら移さずに、移す予定のファイルを返す（ログにも出す）。
+ * dryRun=true なら移さずに、移す予定のファイルを返す（ログにも出す）。お知らせのメールは送らない（結果は実行ログで確認）。
  */
 function archiveOldFiles(dryRun) {
   const root = rootFolder_(), now = new Date();
@@ -192,12 +192,6 @@ function archiveOldFiles(dryRun) {
     }
   }
   Logger.log((dryRun ? '【移す予定】' : '【移しました】') + moved.length + '件\n' + moved.join('\n'));
-  if (!dryRun && moved.length) {
-    try {
-      MailApp.sendEmail(Session.getEffectiveUser().getEmail(), '【予算差異アナライザー】月初の自動整理：' + moved.length + '件を「過去」へ移しました',
-        '前月1日（' + Utilities.formatDate(limit, 'Asia/Tokyo', 'yyyy/MM/dd') + '）より前に更新されたファイルを、各エリアの「過去」フォルダへ移しました。\n\n' + moved.join('\n') + '\n\n間違って移ったものは、エリアのフォルダへ戻してください。');
-    } catch (e) { Logger.log('メールを送れませんでした：' + e.message); }
-  }
   return moved;
 }
 /** 移す予定のファイルを確認するだけ（移さない） */
