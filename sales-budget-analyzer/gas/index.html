@@ -76,6 +76,8 @@ header.top p { margin: 4px 0 0; max-width: 60ch; }
 
 section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.row > * { min-width: 0; max-width: 100%; }
+.btn { max-width: 100%; } select.btn { text-overflow: ellipsis; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .kpi { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
 .kpi .v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
@@ -138,17 +140,30 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .rp-page .heat { min-width: 0; font-size: 8pt; } .rp-page .heat .c { padding: 1.5mm 1mm; }
 .rp-cmt { white-space: pre-wrap; border: 1px solid #dddcd6; border-radius: 2mm; padding: 2.5mm 3mm; background: #fafaf8; font-size: 9.5pt; line-height: 1.65; }
 .rp-cmt:focus { outline: 2px solid #23407a; }
-.rp-cm { border: 1px solid #dddcd6; border-radius: 2mm; overflow: hidden; }
-.rp-cm-head { display: flex; align-items: baseline; gap: 3mm; padding: 2.5mm 3mm; background: #f2f4f9; border-bottom: 1px solid #dddcd6; font-size: 10.5pt; font-weight: 700; }
-.rp-tag { flex: none; font-size: 8.5pt; font-weight: 700; border-radius: 1mm; padding: .4mm 2mm; color: #fff; background: #23407a; }
-.rp-tag.ng { background: #b42323; } .rp-tag.ok { background: #1d5fae; }
-.rp-cm-item { display: grid; grid-template-columns: 27mm minmax(0, 1fr); gap: 3mm; padding: 2mm 3mm; border-top: 1px solid #ecebe6; font-size: 9.5pt; line-height: 1.6; }
-.rp-cm-item:first-of-type { border-top: 0; }
-.rp-cm-lbl { font-weight: 700; color: #23407a; font-size: 9pt; padding-top: .2mm; }
-.rp-cm-sub { margin-top: 1mm; padding-left: 3mm; border-left: 2px solid #dddcd6; font-size: 8.5pt; color: #3c3f45; }
-.rp-cm-sub.note2 { color: #5d6068; border-left-color: transparent; }
-.rp-cm [contenteditable]:focus { outline: 2px solid #23407a; outline-offset: 1px; }
-.rp-cm b.neg { color: #b42323; } .rp-cm b.pos { color: #1d5fae; }
+/* コメントの表示（画面・訪問資料で共通） */
+.cm { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); font-size: .92rem; line-height: 1.7; }
+.cm-head { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; background: var(--accent-soft); font-weight: 700; font-size: 1rem; }
+.cm-tag { flex: none; font-size: .78rem; font-weight: 700; border-radius: 4px; padding: 1px 8px; color: #fff; background: var(--accent); }
+.cm-tag.ng { background: var(--neg-ink); } .cm-tag.ok { background: var(--pos-ink); }
+.cm-sec { padding: 8px 14px 4px; font-family: var(--font-display); font-weight: 700; font-size: .86rem; color: var(--accent); border-top: 1px solid var(--line); background: color-mix(in oklab, var(--accent-soft) 45%, var(--panel)); letter-spacing: .04em; }
+.cm-item { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 4px 12px; padding: 6px 14px; border-top: 1px dashed var(--line); }
+.cm-sec + .cm-item { border-top: 0; }
+.cm-item.solo { grid-template-columns: minmax(0, 1fr); }
+.cm-hsub { padding: 4px 14px 6px; font-size: .84rem; color: var(--muted); background: var(--accent-soft); }
+.cm-head > span, .cm-line, .cm-sub, .cm-hsub { min-width: 0; overflow-wrap: anywhere; }
+.rp-page .cm-hsub { padding: 0 3mm 1.5mm; font-size: 8pt; }
+.cm-lbl { font-weight: 700; font-size: .85rem; color: var(--fg); }
+.cm-line + .cm-line { margin-top: 2px; }
+.cm-sub { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line); font-size: .84rem; color: var(--muted); }
+.cm-sub.note2 { border-left-color: transparent; }
+.cm-st { display: inline-block; min-width: 4.2em; text-align: center; font-size: .75rem; font-weight: 700; border-radius: 999px; padding: 0 8px; margin-right: 8px; color: #fff; background: var(--muted); }
+.cm-st.ng { background: var(--neg-ink); } .cm-st.ok { background: var(--pos-ink); } .cm-st.flat { background: #a07800; }
+.cm b.neg { color: var(--neg-ink); } .cm b.pos { color: var(--pos-ink); }
+.cm [contenteditable]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 560px) { .cm-item { grid-template-columns: minmax(0, 1fr); } }
+.rp-page .cm { border-radius: 2mm; font-size: 9pt; line-height: 1.55; }
+.rp-page .cm-head { padding: 2mm 3mm; font-size: 10pt; } .rp-page .cm-sec { padding: 1.5mm 3mm .8mm; font-size: 8.5pt; }
+.rp-page .cm-item { grid-template-columns: 25mm minmax(0, 1fr); gap: 1mm 3mm; padding: 1.2mm 3mm; } .rp-page .cm-lbl { font-size: 8.5pt; } .rp-page .cm-sub { font-size: 8pt; }
 .rp-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4mm; }
 .rp-none { color: #5d6068; font-size: 9pt; border: 1px dashed #dddcd6; border-radius: 2mm; padding: 3mm; }
 @media print {
@@ -158,7 +173,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   body.printing #repWrap { position: static; padding: 0; background: none; overflow: visible; }
   body.printing #repBar { display: none; }
   .rp-page { margin: 0; box-shadow: none; break-after: page; page-break-after: always; }
-  .rp-cm-head { background: #f2f4f9; }
+  .cm-head, .cm-sec { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 </style>
 
@@ -221,8 +236,9 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       </div>
     </div>
     <div class="kpis" id="kpis"></div>
-    <textarea class="comment" id="areaComment" aria-label="全体コメント" spellcheck="false"></textarea>
-    <div class="row"><span class="small muted">コメントは直接編集できます。一括コピーは「店舗名⇥コメント」の形式で、Excelにそのまま貼り付けできます。</span><button type="button" class="btn ghost" id="copyArea">全体コメントをコピー</button></div>
+    <div id="areaCommentView" class="cmView"></div>
+    <textarea class="comment" id="areaComment" aria-label="全体コメント" spellcheck="false" hidden></textarea>
+    <div class="row"><span class="small muted">「テキストで編集」で文章を直接直せます。コピーは文章のまま（一括コピーは「店舗名⇥コメント」の形式で、Excelにそのまま貼り付けできます）。</span><span class="row" style="gap:8px"><button type="button" class="btn ghost" id="editArea">テキストで編集</button><button type="button" class="btn ghost" id="copyArea">全体コメントをコピー</button></span></div>
   </section>
 
   <section class="card">
@@ -243,8 +259,9 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <div class="kpis" id="sKpis"></div>
     <div>
-      <div class="row" style="margin-bottom:8px"><h3>報告コメント（下書き）</h3><button type="button" class="btn ghost" id="copyStore">この店舗のコメントをコピー</button></div>
-      <textarea class="comment" id="storeComment" aria-label="店舗コメント" spellcheck="false"></textarea>
+      <div class="row" style="margin-bottom:8px"><h3>報告コメント（下書き）</h3><span class="row" style="gap:8px"><button type="button" class="btn ghost" id="editStore">テキストで編集</button><button type="button" class="btn ghost" id="copyStore">この店舗のコメントをコピー</button></span></div>
+      <div id="storeCommentView" class="cmView"></div>
+      <textarea class="comment" id="storeComment" aria-label="店舗コメント" spellcheck="false" hidden></textarea>
     </div>
     <div class="stack" data-tab="sales">
     <div id="fuBox" hidden>
@@ -1898,6 +1915,16 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
   const cls = v => v < 0 ? 'neg' : 'pos';
   const fit = ta => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 4) + 'px'; };
   ['areaComment', 'storeComment'].forEach(id => $(id).addEventListener('input', e => fit(e.target)));
+  /** コメントをセット：ふだんは見出し付きの表示、「テキストで編集」で文章を直す */
+  function setCmt(id, text) {
+    const ta = $(id), v = $(id + 'View'), btn = $(id === 'areaComment' ? 'editArea' : 'editStore');
+    ta.value = text; ta.hidden = true; v.hidden = false; v.innerHTML = cmtHtml(text, false); btn.textContent = 'テキストで編集';
+  }
+  function toggleEdit(id, btn) {
+    const ta = $(id), v = $(id + 'View');
+    if (ta.hidden) { ta.hidden = false; v.hidden = true; fit(ta); ta.focus(); btn.textContent = '見出し付きの表示に戻す'; }
+    else { ta.hidden = true; v.hidden = false; v.innerHTML = cmtHtml(ta.value, false); btn.textContent = 'テキストで編集'; }
+  }
   addEventListener('resize', () => { fit($('areaComment')); fit($('storeComment')); });
 
   /* ---------- サンプルデータ（架空） ---------- */
@@ -2118,7 +2145,8 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const [k0, k1] = later ? [S.k, other] : [other, S.k];
     const L0 = monthLabel(k0, STORE.months[k0].cur.rows), L1 = monthLabel(k1, STORE.months[k1].cur.rows);
     const viewingLater = !later; // 表示中の月が後の月か
-    const insert = (lines, line) => { if (!line) return; const i = lines.findIndex(l => /^・要因分解/.test(l.t)); lines.splice(i >= 0 ? i : lines.length, 0, line); };
+    // 見出し（【予算未達】など）のすぐ後に入れる
+    const insert = (lines, line) => { if (!line) return; const i = lines.findIndex(l => /^【/.test(l.t)); lines.splice(i >= 0 ? i + 1 : 0, 0, line); };
     R.follow = { k0, k1, L0, L1, viewingLater, stores: {} };
     R.stores.forEach(s => { const s0 = (later ? s : A0.stores.find(x => x.code === s.code)), s1 = (later ? A1.stores.find(x => x.code === s.code) : s);
       const items = followUp(s0, s1); R.follow.stores[s.code] = items; insert(s.lines, followUpLine(items, L0, L1, viewingLater)); });
@@ -2323,7 +2351,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       + kpi('客数要因', sman(a.custEff), `客数予算比 ${pct(a.custRate)}`, cls(a.custEff)) + kpi('単価要因', sman(a.upEff), `客単価 ${yen(a.up)}`, cls(a.upEff))
       + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `前年比 ${pct(a.yoy)}` : '')
       + fcKpis(a.fc, `達成見込み ${R.stores.filter(s => s.fc && s.fc.landDiff >= 0).length}／${R.stores.filter(s => s.fc).length}店`);
-    $('areaComment').value = commentText(a.lines, detail); fit($('areaComment'));
+    setCmt('areaComment', commentText(a.lines, detail));
 
     const maxAbs = Math.max(1, ...R.stores.map(s => Math.abs(s.diff)));
     const rows = [...R.stores].sort((x, y) => x.rate - y.rate);
@@ -2352,7 +2380,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       + kpi('単価要因', sman(s.upEff), `客単価 ${yen(s.up)}（予算${syen(s.up - s.bUp)}）`, cls(s.upEff))
       + kpi('前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし')
       + fcKpis(s.fc);
-    $('storeComment').value = commentText(s.lines, detail); fit($('storeComment'));
+    setCmt('storeComment', commentText(s.lines, detail));
     const fu = R.follow && R.follow.stores[s.code];
     $('fuBox').hidden = !(fu && fu.length);
     if (fu && fu.length) {
@@ -2444,23 +2472,53 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     return { s, S1, S2 };
   }
   /**
-   * コメントを項目ごとに見やすく：見出し（【予算未達】など）、「・項目：本文」は項目名と本文に分け、
-   * 「　」で始まる補足は直前の項目の下に小さく。▲の金額・率は赤、＋は青
+   * コメントを見やすく：見出し（区分）ごとにまとめ、項目名と本文を分け、文ごとに改行。
+   * 「　」で始まる補足は直前の項目の下に小さく。▲の金額は赤、＋の金額は青。前月の課題は状況ごとに1行
    */
-  function cmtHtml(text) {
+  const CM_SECTIONS = [
+    ['前月の課題', /課題のその後|課題の.*状況/], ['着地見込み', /^着地見込み/], ['客数・客単価・値引', /要因分解|値引|誘客|客単価/],
+    ['曜日・時間帯', /曜日|時間帯/], ['特異日・データ確認', /不振日|未達が大きかった日|上振れが大きかった日|売上0の日/],
+    ['労働時間・雑給', /労働時間|雑給|勤務予定/], ['残業', /残業/], ['標準比', /標準比/], ['採用・定着', /勤務期間|戦力化|新規採用|退社|減り方/],
+    ['営業部・店舗の比較', /営業部別|未達額上位|達成額上位|挽回|の高い店|店舗別|プレミアム比率/], ['原価', /^原価|理論差|喫食|平均との差|コース構成|食べ放題/], ['ロス', /ロス/],
+  ];
+  const secOf = lbl => { const x = CM_SECTIONS.find(([, re]) => re.test(lbl)); return x ? x[0] : null; };
+  /** カッコの外の区切り文字で分ける */
+  function splitOut(t, ch, keep) {
+    const out = []; let d = 0, cur = '';
+    for (const c of t) { if ('（(「'.includes(c)) d++; else if ('）)」'.includes(c)) d = Math.max(0, d - 1);
+      if (c === ch && d === 0) { if (keep) cur += c; if (cur.trim()) out.push(cur.trim()); cur = ''; } else cur += c; }
+    if (cur.trim()) out.push(cur.trim()); return out;
+  }
+  function cmtHtml(text, editable) {
+    const ce = editable ? ' contenteditable="true"' : '';
     const mark = t => esc(t).replace(/(▲[\d.,]+(?:万円|円|pt|%|h|人|件|日)?)/g, '<b class="neg">$1</b>').replace(/(\+[\d.,]+(?:万円|円))/g, '<b class="pos">$1</b>');
-    const items = []; let head = null;
+    const items = []; let head = null; const headSubs = [];
     text.split('\n').filter(l => l.trim()).forEach(l => {
       const h = l.match(/^【([^】]+)】(.*)$/);
-      if (h) { head = { tag: h[1], body: h[2] }; return; }
+      if (h) { if (!head) head = { tag: h[1], body: h[2] }; else items.push({ lbl: h[1], body: h[2], subs: [] }); return; }
       const it = l.match(/^・([^：:]{1,40})[：:](.*)$/);
       if (it) { const pm = it[1].match(/^(.*?)（(.+)）$/); items.push({ lbl: pm ? pm[1] : it[1], body: it[2], subs: pm ? [`※${pm[2]}`] : [] }); return; }
       if (/^[　\s]/.test(l) && items.length) { items[items.length - 1].subs.push(l.trim()); return; }
+      if (/^[　\s]/.test(l) && head) { headSubs.push(l.trim()); return; }
       items.push({ lbl: '', body: l.replace(/^・/, ''), subs: [] });
     });
     const tagCls = t => /未達|課題/.test(t) ? 'ng' : /達成/.test(t) ? 'ok' : 'info';
-    return `<div class="rp-cm">${head ? `<div class="rp-cm-head"><span class="rp-tag ${tagCls(head.tag)}">${esc(head.tag)}</span><span contenteditable="true">${mark(head.body)}</span></div>` : ''}`
-      + items.map(x => `<div class="rp-cm-item"><div class="rp-cm-lbl">${esc(x.lbl)}</div><div class="rp-cm-txt"><div contenteditable="true">${mark(x.body)}</div>${x.subs.map(t => `<div class="rp-cm-sub${/^※/.test(t) ? ' note2' : ''}" contenteditable="true">${mark(t)}</div>`).join('')}</div></div>`).join('') + '</div>';
+    const FU = { '悪化': 'ng', '横ばい': 'flat', '改善中': 'ok', '解消': 'ok' };
+    const body = x => {
+      // 前月の課題：状況ごとに1行
+      const parts = splitOut(x.body.replace(/。$/, ''), '／');
+      if (parts.length && parts.every(p => /^(悪化|横ばい|改善中|解消)/.test(p))) return parts.map(p => { const m = p.match(/^(悪化|横ばい|改善中|解消)[^：]*：(.*)$/); return m ? `<div class="cm-line"><span class="cm-st ${FU[m[1]]}">${m[1]}</span>${mark(m[2])}</div>` : `<div class="cm-line">${mark(p)}</div>`; }).join('');
+      return splitOut(x.body, '。', true).map(t => `<div class="cm-line">${mark(t)}</div>`).join('');
+    };
+    let html = head ? `<div class="cm-head"><span class="cm-tag ${tagCls(head.tag)}">${esc(head.tag)}</span><span${ce}>${mark(head.body)}</span></div>` + headSubs.map(t => `<div class="cm-hsub"${ce}>${mark(t)}</div>`).join('') : '';
+    // 区分ごとにまとめる（区分の順は最初に出てきた順）
+    let prev = null; const groups = [];
+    items.forEach(x => { const sname = (x.lbl && secOf(x.lbl)) || prev || 'その他'; prev = sname; let g = groups.find(g => g.name === sname); if (!g) groups.push(g = { name: sname, xs: [] }); g.xs.push(x); });
+    groups.forEach(g => { html += `<div class="cm-sec">${esc(g.name)}</div>`; g.xs.forEach(x => { const sname = g.name;
+      const solo = !x.lbl || x.lbl === sname;
+      html += `<div class="cm-item${solo ? ' solo' : ''}">${solo ? '' : `<div class="cm-lbl">${esc(x.lbl)}</div>`}<div class="cm-txt"><div${ce}>${body(x)}</div>${x.subs.map(t => `<div class="cm-sub${/^※/.test(t) ? ' note2' : ''}"${ce}>${splitOut(t, '。', true).map(mark).join('<br>')}</div>`).join('')}</div></div>`;
+    }); });
+    return `<div class="cm">${html}</div>`;
   }
   function reportPages({ s, S1, S2 }) {
     const per = $('period').textContent || `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日`;
@@ -2469,9 +2527,9 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const tblw = h => h ? `<div class="tbl"><table>${h}</table></div>` : '';
     const page = (n, title, body) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料</div><h1>${esc(s.name)}</h1></div><div style="text-align:right"><h2>${title}</h2><div class="muted">${esc(per)}</div></div></div>
       <div class="rp-body">${body}</div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 4</span></div></section>`;
-    return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S1.cmt)}</div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
+    return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S1.cmt, true)}</div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
       + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>曜日区分 × 時間帯の予算比</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div><div><h3>曜日別</h3>${tblw(S1.wd)}</div>`)
-      + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S2.cmt)}</div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
+      + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S2.cmt, true)}</div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
       + page(4, '喫食量・コース・値引', `<div><h3>原価・喫食量・皿数（食べ放題）</h3>${S2.cost || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>${S2.yoy ? `<div><h3>皿数・喫食量の前年比較</h3>${S2.yoy}</div>` : ''}<div><h3>コース構成</h3>${S2.course || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>
         <div><h3>値引</h3>${S1.discCat ? tblw(S1.discCat) : S1.disc ? tblw(S1.disc) : none('値引詳細を読み込むと表示します。')}</div>`);
   }
@@ -2504,14 +2562,14 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
   function renderTenure() {
     const T = R.tenure;
     $('storeTblTitle').textContent = '店舗別 勤務期間・採用・退社';
-    if (!T) { $('kpis').innerHTML = ''; $('areaComment').value = NO_TENURE; fit($('areaComment')); $('storeTbl').innerHTML = ''; $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join(''); renderStore(); return; }
+    if (!T) { $('kpis').innerHTML = ''; setCmt('areaComment', NO_TENURE); $('storeTbl').innerHTML = ''; $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join(''); renderStore(); return; }
     const b = T.bands, ramp = b[1].n && b[3].n && b[3].avg ? b[1].avg / b[3].avg : null;
     $('kpis').innerHTML = kpi('勤務したパート', `${T.n}名`, `${ymTxt(T.curYm)}・履歴${T.months.length}か月`)
       + kpi('新規採用', `${T.hires.length}名`, '当月・前月入社')
       + kpi('退社', `${T.leavers.filter(l => l.sure).length}名`, T.leavers.some(l => !l.sure) ? `可能性 ${T.leavers.filter(l => !l.sure).length}名` : '')
       + kpi('退社リスク注意', `${T.risk.length}名`, `うち要注意 ${T.risk.filter(r => r.level === 'high').length}名`, T.risk.length ? 'neg' : '')
       + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年 ${hh(b[1].avg)}／1年以上 ${hh(b[3].avg)}`, ramp < 0.6 ? 'neg' : '') : '');
-    $('areaComment').value = commentText(R.area.tenureLines || [], detail); fit($('areaComment'));
+    setCmt('areaComment', commentText(R.area.tenureLines || [], detail));
     const rows = [...R.stores].sort((x, y) => ((y.tenure || {}).risk || []).length - ((x.tenure || {}).risk || []).length);
     const cell = x => x && x.n ? `${x.n}名<span class="muted small">・${hh(x.avg)}</span>` : '<span class="muted">－</span>';
     $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">パート</th>${TENURE_LABELS.map(l => `<th class="n">${l}</th>`).join('')}<th class="n">入社日不明</th><th class="n">新規採用</th><th class="n">退社</th><th class="n">リスク注意</th></tr></thead><tbody>`
@@ -2529,11 +2587,11 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
   function renderStoreTenure(s) {
     $('storeName').textContent = s.name;
     const T = R.tenure, t = s.tenure;
-    if (!T || !t) { $('sKpis').innerHTML = ''; $('storeComment').value = T ? '当月に勤務したパートの履歴がありません。' : NO_TENURE; fit($('storeComment')); $('rampChart').innerHTML = ''; $('bandTbl2').innerHTML = ''; $('tenurePeople').innerHTML = ''; return; }
+    if (!T || !t) { $('sKpis').innerHTML = ''; setCmt('storeComment', T ? '当月に勤務したパートの履歴がありません。' : NO_TENURE); $('rampChart').innerHTML = ''; $('bandTbl2').innerHTML = ''; $('tenurePeople').innerHTML = ''; return; }
     const b = t.bands, ramp = b[1].n && b[3].n && b[3].avg ? b[1].avg / b[3].avg : null;
     $('sKpis').innerHTML = kpi('勤務したパート', `${t.n}名`, ymTxt(T.curYm)) + kpi('新規採用', `${t.hires.length}名`, '当月・前月入社') + kpi('退社', `${t.leavers.length}名`, '') + kpi('退社リスク注意', `${t.risk.length}名`, '', t.risk.length ? 'neg' : '')
       + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年／1年以上`, ramp < 0.6 ? 'neg' : '') : '');
-    $('storeComment').value = commentText(s.tenureLines, detail); fit($('storeComment'));
+    setCmt('storeComment', commentText(s.tenureLines, detail));
     // 戦力化の棒（対象店全体）
     const rp = T.ramp, W = 560, H2 = 210, L0 = 40, base = 160, top = 18, bw = (W - L0 - 10) / rp.length;
     const mx = Math.max(1, ...rp.map(r => r.avg || 0));
@@ -2569,7 +2627,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const L = R.labor;
     $('storeTblTitle').textContent = '店舗別 労働時間・雑給・残業';
     if (!L) {
-      $('kpis').innerHTML = ''; $('areaComment').value = NO_LABOR; fit($('areaComment'));
+      $('kpis').innerHTML = ''; setCmt('areaComment', NO_LABOR);
       $('storeTbl').innerHTML = ''; $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
       renderStore(); return;
     }
@@ -2580,7 +2638,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       + (L.hasWage && full && R.area.fc ? kpi('雑給率（見込み）', pct(a.landCost / R.area.fc.landing), `売上見込み ${man(R.area.fc.landing)}`) : '')
       + kpi('残業アラート', `${a.alerts.length}名`, `60h以上 ${a.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, a.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '')
       + (R.area.std ? kpi('標準比（実績）', pct(R.area.std.cutRate), `${L.mo + 1}/${L.cut}時点`) + (land ? kpi('標準比（着地見込み）', pct(R.area.std.landRate), R.area.std.budgetRate != null ? `予算標準比 ${pct(R.area.std.budgetRate)}` : '', R.area.std.budgetRate != null && R.area.std.landRate > R.area.std.budgetRate ? 'neg' : 'pos') : '') : '');
-    $('areaComment').value = commentText(R.area.laborLines, detail); fit($('areaComment'));
+    setCmt('areaComment', commentText(R.area.laborLines, detail));
     const hasStd = !!R.area.std;
     const stdCells = (s, land) => { if (!hasStd) return ''; const x = s.std; if (!x || x.missing) return `<td class="n muted" colspan="${land ? 4 : 2}">卓数なし</td>`;
       return `<td class="n">${pct(x.cutRate)}</td>${land ? `<td class="n ${x.budgetRate != null && x.landRate > x.budgetRate ? 'neg' : ''}"><b>${pct(x.landRate)}</b></td>` : ''}<td class="n muted">${pct(x.budgetRate)}</td>${land ? `<td class="n ${x.over > 0 ? 'neg' : 'pos'}">${x.over != null ? (x.over > 0 ? '+' : '▲') + hrs0(Math.abs(x.over) * 60) : '－'}</td>` : ''}`; };
@@ -2629,14 +2687,14 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
   function renderStoreLabor(s) {
     $('storeName').textContent = s.name;
     const l = s.labor, L = R.labor;
-    if (!l) { $('stdBox').hidden = true; $('sKpis').innerHTML = ''; $('storeComment').value = L ? '勤怠データにこの店舗がありません。' : NO_LABOR; fit($('storeComment')); $('laborDaily').innerHTML = ''; $('peopleTbl').innerHTML = ''; $('laborNote').textContent = ''; return; }
+    if (!l) { $('stdBox').hidden = true; $('sKpis').innerHTML = ''; setCmt('storeComment', L ? '勤怠データにこの店舗がありません。' : NO_LABOR); $('laborDaily').innerHTML = ''; $('peopleTbl').innerHTML = ''; $('laborNote').textContent = ''; return; }
     const land = L.cut < L.N;
     $('sKpis').innerHTML = kpi('労働時間（実績）', hrs0(l.mins), `${L.mo + 1}/${L.cut}時点・社員 ${hrs0(l.staffMins)}`)
       + (land ? kpi('労働時間（着地見込み）', hrs0(l.landMins), `残り予定 ${hrs0(l.planMins)}`) : '')
       + (L.hasWage && !l.wageless ? kpi('雑給（着地見込み）', man(l.landCost), `実績 ${man(l.cost)}`) + (lRate(s) != null ? kpi('雑給率（見込み）', pct(lRate(s)), `売上見込み ${man(s.fc.landing)}`) : '') : '')
       + kpi('残業アラート', `${l.alerts.length}名`, `60h以上 ${l.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '')
       + (s.std && !s.std.missing ? kpi('標準比（着地見込み）', pct(s.std.landRate), `実績 ${pct(s.std.cutRate)}${s.std.budgetRate != null ? `・予算 ${pct(s.std.budgetRate)}` : ''}`, s.std.budgetRate != null && s.std.landRate > s.std.budgetRate ? 'neg' : 'pos') : '');
-    $('storeComment').value = commentText(s.laborLines, detail); fit($('storeComment'));
+    setCmt('storeComment', commentText(s.laborLines, detail));
     $('laborNote').textContent = `${L.mo + 1}/${L.cut}までは実績、${L.cut + 1}日以降は${L.hasSchedule ? '勤務スケジュール表' : 'タイムカードの勤務予定'}の予定労働時間です。`;
     // 日別の棒
     const D = l.days, W = Math.max(320, D.length * 22 + 50), Hh = 190, top = 12, base = 150;
@@ -2673,7 +2731,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       + (a.menu ? kpi('食べ放題フード', a.menu.foodQty.toFixed(1) + '皿/人', `${Math.round(a.menu.foodG).toLocaleString('ja-JP')}g/人`) + kpi('1人あたり原価', yen(a.menu.costPP), `精肉 ${a.menu.meatQty.toFixed(2)}皿`) : '')
       + (a.inv ? kpi('原価率理論差', pt2(a.inv.gap), `値引前原価率 ${pct2(a.inv.preRate)}`) + kpi('ロス込理論差', pt2(a.inv.gapExLoss), `原価管理表 ${a.inv.n}店`)
         : kpi('理論差（概算）', ptx(a.gapRate), `仕入率 ${pct(a.buyRate)}${a.pGapRate != null ? `・前年 ${ptx(a.pGapRate)}` : ''}`));
-    $('areaComment').value = commentText(a.costLines, detail); fit($('areaComment'));
+    setCmt('areaComment', commentText(a.costLines, detail));
     $('storeTblTitle').textContent = R.stores.some(s => s.inv) ? '店舗別 原価・ロス・原価率理論差' : '店舗別 原価・ロス・理論差（概算）';
     const rows = [...R.stores].sort((x, y) => (y.costRate || 0) - (x.costRate || 0));
     const bR = a.benchCostRate != null ? a.benchCostRate : a.costRate;
@@ -2703,7 +2761,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       + (I ? kpi('原価率理論差', pt2(I.gap), sman(I.gapAmt)) + kpi('ロス込理論差', pt2(I.gapExLoss), `ロス率 ${p2(I.lossPre)}`)
         : kpi('仕入率', pct(s.buyRate), s.pBuyRate != null ? `前年 ${pct(s.pBuyRate)}` : '') + kpi('理論差（概算）', ptx(s.gapRate), `うちロス ${ptx(s.lossRate || 0)}`))
       + (I ? '' : kpi('ロス率', p2(s.lossRate), s.loss ? `ロス額 ${man(s.loss)}` : ''));
-    $('storeComment').value = commentText(s.costLines, detail); fit($('storeComment'));
+    setCmt('storeComment', commentText(s.costLines, detail));
     // ロス
     $('lossBox').hidden = s.lossRate == null;
     if (s.lossRate != null) {
@@ -2912,6 +2970,8 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     catch (e) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); btn.textContent = 'コピーしました'; } catch (_) { btn.textContent = '選択してコピーしてください'; } ta.remove(); }
     setTimeout(() => { btn.textContent = old; }, 1600);
   }
+  $('editArea').addEventListener('click', e => toggleEdit('areaComment', e.currentTarget));
+  $('editStore').addEventListener('click', e => toggleEdit('storeComment', e.currentTarget));
   $('copyArea').addEventListener('click', e => copy($('areaComment').value, e.currentTarget));
   $('copyStore').addEventListener('click', e => copy($('storeComment').value, e.currentTarget));
   function setTab(tb) { tab = tb; pref.set('tab', tb); render(); }
