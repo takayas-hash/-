@@ -40,7 +40,8 @@ function extractRows(XLSX, ws) {
   if (hr < 0) throw new Error('「店舗コード」「営業日」の見出し行が見つかりません');
   const H = aoa[hr];
   const col = name => H.indexOf(name);
-  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分', area: '営業部', cost: '原価', loss: '廃棄額', buy: '仕入高' };
+  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分', area: '営業部', cost: '原価', loss: '廃棄額', buy: '仕入高',
+    salesFc: '売上日別予測', custFc: '客数日別予測', staffAct: '社員労働時間(分)', paAct: 'P/A労働時間(分)', staffPlan: '社員労働時間日別予測(分)', paPlan: 'P/A労働時間日別予測(分)' };
   const C = {};
   for (const [k, n] of Object.entries(need)) C[k] = col(n);
   for (const k of ['code', 'date', 'sales', 'budget']) if (C[k] < 0) throw new Error(`列「${need[k]}」が見つかりません`);
@@ -75,6 +76,10 @@ function extractRows(XLSX, ws) {
       cost: C.cost >= 0 ? num(r[C.cost]) : 0,
       loss: C.loss >= 0 ? num(r[C.loss]) : 0,
       buy: C.buy >= 0 ? num(r[C.buy]) : 0,
+      // 店長の売上・客数予測（日別）と、労働時間の実績・計画（分。社員＋P/A）
+      salesFc: C.salesFc >= 0 ? num(r[C.salesFc]) : 0, custFc: C.custFc >= 0 ? num(r[C.custFc]) : 0,
+      staffAct: C.staffAct >= 0 ? num(r[C.staffAct]) : 0, minAct: (C.staffAct >= 0 ? num(r[C.staffAct]) : 0) + (C.paAct >= 0 ? num(r[C.paAct]) : 0),
+      staffPlan: C.staffPlan >= 0 ? num(r[C.staffPlan]) : 0, minPlan: (C.staffPlan >= 0 ? num(r[C.staffPlan]) : 0) + (C.paPlan >= 0 ? num(r[C.paPlan]) : 0),
       hourS, hourC,
     });
   }
@@ -538,8 +543,8 @@ function laborLines(s, L, f, sales, ctx) {
   const cutTxt = L.cut ? `${L.mo + 1}/${L.cut}時点` : '実績なし';
   const land = L.cut < L.N;
   if (!L.cut) push(`【労働時間】勤務予定${hrs0(s.landMins)}（${L.mo + 1}月の勤務スケジュール。うち社員${hrs0((s.staffMins || 0) + (s.planStaffMins || 0))}）。`);
-  else push(`【労働時間】実績${hrs0(s.mins)}（${cutTxt}。うち社員${hrs0(s.staffMins)}）${land ? `、着地見込み${hrs0(s.landMins)}（残り${L.N - L.cut}日の勤務予定${hrs0(s.planMins)}）` : ''}。`);
-  if (s.estDays) push(`　※残り${s.estDays}日は勤務予定が未作成（予定が同じ曜日区分の実績平均の半分未満）のため、実績平均で補っています。`);
+  else push(`【労働時間】実績${hrs0(s.mins)}（${cutTxt}。うち社員${hrs0(s.staffMins)}）${land ? `、着地見込み${hrs0(s.landMins)}（残り${L.N - L.cut}日の${L.fromSummary ? '計画' : '勤務予定'}${hrs0(s.planMins)}）` : ''}。`);
+  if (s.estDays) push(`　※残り${s.estDays}日は${L.fromSummary ? '計画の労働時間がない' : '勤務予定が未作成（予定が同じ曜日区分の実績平均の半分未満）の'}ため、実績平均で補っています。`);
   if (L.hasWage && s.wageless === true) push('・雑給：時給データにこの店舗のパートがいないため計算できません（時給データの店舗を確認してください）。');
   else if (L.hasWage) {
     const landSales = f ? f.landing : null;
@@ -548,6 +553,7 @@ function laborLines(s, L, f, sales, ctx) {
     push(t + `。割増は残業25%・深夜25%（重なる時間は50%）で計算${s.wageless ? `（時給データのない${s.wagelessNames.join('・')}を除く）` : ''}。`);
     if (s.noWage) push(`　時給データにない${s.noWage}名（新規入社など）は店舗のパート平均時給${s.avgWage ? yen(s.avgWage) : ''}で計算しています。`, true);
   }
+  if (L.fromSummary) { push('　※労働時間は売上集計表の実績・計画（労働時間日別予測）から。タイムカード表・勤務スケジュール表を入れると、残業・雑給・個人別も出ます。', true); return out; }
   if (s.alerts && s.alerts.length) {
     const over = s.alerts.filter(p => p.totalOt >= OT_LIMIT);
     push(`・残業アラート（月の残業見込み${OT_WARN / 60}h以上）：${s.alerts.slice(0, 5).map(p => `${p.store ? p.store + '・' : ''}${p.name}${p.staff ? '（社員）' : ''}${hrs(p.totalOt)}（実績${hrs(p.ot)}＋予定${hrs(p.planOt)}）`).join('、')}${s.alerts.length > 5 ? ` ほか${s.alerts.length - 5}名` : ''}。${over.length ? `うち${over.length}名は${OT_LIMIT / 60}h以上の見込みで、勤務予定の見直しが必要。` : ''}`);
@@ -618,42 +624,98 @@ function stdHours(cust, type, st, tables, M, lane) {
   return h;
 }
 /** 店舗の標準比：確定日までは実績（客数＝売上集計表、時間＝タイムカード）、以降は客数見込みと勤務予定 */
-function analyzeStd(s, lab, L, std, settings, salesLast) {
-  if (!lab || !std) return null;
+/**
+ * 店舗の標準比（日別）
+ * 客数：過ぎた日は実績、これからの日は店長の客数予測（なければ客数見込み）
+ * 労働時間：過ぎた日は実績（売上集計表、なければタイムカード）、これからの日は計画（売上集計表の労働時間日別予測、なければ勤務スケジュール）
+ * あわせて「計画標準比」＝計画労働時間÷店長の客数予測からの標準時間（過ぎた日も含め、計画がどうだったか）
+ */
+function analyzeStd(s, lab, L, std, settings, salesLast, rows) {
+  if (!std) return null;
+  rows = rows || [];
   const info = std.info[s.code] || {}, set = settings && settings[s.code];
   const lane = !!info.lane;
   const st = { ...STD_DEFAULT, ...(set || {}) }, tables = (set && set.tables) || info.tables;
   if (lane) st.perCust = info.perCust;
   if (!tables) return { missing: true };
   if (lane ? !(std.laneTables && std.laneTables.length) : !(std.tables && std.tables.length)) return { missing: true, need: lane ? 'lane' : 'normal' };
+  const base = lab ? lab.days[0].date : rows.length ? rows[0].date : null; if (!base) return null;
+  const y = base.getFullYear(), mo0 = base.getMonth(), N = new Date(y, mo0 + 1, 0).getDate();
   const hol = new Set(std.holidays);
   const typeOf = date => hol.has(+date) || date.getDay() === 0 || date.getDay() === 6 ? 2 : 1;
-  const actCust = {}; s.daily.forEach(d => { actCust[d.date.getDate()] = d.cust; });
-  const fcCust = {}; if (s.fc) s.fc.days.forEach(d => { fcCust[d.date.getDate()] = d.custFc; });
-  const days = lab.days.map((d, i) => {
-    const n = i + 1, type = typeOf(d.date);
-    const useAct = n <= salesLast && actCust[n] != null;
-    const cust = useAct ? actCust[n] : fcCust[n] != null ? fcCust[n] : null;
-    const sh = cust != null ? stdHours(cust, type, st, tables, std, lane) : null;
-    return { date: d.date, type, cust, custEst: !useAct, hours: d.mins / 60, done: d.done, est: d.est, std: sh };
-  });
-  const ok = days.filter(d => d.std != null);
+  const rowOf = {};
+  rows.forEach(r => { const k = r.date.getDate(), o = (rowOf[k] = rowOf[k] || { cust: 0, custFc: 0, sales: 0, minAct: 0, minPlan: 0 }); o.cust += r.cust || 0; o.custFc += r.custFc || 0; o.sales += r.sales || 0; o.minAct += r.minAct || 0; o.minPlan += r.minPlan || 0; });
+  const estCust = {}; if (s.fc) s.fc.days.forEach(d => { estCust[d.date.getDate()] = d.custFc; });
+  const days = [];
+  for (let n = 1; n <= N; n++) {
+    const date = new Date(y, mo0, n), type = typeOf(date), row = rowOf[n] || {}, ld = lab ? lab.days[n - 1] : null;
+    const sh = c => c != null ? stdHours(c, type, st, tables, std, lane) : null;
+    const salesDone = n <= salesLast && row.sales > 0;
+    const custAct = salesDone ? row.cust : null;
+    const mgrFc = row.custFc > 0, custFc = mgrFc ? row.custFc : (estCust[n] ?? null);
+    const actH = row.minAct > 0 ? row.minAct / 60 : (ld && ld.done ? ld.mins / 60 : null);
+    const planFromSum = row.minPlan > 0, planH = planFromSum ? row.minPlan / 60 : (ld && !ld.done && ld.mins > 0 ? ld.mins / 60 : null);
+    const done = salesDone && actH != null;
+    const hours = done ? actH : (planH ?? 0);
+    const cust = done ? custAct : custFc;
+    const stdFc = sh(custFc), stdA = sh(custAct);
+    days.push({ date, type, cust, custEst: !done, custFc, custAct, mgrFc, hours, planH, actH, planSrc: planFromSum ? 'plan' : planH != null ? 'sched' : null,
+      done, est: !done && !planFromSum && !!(ld && ld.est), std: sh(cust), stdFc, stdA,
+      rPlan: planH != null && stdFc ? planH / stdFc : null, rAct: done && stdA ? actH / stdA : null, noPlan: !done && !(hours > 0) });
+  }
+  // 着地：実績の日＋計画（予定）のある日。計画のない日は除く
+  const ok = days.filter(d => d.std != null && (d.done || d.hours > 0));
   const past = ok.filter(d => d.done), all = ok;
   const H = ds => sum(ds, d => d.hours), SH = ds => sum(ds, d => d.std), C = ds => sum(ds, d => d.cust);
-  const mo = days[0].date.getMonth() + 1, br = (std.budget[s.code] || {})[mo] ?? null;
+  const mo = mo0 + 1, br = (std.budget[s.code] || {})[mo] ?? null;
   const landStd = SH(all), landH = H(all);
   const r = {
     settings: st, custom: !!set, tables, lane, budgetRate: br, days,
     cutStd: SH(past), cutHours: H(past), cutCust: C(past), cutRate: SH(past) ? H(past) / SH(past) : null,
     landStd, landHours: landH, landCust: C(all), landRate: landStd ? landH / landStd : null,
-    remDays: days.filter(d => !d.done).length, complete: ok.length === days.length,
+    remDays: days.filter(d => !d.done && d.hours > 0).length, noPlanDays: days.filter(d => d.noPlan).length, complete: ok.length === days.length,
   };
+  // 計画標準比（店長の客数予測と計画労働時間で、月を通して）
+  const pd = days.filter(d => d.planSrc === 'plan' && d.stdFc);
+  r.planDays = pd.length; r.planHours = sum(pd, d => d.planH); r.planStd = sum(pd, d => d.stdFc); r.planRate = r.planStd ? r.planHours / r.planStd : null;
+  r.mgrDays = days.filter(d => d.mgrFc).length;
+  // 客数予測の当たり具合（過ぎた日）
+  const acc = days.filter(d => d.done && d.mgrFc && d.custAct != null);
+  r.fcAcc = acc.length ? { n: acc.length, ratio: sum(acc, d => d.custAct) / sum(acc, d => d.custFc) } : null;
+  // 予算標準比を超える計画の日（これからの日）
+  if (br != null) r.overDays = days.filter(d => !d.done && d.rPlan != null && d.rPlan > br).map(d => ({ date: d.date, rPlan: d.rPlan, overH: d.planH - d.stdFc * br })).sort((a, b) => b.overH - a.overH);
   // 予算標準比との差：目標時間＝標準時間×予算標準比
-  if (br != null) { r.target = landStd * br; r.over = landH - r.target; r.overCost = r.over > 0 && lab.avgWage ? r.over * lab.avgWage : null; }
+  if (br != null) { r.target = landStd * br; r.over = landH - r.target; r.overCost = r.over > 0 && lab && lab.avgWage ? r.over * lab.avgWage : null; }
   // 週別（月曜始まり）
   const wk = {}; ok.forEach(d => { const w = Math.floor((d.date.getDate() - 1 + ((new Date(d.date.getFullYear(), d.date.getMonth(), 1).getDay() + 6) % 7)) / 7); (wk[w] = wk[w] || []).push(d); });
   r.weeks = Object.keys(wk).sort((a, b) => a - b).map(w => { const ds = wk[w]; return { from: ds[0].date, to: ds[ds.length - 1].date, n: ds.length, cust: C(ds), std: SH(ds), hours: H(ds), rate: SH(ds) ? H(ds) / SH(ds) : null, done: ds.every(d => d.done), mixed: ds.some(d => d.done) && ds.some(d => !d.done) }; });
   return r;
+}
+/** タイムカード・勤務スケジュールがないとき、売上集計表の労働時間（実績・日別予測）から労働時間の形を作る */
+function laborFromSummary(rows, lastDate) {
+  if (!rows.some(r => r.minAct > 0 || r.minPlan > 0)) return null;
+  const y = rows[0].date.getFullYear(), mo = rows[0].date.getMonth(), N = new Date(y, mo + 1, 0).getDate();
+  const cut = lastDate.getMonth() === mo && lastDate.getFullYear() === y ? Math.max(0, ...rows.filter(r => r.minAct > 0 && r.date <= lastDate).map(r => r.date.getDate())) : 0;
+  const codes = [...new Set(rows.map(r => r.code))];
+  const stores = codes.map(code => {
+    const rs = rows.filter(r => r.code === code), name = rs[0].name;
+    const days = [];
+    for (let d = 1; d <= N; d++) {
+      const date = new Date(y, mo, d), xs = rs.filter(r => r.date.getDate() === d), dt = xs[0] ? xs[0].dt : dtOfDate(date), done = d <= cut;
+      days.push({ date, dt, done, mins: sum(xs, r => done ? r.minAct : r.minPlan), staffMins: sum(xs, r => done ? r.staffAct : r.staffPlan), cost: 0, ot: 0, night: 0 });
+    }
+    // 計画のない日（これから）は、同じ曜日区分の実績平均で補う
+    const dd = days.filter(d => d.done && d.mins > 0);
+    days.filter(d => !d.done && !d.mins).forEach(d => { const same = dd.filter(x => x.dt === d.dt), use = same.length ? same : dd; if (use.length) { d.est = true; d.mins = sum(use, x => x.mins) / use.length; d.staffMins = sum(use, x => x.staffMins) / use.length; } });
+    const past = days.filter(d => d.done), fut = days.filter(d => !d.done);
+    const o = { code, name, cut, N, days, people: [], mins: sum(past, d => d.mins), staffMins: sum(past, d => d.staffMins), cost: 0, planMins: sum(fut, d => d.mins), planStaffMins: sum(fut, d => d.staffMins), planCost: 0,
+      estDays: fut.filter(d => d.est).length, avgWage: null, noWage: 0, wageless: false, alerts: [] };
+    o.landMins = o.mins + o.planMins; o.landCost = 0;
+    return o;
+  }).filter(s => s.landMins > 0);
+  const T = k => sum(stores, s => s[k] || 0);
+  const area = { mins: T('mins'), staffMins: T('staffMins'), planStaffMins: T('planStaffMins'), cost: 0, planMins: T('planMins'), planCost: 0, landMins: T('landMins'), landCost: 0, estDays: Math.max(0, ...stores.map(s => s.estDays)), noWage: 0, wageless: 0, wagelessNames: [], alerts: [], cut, N };
+  return { stores, area, cut, N, y, mo, hasSchedule: false, hasTimecard: false, hasWage: false, fromSummary: true };
 }
 const p0 = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
 function stdLines(x, ctx) {
@@ -663,13 +725,21 @@ function stdLines(x, ctx) {
   let t;
   if (!x.cutHours) t = `・標準比${x.lane ? '（特急レーン店）' : ''}：勤務予定どおりなら${p0(x.landRate)}（客数見込み${Math.round(x.landCust).toLocaleString('ja-JP')}人×勤務予定${hrs0(x.landHours * 60)}、人時来客${x.landHours ? (x.landCust / x.landHours).toFixed(2) : '－'}）`;
   else { t = `・標準比${x.lane ? '（特急レーン店）' : ''}：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
-    if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は客数見込み×勤務予定）`; }
+    if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は${x.mgrDays ? '店長の客数予測×計画労働時間' : '客数見込み×勤務予定'}）`; }
   if (x.budgetRate != null) t += `。予算標準比${p0(x.budgetRate)}`;
   out.push({ t: t + '。', d: false });
   if (x.budgetRate != null && x.remDays) {
     if (x.over > 0) out.push({ t: `　予算標準比に収めるには、${x.cutHours ? '残り' : ''}${x.remDays}日で${hrs0(x.over * 60)}（1日${(x.over / x.remDays).toFixed(1)}h）の削減が必要${x.overCost ? `（雑給換算で約${man(x.overCost)}）` : ''}。`, d: false });
     else out.push({ t: `　勤務予定どおりなら予算標準比内（余裕${hrs0(-x.over * 60)}）。`, d: false });
   }
+  // 店長の計画（客数予測と計画労働時間）
+  if (x.planDays) {
+    let t2 = `・計画標準比（店長の客数予測×計画労働時間、${x.planDays}日分）：${p0(x.planRate)}`;
+    if (x.budgetRate != null && x.overDays) t2 += x.overDays.length ? `。これからの日で予算標準比${p0(x.budgetRate)}を超える計画が${x.overDays.length}日（${x.overDays.slice(0, 4).map(d => `${md(d.date)}(${WEEKDAYS[(d.date.getDay() + 6) % 7]})${p0(d.rPlan)}・+${d.overH.toFixed(1)}h`).join('、')}${x.overDays.length > 4 ? ' ほか' : ''}）` : '。これからの日はすべて予算標準比内の計画';
+    out.push({ t: t2 + '。', d: false });
+  }
+  if (x.fcAcc) out.push({ t: `　客数予測の当たり具合：過ぎた${x.fcAcc.n}日の実際の客数は予測の${p0(x.fcAcc.ratio)}${x.fcAcc.ratio >= 1.05 ? '（予測より多い。人が足りなくなりやすい）' : x.fcAcc.ratio <= 0.95 ? '（予測より少ない。計画の労働時間が多めになりやすい）' : ''}。`, d: false });
+  if (x.noPlanDays) out.push({ t: `　※計画の労働時間がない${x.noPlanDays}日は着地見込みに含めていません。`, d: true });
   const bad = x.weeks.filter(w => w.n >= 3 && w.rate != null && w.rate >= 1.05).sort((a, b) => b.rate - a.rate)[0];
   if (bad) out.push({ t: `　週別で最も高いのは${md(bad.from)}〜${md(bad.to)}の${p0(bad.rate)}${bad.done ? '' : '（見込みを含む）'}。`, d: true });
   if (!x.custom) out.push({ t: `　※店舗設定（ランチ営業・${x.lane ? '' : 'T8台数・'}営業時間${x.lane ? '' : '・自動案内'}）が初期値のままです。「人」タブの店舗詳細で確認してください。`, d: true });
@@ -946,7 +1016,7 @@ function forecastStore(s, rows, prevRows, lastDate, monthEnd) {
     avgBudget[dt] = bs.length ? sum(bs, d => d.budget) / bs.length : (s.daily.length ? sum(s.daily, d => d.budget) / s.daily.length : 0);
   });
   const fut = {};
-  rows.filter(r => r.date > lastDate).forEach(r => { const k = +r.date; (fut[k] = fut[k] || { budget: 0, custBudget: 0, dt: r.dt }); fut[k].budget += r.budget; fut[k].custBudget += r.custBudget || 0; });
+  rows.filter(r => r.date > lastDate).forEach(r => { const k = +r.date; (fut[k] = fut[k] || { budget: 0, custBudget: 0, salesFc: 0, custFc: 0, dt: r.dt }); fut[k].budget += r.budget; fut[k].custBudget += r.custBudget || 0; fut[k].salesFc += r.salesFc || 0; fut[k].custFc += r.custFc || 0; });
   const days = [];
   for (let d = lastDate.getDate() + 1; d <= monthEnd.getDate(); d++) {
     const date = new Date(lastDate.getFullYear(), lastDate.getMonth(), d);
@@ -955,8 +1025,11 @@ function forecastStore(s, rows, prevRows, lastDate, monthEnd) {
     const budget = f ? f.budget : avgBudget[dt];
     const cb = f && f.custBudget ? f.custBudget : avgCustB[dt];
     // 客数の見込み：客数予算×ここまでの曜日区分別の客数予算比。客数予算がなければ売上見込み÷ここまでの客単価
-    const custFc = cb && custRate[dt] != null ? cb * custRate[dt] : s.up ? budget * typeRate[dt] / s.up : 0;
-    days.push({ date, dt, budget, est: !f, fc: budget * typeRate[dt], custFc });
+    let custFc = cb && custRate[dt] != null ? cb * custRate[dt] : s.up ? budget * typeRate[dt] / s.up : 0;
+    let fc = budget * typeRate[dt], mgr = false;
+    // 店長の日別予測があればそれを使う
+    if (f && f.salesFc > 0) { fc = f.salesFc; mgr = true; if (f.custFc > 0) custFc = f.custFc; else if (s.up) custFc = fc / s.up; }
+    days.push({ date, dt, budget, est: !f, fc, custFc, mgr });
   }
   const remBudget = sum(days, d => d.budget), remFc = sum(days, d => d.fc);
   const monthBudget = s.budget + remBudget, landing = s.sales + remFc, need = monthBudget - s.sales;
@@ -966,6 +1039,7 @@ function forecastStore(s, rows, prevRows, lastDate, monthEnd) {
   return {
     remDays: n, days, estDays: days.filter(d => d.est).length,
     remByType: DAYTYPES.map(dt => ({ key: dt, days: days.filter(d => d.dt === dt).length })).filter(x => x.days),
+    mgrDays: days.filter(d => d.mgr).length,
     remBudget, remFc, monthBudget, landing, landDiff: landing - monthBudget, landRate: monthBudget ? landing / monthBudget : null,
     need, needPerDay: need / n, needRate: remBudget ? need / remBudget : null, pace, typeRate,
     doneSales: sum(done, d => d.sales), doneBudget: sum(done, d => d.budget), remCust: sum(days, d => d.custFc),
@@ -978,10 +1052,10 @@ function forecastSum(list, area) {
   const f0 = fs[0];
   const remBudget = sum(fs, f => f.remBudget), remFc = sum(fs, f => f.remFc);
   const monthBudget = area.budget + remBudget, landing = area.sales + remFc, need = monthBudget - area.sales;
-  const days = f0.days.map((d, i) => ({ date: d.date, dt: d.dt, est: fs.some(f => f.days[i] && f.days[i].est), budget: sum(fs, f => f.days[i] ? f.days[i].budget : 0), fc: sum(fs, f => f.days[i] ? f.days[i].fc : 0), custFc: sum(fs, f => f.days[i] ? f.days[i].custFc : 0) }));
+  const days = f0.days.map((d, i) => ({ date: d.date, dt: d.dt, est: fs.some(f => f.days[i] && f.days[i].est), mgr: fs.every(f => f.days[i] && f.days[i].mgr), budget: sum(fs, f => f.days[i] ? f.days[i].budget : 0), fc: sum(fs, f => f.days[i] ? f.days[i].fc : 0), custFc: sum(fs, f => f.days[i] ? f.days[i].custFc : 0) }));
   const pb = fs.every(f => f.prevBased != null) ? sum(fs, f => f.prevBased) : null;
   return {
-    remDays: f0.remDays, days, estDays: Math.max(...fs.map(f => f.estDays)), remByType: f0.remByType,
+    remDays: f0.remDays, days, estDays: Math.max(...fs.map(f => f.estDays)), remByType: f0.remByType, mgrDays: Math.min(...fs.map(f => f.mgrDays || 0)), mgrStores: fs.filter(f => f.mgrDays).length, nStores: fs.length,
     remBudget, remFc, monthBudget, landing, landDiff: landing - monthBudget, landRate: monthBudget ? landing / monthBudget : null,
     need, needPerDay: need / f0.remDays, needRate: remBudget ? need / remBudget : null, pace: sum(fs, f => f.doneSales) / sum(fs, f => f.doneBudget),
     prevBased: pb, prevBasedRate: pb != null && monthBudget ? pb / monthBudget : null,
@@ -1055,7 +1129,7 @@ function analyze(curRows, prevRows, extra) {
   if (tc.length || wsch.length) {
     const dtByDate = {}; curRows.forEach(r => { dtByDate[+r.date] = r.dt; });
     labor = analyzeLabor(tc, wsch, wage, { pick, dtByDate });
-  }
+  } else labor = laborFromSummary(curRows, lastDate); // タイムカードなどがなければ売上集計表の労働時間（実績・日別予測）
     const byDate = {};
   cur.forEach(r => { if (r.sales > 0 && r.budget > 0) (byDate[+r.date] = byDate[+r.date] || []).push(r); });
   // 共通の不振日：対象店の85%以上が予算比85%未満、かつ同じ曜日区分の月平均より15pt以上低い日
@@ -1108,7 +1182,7 @@ function analyze(curRows, prevRows, extra) {
     const std = extra.std || null, cutTxt = `${labor.mo + 1}/${labor.cut}時点`;
     stores.forEach(s => {
       s.labor = labor.stores.find(x => x.code === s.code) || null;
-      s.std = std && s.labor ? analyzeStd(s, s.labor, labor, std, extra.stdSettings, lastDate.getMonth() === labor.mo ? lastDate.getDate() : 0) : null;
+      s.std = std && s.labor ? analyzeStd(s, s.labor, labor, std, extra.stdSettings, lastDate.getMonth() === labor.mo ? lastDate.getDate() : 0, curRows.filter(r => r.code === s.code)) : null;
       // 予測月（実績のない月）：客数・売上は見込み。雑給率は売上見込みで
       if (extra.planMode && s.std && s.std.days) s.std.days.forEach(d => { d.custEst = true; });
       s.laborLines = s.labor ? laborLines(s.labor, labor, extra.planMode ? { landing: s.sales } : s.fc, sameCut ? s.sales : null, ctx).concat(stdLines(s.std, { cutTxt })) : [{ t: '勤怠データにこの店舗がありません。', d: false }];
@@ -1125,9 +1199,13 @@ function analyze(curRows, prevRows, extra) {
       const wb = ws.filter(s => s.std.budgetRate != null);
       A.budgetRate = wb.length ? sum(wb, s => s.std.target) / sum(wb, s => s.std.landStd) : null;
       A.over = wb.length ? sum(wb, s => s.std.over) : null;
+      A.planRate = T2('planStd') ? T2('planHours') / T2('planStd') : null; A.planDays = T2('planDays');
+      A.overDays = sum(ws, s => (s.std.overDays || []).length);
+      const acc = ws.filter(s => s.std.fcAcc); A.fcAcc = acc.length ? sum(acc, s => s.std.fcAcc.ratio * s.std.fcAcc.n) / sum(acc, s => s.std.fcAcc.n) : null;
       area.std = A;
       const rk = [...ws].sort((x, y) => (y.std.landRate - (y.std.budgetRate || 0)) - (x.std.landRate - (x.std.budgetRate || 0)));
       area.laborLines.push({ t: `・標準比：${labor.cut ? `実績${p0(A.cutRate)}（${cutTxt}）${labor.cut < labor.N ? `、着地見込み${p0(A.landRate)}` : ''}` : `勤務予定どおりなら${p0(A.landRate)}`}${A.budgetRate != null ? `（予算標準比${p0(A.budgetRate)}）` : ''}。${ws.length > 1 ? `予算標準比を最も上回る見込みの店：${rk.filter(s => s.std.budgetRate != null && s.std.over > 0).slice(0, 3).map(s => `${s.name}${p0(s.std.landRate)}（予算${p0(s.std.budgetRate)}、${hrs0(s.std.over * 60)}超過）`).join('、') || 'なし'}。` : ''}`, d: false });
+      if (A.planRate != null) area.laborLines.push({ t: `・計画標準比（店長の客数予測×計画労働時間）：${p0(A.planRate)}。これからの日で予算標準比を超える計画：${A.overDays}日（${ws.filter(s => (s.std.overDays || []).length).sort((a, b) => b.std.overDays.length - a.std.overDays.length).slice(0, 4).map(s => `${s.name}${s.std.overDays.length}日`).join('、') || 'なし'}）${A.fcAcc != null ? `。客数の実績は予測の${p0(A.fcAcc)}` : ''}。`, d: false });
       if (ws.some(s => !s.std.custom)) area.laborLines.push({ t: `　※店舗設定が初期値のままの店：${ws.filter(s => !s.std.custom).map(s => s.name).join('、')}。`, d: true });
     } else if (std) area.laborLines.push({ t: '・標準比：標準比マスタに対象店の卓数がありません。', d: false });
     if (labor.hasWage && fs.length > 1) {
@@ -1138,7 +1216,7 @@ function analyze(curRows, prevRows, extra) {
       else if (rk.length) area.laborLines.push({ t: `・店舗別の雑給率（${area.fc ? '着地見込み' : '実績'}、高い順）：${fmt(rk)}。`, d: false });
     }
     const est = fs.filter(s => s.labor.estDays).map(s => `${s.name}${s.labor.estDays}日`);
-    if (est.length) area.laborLines.push({ t: `・勤務予定の未作成：${est.join('、')}（実績平均で補っています）。`, d: true });
+    if (est.length) area.laborLines.push({ t: `・${labor.fromSummary ? '計画の労働時間がない日' : '勤務予定の未作成'}：${est.join('、')}（実績平均で補っています）。`, d: true });
   }
   area.costLines = areaCostComment(area, stores, ctx);
   // 採用・定着（履歴があるとき）
@@ -1440,7 +1518,9 @@ function forecastLines(f, ctx) {
   if (!f) return [];
   const out = [];
   const rem = `残り${f.remDays}日（${f.remByType.map(x => `${x.key}${x.days}`).join('・')}）`;
-  out.push({ t: `・着地見込み：${man(f.landing)}（月予算${man(f.monthBudget)}比${pct(f.landRate)}・${sman(f.landDiff)}）。${rem}の予算を、ここまでの曜日区分別の予算比で見込んだ値。`, d: false });
+  const how = f.mgrStores != null ? (f.mgrStores ? `${rem}は、店長の売上予測がある店（${f.mgrStores}／${f.nStores}店）はその予測、ない店は予算×ここまでの曜日区分別の予算比で見込んだ値` : `${rem}の予算を、ここまでの曜日区分別の予算比で見込んだ値`)
+    : f.mgrDays >= f.remDays ? `${rem}は店長の売上予測で見込んだ値` : f.mgrDays ? `${rem}のうち${f.mgrDays}日は店長の売上予測、残りは予算×ここまでの曜日区分別の予算比で見込んだ値` : `${rem}の予算を、ここまでの曜日区分別の予算比で見込んだ値`;
+  out.push({ t: `・着地見込み：${man(f.landing)}（月予算${man(f.monthBudget)}比${pct(f.landRate)}・${sman(f.landDiff)}）。${how}。`, d: false });
   if (f.need <= 0) out.push({ t: `　月予算はすでに達成済み（${sman(-f.need)}）。`, d: false });
   else {
     let t = `　予算達成には残り${f.remDays}日で${man(f.need)}、1日平均${man(f.needPerDay)}が必要（残り期間の予算比${pct(f.needRate)}。ここまでの予算比${pct(f.pace)}`;
