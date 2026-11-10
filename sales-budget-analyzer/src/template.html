@@ -312,6 +312,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
           <div class="tbl"><table id="bandTbl2"></table></div>
         </div>
       </div>
+      <div id="cohortBox">
+        <h3>入社月ごとの推移（新人の戦力化）</h3>
+        <p class="small muted" style="margin:2px 0 8px">直近6か月に入社したパートを入社月でまとめ、入社月を「1か月目」として月ごとの平均労働時間（勤務した人数）を表示。1か月目は月の途中からの勤務を含むため少なめ。当月は見込み。全体＝表示中の対象店の合計。</p>
+        <div class="tbl"><table id="cohortTbl"></table></div>
+      </div>
       <div>
         <h3>パート個人別の推移</h3>
         <p class="small muted" style="margin:2px 0 8px">月ごとの総労働時間・出勤日数（当月は見込みで月換算）。入社1年以内で、今月の見込みが前の月の平均より30%以上少ない人、または今後のシフトがこれまでのペースより30%以上少ない人を「注意」（50%以上少ないと「要注意」）。理由は月間の総労働時間・出勤日数で表示。減り方は「日数が減っている（本人の都合の可能性→面談）」「1回あたりが短くなっている（シフトの組み方を確認）」に分けています（総労働時間＝出勤日数×1回あたりの時間で分解）。</p>
@@ -975,7 +980,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   const CM_SECTIONS = [
     ['前月の課題', /課題のその後|課題の.*状況/], ['着地見込み', /^着地見込み/], ['客数・客単価・値引', /要因分解|値引|誘客|客単価/],
     ['曜日・時間帯', /曜日|時間帯/], ['特異日・データ確認', /不振日|未達が大きかった日|上振れが大きかった日|売上0の日/],
-    ['労働時間・雑給', /労働時間|雑給|勤務予定/], ['残業', /残業/], ['標準比', /標準比/], ['採用・定着', /勤務期間|戦力化|新規採用|退社|減り方/],
+    ['労働時間・雑給', /労働時間|雑給|勤務予定/], ['残業', /残業/], ['標準比', /標準比/], ['採用・定着', /勤務期間|戦力化|新規採用|退社|減り方|入社月/],
     ['営業部・店舗の比較', /営業部別|未達額上位|達成額上位|挽回|の高い店|店舗別|プレミアム比率/], ['原価', /^原価|理論差|喫食|平均との差|コース構成|食べ放題/], ['ロス', /ロス/],
   ];
   const secOf = lbl => { const x = CM_SECTIONS.find(([, re]) => re.test(lbl)); return x ? x[0] : null; };
@@ -1086,10 +1091,14 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年 ${hh(b[1].avg)}／1年以上 ${hh(b[3].avg)}`, ramp < 0.6 ? 'neg' : '') : '');
     setCmt('areaComment', commentText(R.area.tenureLines || [], detail));
     const rows = [...R.stores].sort((x, y) => ((y.tenure || {}).risk || []).length - ((x.tenure || {}).risk || []).length);
+    // 新人の伸び：いちばん新しい入社月で、2点以上あるものの前の月→最新
+    const growCell = t => { const c = t.cohorts.find(c => c.steps.filter(x => x.avg != null).length >= 2); if (!c) return '<span class="muted">－</span>';
+      const pts = c.steps.filter(x => x.avg != null), a = pts[pts.length - 2], b = pts[pts.length - 1];
+      return `<span class="${c.trend === 'down' ? 'neg' : c.trend === 'up' ? 'pos' : ''}">${Math.round(a.avg)}→${Math.round(b.avg)}h</span><span class="muted small">（${+c.ym.slice(5)}月入社）</span>`; };
     const cell = x => x && x.n ? `${x.n}名<span class="muted small">・${hh(x.avg)}</span>` : '<span class="muted">－</span>';
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">パート</th>${TENURE_LABELS.map(l => `<th class="n">${l}</th>`).join('')}<th class="n">うち入社推定</th><th class="n">新規採用</th><th class="n">退社</th><th class="n">リスク注意</th></tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">パート</th>${TENURE_LABELS.map(l => `<th class="n">${l}</th>`).join('')}<th class="n">うち入社推定</th><th class="n">新規採用</th><th class="n">新人の伸び</th><th class="n">退社</th><th class="n">リスク注意</th></tr></thead><tbody>`
       + rows.map(s => { const t = s.tenure; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
-        + (!t ? '<td class="n muted" colspan="9">履歴なし</td></tr>' : `<td class="n">${t.n}名</td>${t.bands.slice(0, 4).map(x => `<td class="n">${cell(x)}</td>`).join('')}<td class="n muted">${t.estN || '－'}</td><td class="n">${t.hires.length || '－'}</td><td class="n">${t.leavers.length || '－'}</td><td class="n ${t.risk.length ? 'neg' : ''}">${t.risk.length ? t.risk.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
+        + (!t ? '<td class="n muted" colspan="10">履歴なし</td></tr>' : `<td class="n">${t.n}名</td>${t.bands.slice(0, 4).map(x => `<td class="n">${cell(x)}</td>`).join('')}<td class="n muted">${t.estN || '－'}</td><td class="n">${t.hires.length || '－'}</td><td class="n">${growCell(t)}</td><td class="n">${t.leavers.length || '－'}</td><td class="n ${t.risk.length ? 'neg' : ''}">${t.risk.length ? t.risk.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
       tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -1125,6 +1134,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     // 勤務期間別：店舗と全体
     $('bandTbl2').innerHTML = `<thead><tr><th>勤務期間</th><th class="n">この店舗</th><th class="n">平均</th><th class="n">時間の割合</th><th class="n">全体の平均</th></tr></thead><tbody>`
       + b.map((x, i) => `<tr><td>${x.label}</td><td class="n">${x.n || '－'}${x.n ? '名' : ''}</td><td class="n">${hh(x.avg)}</td><td class="n muted">${x.share != null && x.n ? pct(x.share) : '－'}</td><td class="n muted">${hh(T.bands[i].avg)}</td></tr>`).join('') + '</tbody>';
+    // 入社月ごとの推移（この店舗と全体）
+    const TRP = { up: '<span class="pill ok">順調</span>', flat: '<span class="pill" style="background:var(--mid);color:var(--muted)">横ばい</span>', down: '<span class="pill ng">減っている</span>' };
+    const maxK = Math.max(1, ...t.cohorts.concat(T.cohorts).map(c => c.steps.length));
+    const crow = (c, who) => `<tr><td>${who}${+c.ym.slice(0, 4)}/${+c.ym.slice(5)}入社</td><td class="n">${c.n}名${c.est ? `<span class="muted small">（推定${c.est}）</span>` : ''}</td>`
+      + Array.from({ length: maxK }, (_, k) => { const x = c.steps[k]; return `<td class="n">${x && x.avg != null ? `${Math.round(x.avg)}h<span class="muted small">・${x.n}名${x.proj ? '・見込' : ''}</span>` : x && x.n === null ? '<span class="muted small">履歴なし</span>' : '<span class="muted">－</span>'}</td>`; }).join('')
+      + `<td>${c.trend ? TRP[c.trend] : ''}</td></tr>`;
+    $('cohortBox').hidden = !t.cohorts.length && !T.cohorts.length;
+    $('cohortTbl').innerHTML = `<thead><tr><th>入社月</th><th class="n">人数</th>${Array.from({ length: maxK }, (_, k) => `<th class="n">${k + 1}か月目</th>`).join('')}<th>傾向</th></tr></thead><tbody>`
+      + (t.cohorts.length ? t.cohorts.map(c => crow(c, '')).join('') : `<tr><td colspan="${maxK + 3}" class="muted">この店舗は直近6か月の入社がありません。</td></tr>`)
+      + (R.stores.length > 1 && T.cohorts.length ? `<tr><td colspan="${maxK + 3}" class="small muted" style="padding-top:10px"><b>全体（表示中の対象店）</b></td></tr>` + T.cohorts.map(c => crow(c, '全体・')).join('') : '') + '</tbody>';
     // 個人別
     const months = T.months.slice(-6);
     const flagOf = p => { const r = t.risk.find(x => x.emp === p.emp); if (r) return `<span class="${r.level === 'high' ? 'pill ng' : 'flag'}">${r.level === 'high' ? '要注意' : '注意'}</span>`; if (t.hires.some(x => x.emp === p.emp)) return '<span class="pill ok">新規</span>'; return ''; };

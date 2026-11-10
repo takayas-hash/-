@@ -840,13 +840,35 @@ function analyzeTenure(H0, cur, opt) {
   working.forEach(p => { (byStore[p.code] = byStore[p.code] || []).push(p); });
   const stores = Object.entries(byStore).map(([code, xs]) => {
     const b = bandStats(xs), t = sum(xs, p => p.cur); b.forEach(x => { x.share = t ? x.hours / t : null; });
-    return { code, n: xs.length, estN: xs.filter(p => p.hireEst).length, bands: b, hires: hires.filter(h => h.code === code), leavers: leavers.filter(l => l.code === code), risk: risk.filter(r => r.code === code) };
+    return { code, n: xs.length, cohorts: cohortsOf(Object.values(P).filter(p => p.code === code)), estN: xs.filter(p => p.hireEst).length, bands: b, hires: hires.filter(h => h.code === code), leavers: leavers.filter(l => l.code === code), risk: risk.filter(r => r.code === code) };
   });
   const order = p => (risk.find(r => r.emp === p.emp) ? 0 : hires.some(h => h.emp === p.emp) ? 1 : 2);
   const peopleOf = code => people.filter(p => p.code === code && Object.values(p.hrs).some(h => h > 0)).sort((a, b) => order(a) - order(b) || (a.k ?? 999) - (b.k ?? 999));
   const partialMonths = Object.keys(partial).filter(m => m !== curYm);
+  // 入社月ごとの推移（直近6か月の入社）：入社月を1か月目として、月ごとの平均時間と勤務している人数
+  function cohortsOf(list) {
+    const by = {};
+    list.forEach(p => { const h = hireOf[p.emp]; if (!h) return; const d = new Date(h.h), ci = d.getFullYear() * 12 + d.getMonth(); if (ci < curI - 5 || ci > curI) return;
+      (by[ci] = by[ci] || []).push(p); });
+    return Object.keys(by).map(Number).sort((a, b) => b - a).map(ci => {
+      const xs = by[ci], steps = [];
+      for (let k = 0; ci + k <= curI; k++) {
+        const ym = `${Math.floor((ci + k) / 12)}-${String((ci + k) % 12 + 1).padStart(2, '0')}`;
+        if (!useMonths.includes(ym) && ym !== curYm) { steps.push({ k, ym, n: null, avg: null }); continue; }
+        const ws = xs.filter(p => (p.hrs[ym] || 0) > 0);
+        steps.push({ k, ym, n: ws.length, avg: ws.length ? sum(ws, p => p.hrs[ym]) / ws.length : null, proj: ym === curYm && !!Object.keys(curRate).length });
+      }
+      const pts = steps.filter(x => x.avg != null);
+      let trend = null;
+      if (pts.length >= 2) { const a = pts[pts.length - 2].avg, b = pts[pts.length - 1].avg; trend = b >= a * 1.1 ? 'up' : b <= a * 0.9 ? 'down' : 'flat'; }
+      const nowN = steps.length && steps[steps.length - 1].n != null ? steps[steps.length - 1].n : null;
+      return { ci, ym: `${Math.floor(ci / 12)}-${String(ci % 12 + 1).padStart(2, '0')}`, n: xs.length, est: xs.filter(p => hireOf[p.emp].est).length, steps, trend, nowN };
+    });
+  }
+  const allPeople = Object.values(P);
+  const cohorts = cohortsOf(allPeople);
   const estN = working.filter(p => p.hireEst).length;
-  return { noWageStores, estN, partialMonths, peopleOf, curYm, months: useMonths, wMonths, hasCur: !!Object.keys(curRate).length, bands, total, ramp, hires, leavers, risk, stores, preLeave: pre.length >= 3 ? { n: pre.length, ratio: avgOf(pre) } : null, n: working.length, noHire: working.filter(p => p.k == null).length };
+  return { cohorts, cohortsOf, allPeople, noWageStores, estN, partialMonths, peopleOf, curYm, months: useMonths, wMonths, hasCur: !!Object.keys(curRate).length, bands, total, ramp, hires, leavers, risk, stores, preLeave: pre.length >= 3 ? { n: pre.length, ratio: avgOf(pre) } : null, n: working.length, noHire: working.filter(p => p.k == null).length };
 }
 function tenureLines(T, st, isArea) {
   const out = [], push = (t, d) => out.push({ t, d: !!d });
@@ -867,6 +889,12 @@ function tenureLines(T, st, isArea) {
   if (nw.length) push(`　※${st ? 'この店舗' : `${nw.length}店舗`}はパートの多くが時給資料に載っていないため、入社日を推定していません（時給資料が違う可能性。入社日不明として表示）。`);
   if (estN) push(`　※時給資料に載っていない${estN}名は前月入社として推定しています（タイムカードの履歴で入社月がわかる人はその月）。次の月の時給資料を入れると正しい入社日に置き換わります。`, true);
   const hires = st ? st.hires : T.hires, leavers = st ? st.leavers : T.leavers, risk = st ? st.risk : T.risk;
+  const cs = (st ? st.cohorts : T.cohorts).filter(c => c.steps.some(x => x.avg != null));
+  if (cs.length) {
+    const TR = { up: '順調に伸びている', flat: '横ばい', down: '減っている・注意' };
+    push(`・入社月ごとの推移：${cs.slice(0, 4).map(c => `${+c.ym.slice(5)}月入社${c.n}名${c.est ? `（うち推定${c.est}）` : ''}：${c.steps.filter(x => x.avg != null).map(x => `${x.k + 1}か月目${Math.round(x.avg)}h${x.n < c.n ? `（${x.n}名）` : ''}`).join('→')}${c.trend ? `（${TR[c.trend]}）` : ''}`).join('、')}。`);
+    push('　※1か月目は月の途中からの勤務を含むため少なめに出ます。当月は見込みで月換算。', true);
+  }
   const nm = p => `${isArea && p.store ? p.store + '・' : ''}${p.name}`;
   if (hires.length) { const e = hires.filter(p => p.hireEst).length;
     push(`・新規採用（当月・前月入社）：${hires.length}名${e ? `（うち${e}名は時給資料に未掲載のため入社月を推定）` : ''}。${hires.slice(0, 6).map(p => `${nm(p)}${hh(p.cur)}`).join('、')}${hires.length > 6 ? ' ほか' : ''}。`); }
