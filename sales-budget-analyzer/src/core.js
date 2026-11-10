@@ -737,7 +737,7 @@ function analyzeTenure(H0, cur, opt) {
   useMonths.forEach(m => H.tc[m].recs.forEach(r => {
     if (r.s || (pick && !pick.has(r.c))) return;
     const p = (P[r.e] = P[r.e] || { emp: r.e, name: r.n, code: r.c, hrs: {}, days: {} });
-    p.hrs[m] = (p.hrs[m] || 0) + r.m / 60 * (partial[m] || 1); p.days[m] = (p.days[m] || 0) + r.d; p.code = r.c; p.name = r.n;
+    p.hrs[m] = (p.hrs[m] || 0) + r.m / 60 * (partial[m] || 1); p.days[m] = (p.days[m] || 0) + r.d * (partial[m] || 1); p.code = r.c; p.name = r.n;
   }));
   // 当月は見込み（実績の1日あたり＋予定のある日の1日あたりで月換算）
   const curRate = {};
@@ -748,7 +748,7 @@ function analyzeTenure(H0, cur, opt) {
       const p = (P[x.emp] = P[x.emp] || { emp: x.emp, name: x.name, code: st.code, hrs: {}, days: {} });
       const span = cur.cut + covered;
       const monthEq = span ? (x.mins + x.planMins) / 60 / span * cur.N : 0;
-      p.hrs[curYm] = monthEq; p.code = st.code;
+      p.hrs[curYm] = monthEq; p.days[curYm] = span ? (x.days + x.planDays) / span * cur.N : 0; p.code = st.code;
       curRate[x.emp] = { act: cur.cut ? x.mins / 60 / cur.cut : 0, plan: covered ? x.planMins / 60 / covered : null, actDays: x.days, planDays: x.planDays, covered };
     });
   });
@@ -788,8 +788,14 @@ function analyzeTenure(H0, cur, opt) {
     const r = curRate[p.emp];
     // ①前の月との比較 ②当月の中で、これからの予定がこれまでの実績より減っているか。低い方を使う
     const c = [];
-    if (prevAvg) c.push({ ratio: p.cur / prevAvg, why: `当月見込み${p.cur.toFixed(0)}h（前${prevMs.length}か月平均${prevAvg.toFixed(0)}h）` });
-    if (r && r.plan != null && r.act > 0 && r.actDays >= 3 && r.covered >= 5) c.push({ ratio: r.plan / r.act, why: `今後の予定が1日${r.plan.toFixed(1)}h（これまでの実績は1日${r.act.toFixed(1)}h）` });
+    // 表示は月間の総労働時間で（当月見込み＝表の「見込」と同じ値）
+    // 表示は月間の総労働時間と出勤日数で（今月の見込み＝表の「見込」と同じ値）
+    const sg0 = (v, u) => `${v >= 0 ? '+' : '▲'}${Math.abs(Math.round(v))}${u}`;
+    const curD = p.days[curYm] || 0;
+    if (prevAvg) { const prevD = avgOf(prevMs.map(m => p.days[m] || 0));
+      c.push({ ratio: p.cur / prevAvg, why: `今月の見込み${Math.round(p.cur)}h・${Math.round(curD)}日（前${prevMs.length}か月の平均${Math.round(prevAvg)}h・${Math.round(prevD)}日、${sg0(p.cur - prevAvg, 'h')}・${sg0(curD - prevD, '日')}）` }); }
+    if (r && r.plan != null && r.act > 0 && r.actDays >= 3 && r.covered >= 5) { const pace = r.act * cur.N, paceD = cur.cut ? r.actDays / cur.cut * cur.N : 0;
+      c.push({ ratio: r.plan / r.act, why: `今月の見込み${Math.round(p.cur)}h・${Math.round(curD)}日（これまでのペースなら${Math.round(pace)}h・${Math.round(paceD)}日、${sg0(p.cur - pace, 'h')}・${sg0(curD - paceD, '日')}。今後のシフトが減っている）` }); }
     const best = c.sort((a, b) => a.ratio - b.ratio)[0];
     const ratio = best ? best.ratio : null, why = best ? best.why : '';
     if (ratio != null && ratio <= RISK_WARN) risk.push({ ...p, ratio, why, level: ratio <= RISK_HIGH ? 'high' : 'warn' });
@@ -826,7 +832,7 @@ function tenureLines(T, st, isArea) {
   const nm = p => `${isArea && p.store ? p.store + '・' : ''}${p.name}`;
   if (hires.length) push(`・新規採用（当月・前月入社）：${hires.length}名（${hires.slice(0, 6).map(p => `${nm(p)}${hh(p.cur)}`).join('、')}${hires.length > 6 ? ' ほか' : ''}）。`);
   if (leavers.length) push(`・退社：${leavers.filter(l => l.sure).length}名${leavers.some(l => !l.sure) ? `、退社の可能性${leavers.filter(l => !l.sure).length}名（2か月勤務なし）` : ''}（${leavers.slice(0, 6).map(l => `${nm(l)}${l.k != null ? `・入社${l.k}か月` : ''}`).join('、')}${leavers.length > 6 ? ' ほか' : ''}）。`);
-  if (risk.length) push(`・退社リスク注意（入社1年以内で時間が減っている）：${risk.slice(0, 6).map(p => `${nm(p)}（入社${p.k}か月、${p.why}）`).join('、')}${risk.length > 6 ? ` ほか${risk.length - 6}名` : ''}。`);
+  if (risk.length) push(`・退社リスク注意（入社1年以内で、月間の労働時間が減る見込み）：${risk.slice(0, 6).map(p => `${nm(p)}（入社${p.k}か月、${p.why}）`).join('、')}${risk.length > 6 ? ` ほか${risk.length - 6}名` : ''}。`);
   else push('・退社リスク注意：入社1年以内で時間が大きく減っている人はいません。');
   if (T.preLeave && !st) push(`　参考：これまでに退社した${T.preLeave.n}名は、最後の月の時間がそれまでの平均の${Math.round(T.preLeave.ratio * 100)}%でした。`, true);
   if (T.partialMonths && T.partialMonths.length && !st) push(`　※${T.partialMonths.map(ymTxt).join('・')}は月の途中までのタイムカードしかないため、確定日までの実績を月換算しています（月末後に最終のタイムカードを入れると置き換わります）。`);
