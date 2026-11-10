@@ -127,7 +127,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君。通常店・特急レーン店）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君。通常店・特急レーン店）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます。タイムカードと時給データを毎月入れると、採用・定着の分析が積み上がります（過去の月のタイムカードもまとめて入れられます）<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -154,6 +154,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <button type="button" role="tab" id="tabSales" aria-selected="true">売上分析</button>
     <button type="button" role="tab" id="tabCost" aria-selected="false">原価分析</button>
     <button type="button" role="tab" id="tabLabor" aria-selected="false">人（労働時間・雑給）</button>
+    <button type="button" role="tab" id="tabTenure" aria-selected="false">採用・定着</button>
   </div>
 
   <section class="card" id="areaCard">
@@ -226,6 +227,25 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <div><h3>曜日別</h3><div class="tbl"><table id="wdTbl"></table></div></div>
     <div id="discCatBox" hidden><h3>値引の前年比較（分類別）</h3><p class="small muted" style="margin:2px 0 8px">利用件数＝値引が使われた会計の数。客単価への影響＝1人あたり値引（税抜換算）の前年差で、値引が増えるとマイナス。</p><div class="tbl"><table id="discCatTbl"></table></div></div>
     <div id="discBox" hidden><h3>値引の内訳（上位10）</h3><div class="tbl"><table id="discTbl"></table></div></div>
+    </div>
+    <div class="stack" data-tab="tenure" hidden>
+      <div class="grid2">
+        <div>
+          <h3>入社後の月数ごとの平均労働時間（戦力化）</h3>
+          <p class="small muted" style="margin:2px 0 8px">表示中の対象店のパート全員を、積み上げた全期間で集計（当月は見込みで月換算）。棒の上は平均時間、下は延べ人数。</p>
+          <div class="chart" id="rampChart"></div>
+        </div>
+        <div>
+          <h3>勤務期間別（当月）</h3>
+          <p class="small muted" style="margin:2px 0 8px">この店舗と、表示中の対象店全体の比較。</p>
+          <div class="tbl"><table id="bandTbl2"></table></div>
+        </div>
+      </div>
+      <div>
+        <h3>パート個人別の推移</h3>
+        <p class="small muted" style="margin:2px 0 8px">月ごとの労働時間（当月は見込みで月換算）。入社1年以内で時間が前の月より30%以上減っている、または当月の予定がこれまでの実績より30%以上少ない人を「注意」。</p>
+        <div class="tbl" style="max-height:520px;overflow-y:auto"><table id="tenurePeople"></table></div>
+      </div>
     </div>
     <div class="stack" data-tab="labor" hidden>
       <div>
@@ -332,6 +352,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   async function readOne(f) {
     const r = await readOneInner(f);
     r.file = { name: f.name, raw: await f.arrayBuffer() };
+    r.area = f.__area || null; // ウェブアプリ：どのエリアのフォルダのファイルか
     return r;
   }
   async function readOneInner(f) {
@@ -390,8 +411,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       return Promise.race([timeout, new Promise((res, rej) => { const x = db.transaction('kv', mode); const r = fn(x.objectStore('kv')); x.oncomplete = () => res(r && r.result); x.onerror = () => rej(x.error); })]);
     },
     get() { return this.tx('readonly', s => s.get('data')).catch(() => null); },
+    getK(k) { return this.tx('readonly', s => s.get(k)).catch(() => null); },
+    putK(k, v) { return this.tx('readwrite', s => s.put(v, k)); },
     put(v) { return this.tx('readwrite', s => s.put(v, 'data')); },
-    clear() { return this.tx('readwrite', s => s.delete('data')); },
+    clear() { return this.tx('readwrite', s => { s.delete('history'); return s.delete('data'); }); },
   };
   const pref = {
     get(k, d) { try { const v = localStorage.getItem('ba.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -405,6 +428,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function saveStdSetting(code, v, all) {
     if (GAS) { stdMem = all; call('saveStdSetting', code, v).catch(e => setStatus('店舗設定を保存できませんでした：' + (e.message || e), true)); }
     else pref.set('stdSettings', all);
+  }
+  let HIST = null; // 採用・定着の履歴 {tc:{年月:{recs}}, wage:{年月:{recs}}}
+  function saveHist(add) {
+    if (GAS) { [...add.tc.map(x => ['tc', x]), ...add.wage.map(x => ['wage', x])].forEach(([k, x]) => { if (x.area) call('saveHistory', x.area, k, x.ym, JSON.stringify(x)).catch(e => console.warn('履歴を保存できませんでした（フォルダの編集権限がない場合）', e)); }); }
+    else store.putK('history', HIST).catch(() => {});
   }
   let S = null; // 保存中のデータ {cur, prev, pays, hourly, savedAt}
   // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
@@ -441,6 +469,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
       + (S.stdBook ? `<li><span class="label">標準比マスタ（通常店）</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（通常店）</span> なし</li>')
       + (S.stdLane ? `<li><span class="label">標準比マスタ（特急レーン店）</span> ${esc(S.stdLane.name)} <span class="muted">レーン店${Object.values(S.stdLane.data.info).filter(x => x.perCust != null && /特急|レーン/.test(x.flag || '')).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（特急レーン店）</span> なし</li>')
+      + (HIST && Object.keys(HIST.tc).length ? `<li><span class="label">採用・定着の履歴</span> タイムカード ${[...new Set(Object.values(HIST.tc).map(x => x.ym))].sort().map(ymTxt).join('・')}<span class="muted">／時給データ ${[...new Set(Object.values(HIST.wage).map(x => x.ym))].sort().map(ymTxt).join('・') || 'なし'}</span></li>` : '')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
@@ -449,7 +478,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -477,6 +506,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     try {
       let got = [];
       for (const f of files) got.push(await readOne(f));
+      const gotRaw = got;
       got = mergeSame(got);
       const N = S && !opt.fresh ? { ...S } : {};
       const notes = [];
@@ -520,10 +550,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         else N.pays = { name: g.name, rows: g.pays, file: g.file };
       }
       // 勤怠：タイムカード・勤務スケジュールは当月分、時給データ・標準比マスタは最新のファイルで差し替え（月が変わっても残す）
-      const ck0 = mKey(N.cur.rows), pickM = xs => xs.find(g => mKey(g.tc || g.ws) === ck0) || xs[0];
-      const tcs = got.filter(g => g.tc), wss = got.filter(g => g.ws);
-      if (tcs.length) { const g = pickM(tcs); N.tc = { name: g.name, rows: g.tc, file: g.file }; }
-      if (wss.length) { const g = pickM(wss); N.ws = { name: g.name, rows: g.ws, file: g.file }; }
+      // 当月以外のタイムカード・勤務スケジュールは採用・定着の履歴にだけ使い、当月分は置き換えない
+      const ck0 = mKey(N.cur.rows), pickM = xs => xs.find(g => mKey(g.tc || g.ws) === ck0);
+      const tcG = pickM(got.filter(g => g.tc)), wsG = pickM(got.filter(g => g.ws));
+      if (tcG) N.tc = { name: tcG.name, rows: tcG.tc, file: tcG.file };
+      if (wsG) N.ws = { name: wsG.name, rows: wsG.ws, file: wsG.file };
       for (const g of got) {
         if (g.wage && !(opt.fresh && N.wage)) N.wage = { name: g.name, rows: g.wage, file: g.file };
         if (g.std && g.std.kind === 'lane') { if (!(opt.fresh && N.stdLane)) N.stdLane = { name: g.name, data: g.std, file: g.file }; }
@@ -541,6 +572,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       if (N.tc && mKey(N.tc.rows) !== ck) { notes.push(`タイムカード（${fmtYM(N.tc.rows)}）が当年と別の月のため外しました`); N.tc = null; }
       if (N.ws && mKey(N.ws.rows) !== ck) { notes.push(`勤務スケジュール（${fmtYM(N.ws.rows)}）が当年と別の月のため外しました`); N.ws = null; }
       if (N.invFiles) N.invFiles = N.invFiles.filter(x => { const ok = mKey(x.rows) === ck; if (!ok) notes.push(`原価管理表（${fmtYM(x.rows)}）が当年と別の月のため外しました`); return ok; });
+      // 採用・定着：タイムカード（読み込んだすべての月）と時給データを履歴に積み上げる
+      const add = { tc: [], wage: [] };
+      gotRaw.filter(g => g.tc).forEach(g => { const x = tcSummary(g.tc); if (x) { if (g.area) x.area = g.area; add.tc.push(x); } });
+      const wg = gotRaw.find(g => g.wage);
+      if (wg) {
+        const H1 = mergeHistory(HIST, add), areas = [...new Set(Object.values(H1.tc).map(x => x.area || ''))];
+        areas.forEach(a => { const codes = new Set(Object.values(H1.tc).filter(x => (x.area || '') === a).flatMap(x => x.recs.map(r => r.c))); const w = wageSnapshot(wg.wage, codes, ymOf(maxD(N.cur.rows))); if (w && w.recs.length) { if (a) w.area = a; add.wage.push(w); } });
+      }
+      if (add.tc.length || add.wage.length) { HIST = mergeHistory(HIST, add); saveHist(add); }
+      if (add.tc.length > 1) notes.push(`タイムカード${add.tc.length}か月分を採用・定着の履歴に積み上げました`);
       N.savedAt = Date.now();
       N.v = DATA_VERSION;
       S = N;
@@ -633,10 +674,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   function render() {
     const a = R.area;
-    $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor');
+    $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor'); $('tabTenure').setAttribute('aria-selected', tab === 'tenure');
     document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; });
     if (tab === 'cost') { renderCost(); return; }
     if (tab === 'labor') { renderLabor(); return; }
+    if (tab === 'tenure') { renderTenure(); return; }
     $('storeTblTitle').textContent = '店舗別 予算差と要因';
     $('period').textContent = `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
     const okN = R.stores.filter(s => s.diff >= 0).length;
@@ -667,6 +709,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (!s) return;
     if (tab === 'cost') { renderStoreCost(s); return; }
     if (tab === 'labor') { renderStoreLabor(s); return; }
+    if (tab === 'tenure') { renderStoreTenure(s); return; }
     $('storeName').innerHTML = `${esc(s.name)} <span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '予算達成' : '予算未達'}</span>`;
     $('sKpis').innerHTML = kpi('売上', man(s.sales), `予算 ${man(s.budget)}`) + kpi('予算比', pct(s.rate), `差額 ${sman(s.diff)}`, cls(s.diff))
       + kpi('客数要因', sman(s.custEff), `客数 ${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`, cls(s.custEff))
@@ -737,6 +780,69 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
       + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr>`
       + '</tbody>';
+  }
+
+  /* ---------- 採用・定着 ---------- */
+  const NO_TENURE = 'タイムカード表と時給データ（入社年月日の入った店長資料）を読み込むと、勤務期間別の労働時間・新規採用・退社・退社リスクを分析します。毎月読み込むと履歴が積み上がり、前の月との比較ができるようになります。';
+  const hh = v => v == null ? '－' : Math.round(v) + 'h';
+  function renderTenure() {
+    const T = R.tenure;
+    $('storeTblTitle').textContent = '店舗別 勤務期間・採用・退社';
+    if (!T) { $('kpis').innerHTML = ''; $('areaComment').value = NO_TENURE; fit($('areaComment')); $('storeTbl').innerHTML = ''; $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join(''); renderStore(); return; }
+    const b = T.bands, ramp = b[1].n && b[3].n && b[3].avg ? b[1].avg / b[3].avg : null;
+    $('kpis').innerHTML = kpi('勤務したパート', `${T.n}名`, `${ymTxt(T.curYm)}・履歴${T.months.length}か月`)
+      + kpi('新規採用', `${T.hires.length}名`, '当月・前月入社')
+      + kpi('退社', `${T.leavers.filter(l => l.sure).length}名`, T.leavers.some(l => !l.sure) ? `可能性 ${T.leavers.filter(l => !l.sure).length}名` : '')
+      + kpi('退社リスク注意', `${T.risk.length}名`, `うち要注意 ${T.risk.filter(r => r.level === 'high').length}名`, T.risk.length ? 'neg' : '')
+      + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年 ${hh(b[1].avg)}／1年以上 ${hh(b[3].avg)}`, ramp < 0.6 ? 'neg' : '') : '');
+    $('areaComment').value = commentText(R.area.tenureLines || [], detail); fit($('areaComment'));
+    const rows = [...R.stores].sort((x, y) => ((y.tenure || {}).risk || []).length - ((x.tenure || {}).risk || []).length);
+    const cell = x => x && x.n ? `${x.n}名<span class="muted small">・${hh(x.avg)}</span>` : '<span class="muted">－</span>';
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">パート</th>${TENURE_LABELS.map(l => `<th class="n">${l}</th>`).join('')}<th class="n">入社日不明</th><th class="n">新規採用</th><th class="n">退社</th><th class="n">リスク注意</th></tr></thead><tbody>`
+      + rows.map(s => { const t = s.tenure; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
+        + (!t ? '<td class="n muted" colspan="9">履歴なし</td></tr>' : `<td class="n">${t.n}名</td>${t.bands.slice(0, 4).map(x => `<td class="n">${cell(x)}</td>`).join('')}<td class="n muted">${t.bands[4].n || '－'}</td><td class="n">${t.hires.length || '－'}</td><td class="n">${t.leavers.length || '－'}</td><td class="n ${t.risk.length ? 'neg' : ''}">${t.risk.length ? t.risk.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
+    $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
+      const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
+      tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+    $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+    renderStore();
+  }
+  const TENURE_LABELS = ['1か月未満', '1か月〜半年', '半年〜1年', '1年以上'];
+  function renderStoreTenure(s) {
+    $('storeName').textContent = s.name;
+    const T = R.tenure, t = s.tenure;
+    if (!T || !t) { $('sKpis').innerHTML = ''; $('storeComment').value = T ? '当月に勤務したパートの履歴がありません。' : NO_TENURE; fit($('storeComment')); $('rampChart').innerHTML = ''; $('bandTbl2').innerHTML = ''; $('tenurePeople').innerHTML = ''; return; }
+    const b = t.bands, ramp = b[1].n && b[3].n && b[3].avg ? b[1].avg / b[3].avg : null;
+    $('sKpis').innerHTML = kpi('勤務したパート', `${t.n}名`, ymTxt(T.curYm)) + kpi('新規採用', `${t.hires.length}名`, '当月・前月入社') + kpi('退社', `${t.leavers.length}名`, '') + kpi('退社リスク注意', `${t.risk.length}名`, '', t.risk.length ? 'neg' : '')
+      + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年／1年以上`, ramp < 0.6 ? 'neg' : '') : '');
+    $('storeComment').value = commentText(s.tenureLines, detail); fit($('storeComment'));
+    // 戦力化の棒（対象店全体）
+    const rp = T.ramp, W = 560, H2 = 210, L0 = 40, base = 160, top = 18, bw = (W - L0 - 10) / rp.length;
+    const mx = Math.max(1, ...rp.map(r => r.avg || 0));
+    let svg = `<svg viewBox="0 0 ${W} ${H2}" width="100%" style="max-width:${W * 1.3}px" role="img" aria-label="入社後の月数ごとの平均労働時間">`;
+    const step = [10, 20, 25, 50, 100].find(u => mx / u <= 4) || 100;
+    for (let v = 0; v <= mx; v += step) { const y = base - v / mx * (base - top); svg += `<line x1="${L0}" x2="${W - 4}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L0 - 4}" y="${y + 3}" text-anchor="end">${v}h</text>`; }
+    rp.forEach((r, i) => {
+      const x = L0 + 6 + i * bw, w = Math.min(28, bw - 8);
+      if (r.avg) { const h = r.avg / mx * (base - top), y = base - h, rr = Math.min(4, h);
+        svg += `<path d="M${x},${base} V${y + rr} Q${x},${y} ${x + rr},${y} H${x + w - rr} Q${x + w},${y} ${x + w},${y + rr} V${base} Z" fill="var(${i >= 7 ? '--c0' : '--c1'})"/>`;
+        svg += `<text x="${x + w / 2}" y="${y - 4}" text-anchor="middle" style="fill:var(--fg)">${Math.round(r.avg)}</text>`; }
+      svg += `<rect x="${x - 4}" y="${top}" width="${w + 8}" height="${base - top + 40}" fill="transparent" data-tip="${esc(`${r.label}|平均 ${hh(r.avg)}|延べ ${r.n}名`)}"/>`;
+      svg += `<text x="${x + w / 2}" y="${base + 14}" text-anchor="middle">${r.label.replace('か月目', '')}</text><text x="${x + w / 2}" y="${base + 27}" text-anchor="middle">${r.n}名</text>`;
+    });
+    $('rampChart').innerHTML = svg + '</svg>';
+    // 勤務期間別：店舗と全体
+    $('bandTbl2').innerHTML = `<thead><tr><th>勤務期間</th><th class="n">この店舗</th><th class="n">平均</th><th class="n">時間の割合</th><th class="n">全体の平均</th></tr></thead><tbody>`
+      + b.map((x, i) => `<tr><td>${x.label}</td><td class="n">${x.n || '－'}${x.n ? '名' : ''}</td><td class="n">${hh(x.avg)}</td><td class="n muted">${x.share != null && x.n ? pct(x.share) : '－'}</td><td class="n muted">${hh(T.bands[i].avg)}</td></tr>`).join('') + '</tbody>';
+    // 個人別
+    const months = T.months.slice(-6);
+    const flagOf = p => { const r = t.risk.find(x => x.emp === p.emp); if (r) return `<span class="${r.level === 'high' ? 'pill ng' : 'flag'}">${r.level === 'high' ? '要注意' : '注意'}</span>`; if (t.hires.some(x => x.emp === p.emp)) return '<span class="pill ok">新規</span>'; return ''; };
+    const list = R.tenure.peopleOf ? R.tenure.peopleOf(s.code) : [];
+    $('tenurePeople').innerHTML = `<thead><tr><th>氏名</th><th></th><th>入社日</th><th class="n">勤務期間</th>${months.map(m => `<th class="n">${+m.slice(5)}月${m === T.curYm && T.hasCur ? '<span class="muted small">見込</span>' : ''}</th>`).join('')}<th>理由</th></tr></thead><tbody>`
+      + list.map(p => { const r = t.risk.find(x => x.emp === p.emp); const hd = p.hire ? new Date(p.hire) : null;
+        return `<tr><td>${esc(p.name)}</td><td>${flagOf(p)}</td><td class="muted">${hd ? `${hd.getFullYear()}/${hd.getMonth() + 1}/${hd.getDate()}` : '不明'}</td><td class="n">${p.k == null ? '－' : p.k >= 12 ? `${Math.floor(p.k / 12)}年${p.k % 12 ? (p.k % 12) + 'か月' : ''}` : p.k + 'か月'}</td>${months.map(m => `<td class="n">${p.hrs[m] ? Math.round(p.hrs[m]) : '<span class="muted">－</span>'}</td>`).join('')}<td class="small muted" style="white-space:normal;min-width:14em">${r ? esc(r.why) : ''}</td></tr>`; }).join('')
+      + (t.leavers.length ? `<tr><td colspan="${5 + months.length}" class="small"><b>退社</b>：${t.leavers.map(l => `${esc(l.name)}（${esc(l.how)}）`).join('、')}</td></tr>` : '') + '</tbody>';
   }
 
   /* ---------- 人（労働時間・雑給・残業） ---------- */
@@ -1089,9 +1195,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('tabSales').addEventListener('click', () => setTab('sales'));
   $('tabCost').addEventListener('click', () => setTab('cost'));
   $('tabLabor').addEventListener('click', () => setTab('labor'));
+  $('tabTenure').addEventListener('click', () => setTab('tenure'));
   $('copyAll').addEventListener('click', e => {
     const q = t => '"' + t.replace(/"/g, '""') + '"';
-    const key = tab === 'cost' ? 'costLines' : tab === 'labor' ? 'laborLines' : 'lines';
+    const key = tab === 'cost' ? 'costLines' : tab === 'labor' ? 'laborLines' : tab === 'tenure' ? 'tenureLines' : 'lines';
     const lines = [[R.scopeLabel, $('areaComment').value], ...R.stores.map(s => [s.name, s.code === cur ? $('storeComment').value : commentText(s[key] || [], detail)])];
     copy(lines.map(([n, c]) => `${n}\t${q(c)}`).join('\n'), e.currentTarget);
   });
@@ -1100,7 +1207,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('clearNo').addEventListener('click', () => { $('clearAsk').hidden = true; $('clearBtn').hidden = false; });
   $('clearYes').addEventListener('click', async () => {
     try { await store.clear(); } catch (e) { /* なし */ }
-    S = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
+    S = null; HIST = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
     setStatus('保存データを削除しました。');
   });
 
@@ -1109,7 +1216,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
   if (GAS) startDrive();
-  else store.get().then(async v => {
+  else store.getK('history').then(h => { HIST = h || null; return store.get(); }).then(async v => {
     if (!v || !v.cur) return;
     let msg = '前回保存したデータを表示しています。新しいファイルを入れると更新されます。', err = false;
     if (v.v !== DATA_VERSION) {
@@ -1149,11 +1256,13 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       setStatus(`「${label}」のファイルを探しています…`);
       const list = await call('listFiles', ids);
       if (!list.length) throw new Error('フォルダにファイルがありません');
+      // 採用・定着の履歴（各エリアの「履歴データ」フォルダ）
+      try { const h = await call('getHistory', ids); HIST = mergeHistory(null, { tc: h.tc.map(x => JSON.parse(x)), wage: h.wage.map(x => JSON.parse(x)) }); } catch (e) { console.warn(e); HIST = null; }
       const files = []; let n = 0;
-      const b64ToFile = (r) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new File([u], r.name); };
+      const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name); f.__area = m.common ? null : m.folderId; return f; };
       // 4件ずつ並行して取得
       for (let i = 0; i < list.length; i += 4) {
-        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; setStatus(`共有ドライブから読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r); })));
+        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; setStatus(`共有ドライブから読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r, m); })));
         files.push(...part);
       }
       await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています。` });

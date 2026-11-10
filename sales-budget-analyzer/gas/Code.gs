@@ -13,6 +13,7 @@
  */
 const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
+const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
 
 function doGet() {
@@ -61,7 +62,7 @@ function listFiles(areaIds) {
       const f = it.next(), name = f.getName(), mime = f.getMimeType();
       if (/^~\$/.test(name)) continue; // Excelの一時ファイル
       if (!/\.(csv|txt|xlsx|xlsm|xls)$/i.test(name) && mime !== MimeType.GOOGLE_SHEETS) continue;
-      files.push({ id: f.getId(), name: name, folder: folder.getName(), updated: f.getLastUpdated().getTime(), size: f.getSize() });
+      files.push({ id: f.getId(), name: name, folder: folder.getName(), folderId: folder.getId(), common: folder.getName() === COMMON_NAME, updated: f.getLastUpdated().getTime(), size: f.getSize() });
     }
     files.sort((a, b) => b.updated - a.updated);
     files.slice(0, MAX_FILES_PER_FOLDER).forEach(x => out.push(x));
@@ -97,5 +98,34 @@ function saveStdSetting(code, v) {
   keep.by = Session.getActiveUser().getEmail() || '';
   keep.at = new Date().toISOString();
   PropertiesService.getScriptProperties().setProperty('std_' + code, JSON.stringify(keep));
+  return true;
+}
+
+/* ===== 採用・定着の履歴（タイムカード・時給データを月ごとにまとめたもの） ===== */
+/** エリアの「履歴データ」フォルダにある JSON を返す（kind: tc＝タイムカード、wage＝時給データ） */
+function getHistory(areaIds) {
+  const out = { tc: [], wage: [] };
+  (areaIds || []).forEach(id => {
+    const it = DriveApp.getFolderById(id).getFoldersByName(HISTORY_NAME);
+    if (!it.hasNext()) return;
+    const files = it.next().getFiles();
+    while (files.hasNext()) {
+      const f = files.next(), m = f.getName().match(/^(tc|wage)_(\d{4}-\d{2})\.json$/);
+      if (!m) continue;
+      try { const x = JSON.parse(f.getBlob().getDataAsString('UTF-8')); x.area = id; out[m[1]].push(JSON.stringify(x)); } catch (e) { /* 壊れたファイルは無視 */ }
+    }
+  });
+  return out;
+}
+/** 履歴を保存（同じ月は上書き）。エリアのフォルダの編集権限がない人は保存できない（表示はできる） */
+function saveHistory(areaId, kind, ym, json) {
+  if (!/^(tc|wage)$/.test(kind) || !/^\d{4}-\d{2}$/.test(ym)) throw new Error('保存する内容が不正です');
+  const area = DriveApp.getFolderById(areaId);
+  const it = area.getFoldersByName(HISTORY_NAME);
+  const folder = it.hasNext() ? it.next() : area.createFolder(HISTORY_NAME);
+  const name = kind + '_' + ym + '.json';
+  const old = folder.getFilesByName(name);
+  if (old.hasNext()) old.next().setContent(json);
+  else folder.createFile(name, json, MimeType.PLAIN_TEXT);
   return true;
 }

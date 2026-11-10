@@ -129,7 +129,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君。通常店・特急レーン店）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君。通常店・特急レーン店）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます。タイムカードと時給データを毎月入れると、採用・定着の分析が積み上がります（過去の月のタイムカードもまとめて入れられます）<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -156,6 +156,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <button type="button" role="tab" id="tabSales" aria-selected="true">売上分析</button>
     <button type="button" role="tab" id="tabCost" aria-selected="false">原価分析</button>
     <button type="button" role="tab" id="tabLabor" aria-selected="false">人（労働時間・雑給）</button>
+    <button type="button" role="tab" id="tabTenure" aria-selected="false">採用・定着</button>
   </div>
 
   <section class="card" id="areaCard">
@@ -228,6 +229,25 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <div><h3>曜日別</h3><div class="tbl"><table id="wdTbl"></table></div></div>
     <div id="discCatBox" hidden><h3>値引の前年比較（分類別）</h3><p class="small muted" style="margin:2px 0 8px">利用件数＝値引が使われた会計の数。客単価への影響＝1人あたり値引（税抜換算）の前年差で、値引が増えるとマイナス。</p><div class="tbl"><table id="discCatTbl"></table></div></div>
     <div id="discBox" hidden><h3>値引の内訳（上位10）</h3><div class="tbl"><table id="discTbl"></table></div></div>
+    </div>
+    <div class="stack" data-tab="tenure" hidden>
+      <div class="grid2">
+        <div>
+          <h3>入社後の月数ごとの平均労働時間（戦力化）</h3>
+          <p class="small muted" style="margin:2px 0 8px">表示中の対象店のパート全員を、積み上げた全期間で集計（当月は見込みで月換算）。棒の上は平均時間、下は延べ人数。</p>
+          <div class="chart" id="rampChart"></div>
+        </div>
+        <div>
+          <h3>勤務期間別（当月）</h3>
+          <p class="small muted" style="margin:2px 0 8px">この店舗と、表示中の対象店全体の比較。</p>
+          <div class="tbl"><table id="bandTbl2"></table></div>
+        </div>
+      </div>
+      <div>
+        <h3>パート個人別の推移</h3>
+        <p class="small muted" style="margin:2px 0 8px">月ごとの労働時間（当月は見込みで月換算）。入社1年以内で時間が前の月より30%以上減っている、または当月の予定がこれまでの実績より30%以上少ない人を「注意」。</p>
+        <div class="tbl" style="max-height:520px;overflow-y:auto"><table id="tenurePeople"></table></div>
+      </div>
     </div>
     <div class="stack" data-tab="labor" hidden>
       <div>
@@ -731,12 +751,17 @@ function extractWage(XLSX, ws) {
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
   const hr = headerIndex(aoa, ['社員番号', '時給'], 30); const H = aoa[hr].map(h => String(h || '').trim());
   const c = n => H.indexOf(n);
-  const C = { code: c('所属コード'), emp: c('社員番号'), name: c('氏名'), wage: c('時給'), busy: c('繁忙手当'), status: c('在籍区分') };
+  const C = { code: c('所属コード'), emp: c('社員番号'), name: c('氏名'), wage: c('時給'), busy: c('繁忙手当'), status: c('在籍区分'), hire: c('入社年月日'), leave: c('退職年月日') };
+  // 何月分の資料か（上の行の「2026年10月分」など）。なければ空
+  let ym = '';
+  for (let i = 0; i < hr && !ym; i++) for (const v of aoa[i] || []) { const m = String(v || '').match(/(\d{4})年\s*(\d{1,2})月分/); if (m) { ym = `${m[1]}-${String(m[2]).padStart(2, '0')}`; break; } }
   const out = [];
   for (let i = hr + 1; i < aoa.length; i++) {
     const r = aoa[i]; if (!r || r[C.emp] == null || r[C.emp] === '') continue;
     const wage = numc(r[C.wage]); if (!wage) continue;
-    out.push({ emp: String(r[C.emp]).trim(), code: C.code >= 0 ? String(r[C.code] || '').trim() : '', name: String(r[C.name] || '').trim(), wage, busy: C.busy >= 0 ? numc(r[C.busy]) : 0 });
+    const hire = C.hire >= 0 ? toDate(r[C.hire]) : null, leave = C.leave >= 0 ? toDate(r[C.leave]) : null;
+    out.push({ emp: String(r[C.emp]).trim(), code: C.code >= 0 ? String(r[C.code] || '').trim() : '', name: String(r[C.name] || '').trim(), wage, busy: C.busy >= 0 ? numc(r[C.busy]) : 0,
+      hire: hire ? +hire : null, leave: leave ? +leave : null, status: C.status >= 0 ? String(r[C.status] || '').trim() : '', ym });
   }
   return out;
 }
@@ -952,6 +977,165 @@ function stdLines(x, ctx) {
   const bad = x.weeks.filter(w => w.n >= 3 && w.rate != null && w.rate >= 1.05).sort((a, b) => b.rate - a.rate)[0];
   if (bad) out.push({ t: `　週別で最も高いのは${md(bad.from)}〜${md(bad.to)}の${p0(bad.rate)}${bad.done ? '' : '（見込みを含む）'}。`, d: true });
   if (!x.custom) out.push({ t: `　※店舗設定（ランチ営業・${x.lane ? '' : 'T8台数・'}営業時間${x.lane ? '' : '・自動案内'}）が初期値のままです。「人」タブの店舗詳細で確認してください。`, d: true });
+  return out;
+}
+
+/* ===== 採用・定着（タイムカード・時給データを月ごとに積み上げて分析） ===== */
+const ymOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const ymIdx = ym => { const [y, m] = ym.split('-').map(Number); return y * 12 + m - 1; };
+const ymTxt = ym => `${+ym.slice(0, 4)}年${+ym.slice(5)}月`;
+/** タイムカード → 月の個人別まとめ（履歴として保存する小さな形） */
+function tcSummary(tc) {
+  if (!tc.length) return null;
+  const ym = ymOf(tc[0].date), by = {};
+  tc.filter(r => r.done).forEach(r => { const p = (by[r.emp] = by[r.emp] || { e: r.emp, n: r.name, c: r.code, s: r.staff ? 1 : 0, m: 0, d: 0, o: 0 }); p.m += r.labor; p.d++; p.o += r.ot; });
+  // 確定日（その月の実績の最終日）
+  const last = Math.max(0, ...tc.filter(r => r.done).map(r => r.date.getDate()));
+  return { ym, last, days: new Date(tc[0].date.getFullYear(), tc[0].date.getMonth() + 1, 0).getDate(), recs: Object.values(by), at: Date.now() };
+}
+/** 時給データ → 月のスナップショット（対象店舗の人だけ） */
+function wageSnapshot(wage, codes, fallbackYm) {
+  if (!wage.length) return null;
+  const ym = wage[0].ym || fallbackYm;
+  const recs = wage.filter(w => !codes || codes.has(w.code)).map(w => ({ e: w.emp, c: w.code, n: w.name, h: w.hire, l: w.leave, st: w.status, w: w.wage }));
+  return { ym, recs, at: Date.now() };
+}
+/** 履歴をまとめる（同じ月は新しいもので置き換え） */
+function mergeHistory(H, add) {
+  // キーは「年月」または「年月|エリア」（ウェブアプリではエリアごとに保存する）
+  const out = { tc: { ...((H || {}).tc || {}) }, wage: { ...((H || {}).wage || {}) } };
+  const key = x => x.ym + (x.area ? '|' + x.area : '');
+  ((add || {}).tc || []).forEach(x => { if (x && x.ym) out.tc[key(x)] = x; });
+  ((add || {}).wage || []).forEach(x => { if (x && x.ym) out.wage[key(x)] = x; });
+  return out;
+}
+/** 年月ごとにまとめ直す（エリアごとの分をつなげる） */
+function byMonth(obj) {
+  const out = {};
+  Object.values(obj || {}).forEach(x => { const o = (out[x.ym] = out[x.ym] || { ym: x.ym, recs: [], seen: new Set() }); x.recs.forEach(r => { const k = r.e + '@' + r.c; if (!o.seen.has(k)) { o.seen.add(k); o.recs.push(r); } }); });
+  return out;
+}
+const TENURE = [
+  { key: 't0', label: '1か月未満', test: k => k === 0 },
+  { key: 't1', label: '1か月〜半年', test: k => k >= 1 && k <= 5 },
+  { key: 't2', label: '半年〜1年', test: k => k >= 6 && k <= 11 },
+  { key: 't3', label: '1年以上', test: k => k >= 12 },
+];
+const RAMP = [[0, 0, '入社月'], [1, 1, '2か月目'], [2, 2, '3か月目'], [3, 3, '4か月目'], [4, 5, '5〜6か月目'], [6, 8, '7〜9か月目'], [9, 11, '10〜12か月目'], [12, 23, '2年目'], [24, 999, '3年目以降']];
+const RISK_WARN = 0.7, RISK_HIGH = 0.5;
+/**
+ * 勤務期間別の労働時間・戦力化・退社リスク（パートのみ。社員は入社日がないため対象外）
+ * H：履歴 {tc:{ym:{recs}}, wage:{ym:{recs}}}、cur：当月の勤怠分析（見込みに使う）
+ */
+function analyzeTenure(H0, cur, opt) {
+  opt = opt || {};
+  const H = { tc: byMonth(H0.tc), wage: byMonth(H0.wage) };
+  const pick = opt.pick, months = Object.keys(H.tc || {}).sort();
+  if (!months.length) return null;
+  const curYm = cur ? `${cur.y}-${String(cur.mo + 1).padStart(2, '0')}` : months[months.length - 1];
+  const useMonths = months.filter(m => m <= curYm);
+  // 入社日・在籍：いちばん新しいスナップショットを優先
+  const wMonths = Object.keys(H.wage || {}).sort();
+  const info = {};
+  wMonths.forEach(m => H.wage[m].recs.forEach(r => { info[r.e] = { ...(info[r.e] || {}), ...r, seen: m, first: (info[r.e] || {}).first || m }; }));
+  const lastW = wMonths[wMonths.length - 1];
+  // 個人ごとの月別時間（パート）
+  const P = {};
+  useMonths.forEach(m => H.tc[m].recs.forEach(r => {
+    if (r.s || (pick && !pick.has(r.c))) return;
+    const p = (P[r.e] = P[r.e] || { emp: r.e, name: r.n, code: r.c, hrs: {}, days: {} });
+    p.hrs[m] = (p.hrs[m] || 0) + r.m / 60; p.days[m] = (p.days[m] || 0) + r.d; p.code = r.c; p.name = r.n;
+  }));
+  // 当月は見込み（実績の1日あたり＋予定のある日の1日あたりで月換算）
+  const curRate = {};
+  if (cur && curYm === months[months.length - 1]) cur.stores.forEach(st => {
+    if (pick && !pick.has(st.code)) return;
+    const covered = st.days.filter(d => !d.done && !d.est).length;
+    st.people.filter(x => !x.staff).forEach(x => {
+      const p = (P[x.emp] = P[x.emp] || { emp: x.emp, name: x.name, code: st.code, hrs: {}, days: {} });
+      const span = cur.cut + covered;
+      const monthEq = span ? (x.mins + x.planMins) / 60 / span * cur.N : 0;
+      p.hrs[curYm] = monthEq; p.code = st.code;
+      curRate[x.emp] = { act: cur.cut ? x.mins / 60 / cur.cut : 0, plan: covered ? x.planMins / 60 / covered : null, actDays: x.days, planDays: x.planDays, covered };
+    });
+  });
+  const tenureK = (emp, ym) => { const i = info[emp]; if (!i || !i.h) return null; const h = new Date(i.h); return ymIdx(ym) - (h.getFullYear() * 12 + h.getMonth()); };
+  const band = k => k == null ? null : TENURE.findIndex(b => b.test(k));
+  // 当月の勤務期間別
+  const people = Object.values(P).map(p => ({ ...p, k: tenureK(p.emp, curYm), hire: info[p.emp] && info[p.emp].h ? info[p.emp].h : null, wage: info[p.emp] ? info[p.emp].w : null, cur: p.hrs[curYm] || 0 }));
+  const working = people.filter(p => p.cur > 0);
+  const bandStats = list => TENURE.map((b, i) => { const xs = list.filter(p => band(p.k) === i); const h = sum(xs, p => p.cur); return { key: b.key, label: b.label, n: xs.length, hours: h, avg: xs.length ? h / xs.length : null }; })
+    .concat([(() => { const xs = list.filter(p => p.k == null); const h = sum(xs, p => p.cur); return { key: 'tx', label: '入社日不明', n: xs.length, hours: h, avg: xs.length ? h / xs.length : null }; })()]);
+  const bands = bandStats(working);
+  const total = sum(working, p => p.cur);
+  bands.forEach(b => { b.share = total ? b.hours / total : null; });
+  // 入社後の月数ごとの平均時間（全期間の積み上げ。当月は見込み）
+  const ramp = RAMP.map(([a, b, label]) => ({ label, n: 0, h: 0 }));
+  Object.values(P).forEach(p => Object.entries(p.hrs).forEach(([m, h]) => { const k = tenureK(p.emp, m); if (k == null || k < 0 || h <= 0) return; const i = RAMP.findIndex(([a, b]) => k >= a && k <= b); ramp[i].n++; ramp[i].h += h; }));
+  ramp.forEach(r => { r.avg = r.n ? r.h / r.n : null; });
+  // 新規採用（当月・前月入社）と退社
+  const hires = people.filter(p => p.k != null && p.k <= 1).sort((a, b) => b.hire - a.hire);
+  const leavers = [];
+  const prevW = wMonths.filter(m => m < lastW).pop();
+  if (prevW) H.wage[prevW].recs.forEach(r => { const inLast = H.wage[lastW].recs.some(x => x.e === r.e); if (!inLast && (!pick || pick.has(r.c))) leavers.push({ emp: r.e, name: r.n, code: r.c, hire: r.h, how: `時給データ（${ymTxt(lastW)}分）から外れた`, sure: true }); });
+  Object.values(info).filter(i => (i.st === '退職' || i.l) && (!pick || pick.has(i.c))).forEach(i => { if (!leavers.some(x => x.emp === i.e)) leavers.push({ emp: i.e, name: i.n, code: i.c, hire: i.h, leave: i.l, how: '退職日あり', sure: true }); });
+  // 勤務が2か月続けてない人（退社の可能性）
+  if (useMonths.length >= 3) { const [m2, m1, m0] = useMonths.slice(-3); Object.values(P).forEach(p => { if ((p.hrs[m2] || 0) > 0 && !(p.hrs[m1] > 0) && !(p.hrs[m0] > 0) && !leavers.some(x => x.emp === p.emp)) leavers.push({ emp: p.emp, name: p.name, code: p.code, hire: info[p.emp] && info[p.emp].h, how: `${ymTxt(m1)}・${ymTxt(m0)}の勤務なし`, sure: false }); }); }
+  // 当月に勤務している人は退社扱いにしない（異動・データの都合で時給データから外れた場合など）
+  for (let i = leavers.length - 1; i >= 0; i--) if (P[leavers[i].emp] && (P[leavers[i].emp].hrs[curYm] || 0) > 0) leavers.splice(i, 1);
+  leavers.forEach(l => { const p = P[l.emp]; l.k = l.hire ? tenureK(l.emp, curYm) : null; l.hrs = p ? p.hrs : {}; });
+  // 退社した人の、辞める前の時間の変化（履歴があるときの裏付け）
+  const pre = leavers.map(l => { const ms = Object.keys(l.hrs).filter(m => l.hrs[m] > 0).sort(); if (ms.length < 3) return null; const lastH = l.hrs[ms[ms.length - 1]], before = ms.slice(0, -1).map(m => l.hrs[m]); return lastH / avgOf(before); }).filter(v => v != null && isFinite(v));
+  // 退社リスク：入社1年以内のパートで、当月の時間が前の月（最大3か月）の平均の70%以下／当月の予定が実績ペースの70%以下
+  const risk = [];
+  working.concat(people.filter(p => p.cur === 0 && Object.keys(p.hrs).length > 1)).forEach(p => {
+    if (p.k == null || p.k > 11) return;
+    const prevMs = useMonths.filter(m => m < curYm && (p.hrs[m] || 0) > 0 && tenureK(p.emp, m) > 0).slice(-3);
+    const prevAvg = prevMs.length ? avgOf(prevMs.map(m => p.hrs[m])) : null;
+    const r = curRate[p.emp];
+    // ①前の月との比較 ②当月の中で、これからの予定がこれまでの実績より減っているか。低い方を使う
+    const c = [];
+    if (prevAvg) c.push({ ratio: p.cur / prevAvg, why: `当月見込み${p.cur.toFixed(0)}h（前${prevMs.length}か月平均${prevAvg.toFixed(0)}h）` });
+    if (r && r.plan != null && r.act > 0 && r.actDays >= 3 && r.covered >= 5) c.push({ ratio: r.plan / r.act, why: `今後の予定が1日${r.plan.toFixed(1)}h（これまでの実績は1日${r.act.toFixed(1)}h）` });
+    const best = c.sort((a, b) => a.ratio - b.ratio)[0];
+    const ratio = best ? best.ratio : null, why = best ? best.why : '';
+    if (ratio != null && ratio <= RISK_WARN) risk.push({ ...p, ratio, why, level: ratio <= RISK_HIGH ? 'high' : 'warn' });
+  });
+  risk.sort((a, b) => a.ratio - b.ratio);
+  // 店舗別
+  const byStore = {};
+  working.forEach(p => { (byStore[p.code] = byStore[p.code] || []).push(p); });
+  const stores = Object.entries(byStore).map(([code, xs]) => {
+    const b = bandStats(xs), t = sum(xs, p => p.cur); b.forEach(x => { x.share = t ? x.hours / t : null; });
+    return { code, n: xs.length, bands: b, hires: hires.filter(h => h.code === code), leavers: leavers.filter(l => l.code === code), risk: risk.filter(r => r.code === code) };
+  });
+  const order = p => (risk.find(r => r.emp === p.emp) ? 0 : hires.some(h => h.emp === p.emp) ? 1 : 2);
+  const peopleOf = code => people.filter(p => p.code === code && Object.values(p.hrs).some(h => h > 0)).sort((a, b) => order(a) - order(b) || (a.k ?? 999) - (b.k ?? 999));
+  return { peopleOf, curYm, months: useMonths, wMonths, hasCur: !!Object.keys(curRate).length, bands, total, ramp, hires, leavers, risk, stores, preLeave: pre.length >= 3 ? { n: pre.length, ratio: avgOf(pre) } : null, n: working.length, noHire: working.filter(p => p.k == null).length };
+}
+function tenureLines(T, st, isArea) {
+  const out = [], push = (t, d) => out.push({ t, d: !!d });
+  const B = (st ? st.bands : T.bands), n = st ? st.n : T.n;
+  if (!n) return [{ t: '当月に勤務したパートがいません。', d: false }];
+  const b = i => B[i];
+  const hh = v => v == null ? '－' : Math.round(v) + 'h';
+  push(`【勤務期間別（パート${n}名、${ymTxt(T.curYm)}${T.hasCur ? '・見込みで月換算' : ''}）】${B.filter(x => x.n && x.key !== 'tx').map(x => `${x.label}${x.n}名・平均${hh(x.avg)}`).join('、')}${b(4).n ? `、入社日不明${b(4).n}名` : ''}。`);
+  // 戦力化：1か月〜半年の平均が1年以上の何割か
+  if (b(1).n >= 2 && b(3).n >= 2 && b(3).avg) {
+    const r = b(1).avg / b(3).avg;
+    push(`・戦力化：入社1か月〜半年の平均${hh(b(1).avg)}は、1年以上（${hh(b(3).avg)}）の${Math.round(r * 100)}%${r < 0.6 ? '。新しい人の時間が少なく、戦力化が進んでいない可能性' : r >= 0.9 ? '。新しい人も1年以上の人と同じくらい勤務できている' : ''}。`);
+  }
+  const known = b(0).hours + b(1).hours + b(2).hours + b(3).hours;
+  if (known) push(`　入社1年未満の人が労働時間の${Math.round((b(0).hours + b(1).hours + b(2).hours) / known * 100)}%を担っています（入社日のわかる人のうち）。`, true);
+  if (b(4).n && b(4).n >= n * 0.2) push(`　※${b(4).n}名は時給データに入社日がありません（社員番号が見つからない、または別の店の所属など）。`, true);
+  const hires = st ? st.hires : T.hires, leavers = st ? st.leavers : T.leavers, risk = st ? st.risk : T.risk;
+  const nm = p => `${isArea && p.store ? p.store + '・' : ''}${p.name}`;
+  if (hires.length) push(`・新規採用（当月・前月入社）：${hires.length}名（${hires.slice(0, 6).map(p => `${nm(p)}${hh(p.cur)}`).join('、')}${hires.length > 6 ? ' ほか' : ''}）。`);
+  if (leavers.length) push(`・退社：${leavers.filter(l => l.sure).length}名${leavers.some(l => !l.sure) ? `、退社の可能性${leavers.filter(l => !l.sure).length}名（2か月勤務なし）` : ''}（${leavers.slice(0, 6).map(l => `${nm(l)}${l.k != null ? `・入社${l.k}か月` : ''}`).join('、')}${leavers.length > 6 ? ' ほか' : ''}）。`);
+  if (risk.length) push(`・退社リスク注意（入社1年以内で時間が減っている）：${risk.slice(0, 6).map(p => `${nm(p)}（入社${p.k}か月、${p.why}）`).join('、')}${risk.length > 6 ? ` ほか${risk.length - 6}名` : ''}。`);
+  else push('・退社リスク注意：入社1年以内で時間が大きく減っている人はいません。');
+  if (T.preLeave && !st) push(`　参考：これまでに退社した${T.preLeave.n}名は、最後の月の時間がそれまでの平均の${Math.round(T.preLeave.ratio * 100)}%でした。`, true);
+  if (T.months.length < 3 && !st) push(`　※履歴が${T.months.length}か月分のため、退社の判定・時間の推移は今後の積み上げで精度が上がります。`, true);
   return out;
 }
 
@@ -1177,7 +1361,18 @@ function analyze(curRows, prevRows, extra) {
     if (est.length) area.laborLines.push({ t: `・勤務予定の未作成：${est.join('、')}（実績平均で補っています）。`, d: true });
   }
   area.costLines = areaCostComment(area, stores, ctx);
-  return { labor, stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0,  hasPays: pays.length > 0 };
+  // 採用・定着（履歴があるとき）
+  let tenure = null;
+  if (extra.history && Object.keys(extra.history.tc || {}).length) {
+    tenure = analyzeTenure(extra.history, labor, { pick });
+    if (tenure) {
+      const nameOf = c => (stores.find(s => s.code === c) || {}).name || c;
+      ['hires', 'leavers', 'risk'].forEach(k => tenure[k].forEach(p => { p.store = nameOf(p.code); }));
+      area.tenureLines = tenureLines(tenure, null, stores.length > 1);
+      stores.forEach(s => { const st = tenure.stores.find(x => x.code === s.code); s.tenure = st || null; s.tenureLines = st ? tenureLines(tenure, st, false) : [{ t: '当月に勤務したパートの履歴がありません。', d: false }]; });
+    }
+  }
+  return { tenure, labor, stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0,  hasPays: pays.length > 0 };
 }
 
 /* ===== コメント生成 ===== */
@@ -1571,7 +1766,7 @@ function areaCostComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
 
 </script>
 <script>
@@ -1618,6 +1813,7 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
   async function readOne(f) {
     const r = await readOneInner(f);
     r.file = { name: f.name, raw: await f.arrayBuffer() };
+    r.area = f.__area || null; // ウェブアプリ：どのエリアのフォルダのファイルか
     return r;
   }
   async function readOneInner(f) {
@@ -1676,8 +1872,10 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
       return Promise.race([timeout, new Promise((res, rej) => { const x = db.transaction('kv', mode); const r = fn(x.objectStore('kv')); x.oncomplete = () => res(r && r.result); x.onerror = () => rej(x.error); })]);
     },
     get() { return this.tx('readonly', s => s.get('data')).catch(() => null); },
+    getK(k) { return this.tx('readonly', s => s.get(k)).catch(() => null); },
+    putK(k, v) { return this.tx('readwrite', s => s.put(v, k)); },
     put(v) { return this.tx('readwrite', s => s.put(v, 'data')); },
-    clear() { return this.tx('readwrite', s => s.delete('data')); },
+    clear() { return this.tx('readwrite', s => { s.delete('history'); return s.delete('data'); }); },
   };
   const pref = {
     get(k, d) { try { const v = localStorage.getItem('ba.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -1691,6 +1889,11 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
   function saveStdSetting(code, v, all) {
     if (GAS) { stdMem = all; call('saveStdSetting', code, v).catch(e => setStatus('店舗設定を保存できませんでした：' + (e.message || e), true)); }
     else pref.set('stdSettings', all);
+  }
+  let HIST = null; // 採用・定着の履歴 {tc:{年月:{recs}}, wage:{年月:{recs}}}
+  function saveHist(add) {
+    if (GAS) { [...add.tc.map(x => ['tc', x]), ...add.wage.map(x => ['wage', x])].forEach(([k, x]) => { if (x.area) call('saveHistory', x.area, k, x.ym, JSON.stringify(x)).catch(e => console.warn('履歴を保存できませんでした（フォルダの編集権限がない場合）', e)); }); }
+    else store.putK('history', HIST).catch(() => {});
   }
   let S = null; // 保存中のデータ {cur, prev, pays, hourly, savedAt}
   // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
@@ -1727,6 +1930,7 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
     $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
       + (S.stdBook ? `<li><span class="label">標準比マスタ（通常店）</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（通常店）</span> なし</li>')
       + (S.stdLane ? `<li><span class="label">標準比マスタ（特急レーン店）</span> ${esc(S.stdLane.name)} <span class="muted">レーン店${Object.values(S.stdLane.data.info).filter(x => x.perCust != null && /特急|レーン/.test(x.flag || '')).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（特急レーン店）</span> なし</li>')
+      + (HIST && Object.keys(HIST.tc).length ? `<li><span class="label">採用・定着の履歴</span> タイムカード ${[...new Set(Object.values(HIST.tc).map(x => x.ym))].sort().map(ymTxt).join('・')}<span class="muted">／時給データ ${[...new Set(Object.values(HIST.wage).map(x => x.ym))].sort().map(ymTxt).join('・') || 'なし'}</span></li>` : '')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
@@ -1735,7 +1939,7 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -1763,6 +1967,7 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
     try {
       let got = [];
       for (const f of files) got.push(await readOne(f));
+      const gotRaw = got;
       got = mergeSame(got);
       const N = S && !opt.fresh ? { ...S } : {};
       const notes = [];
@@ -1806,10 +2011,11 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
         else N.pays = { name: g.name, rows: g.pays, file: g.file };
       }
       // 勤怠：タイムカード・勤務スケジュールは当月分、時給データ・標準比マスタは最新のファイルで差し替え（月が変わっても残す）
-      const ck0 = mKey(N.cur.rows), pickM = xs => xs.find(g => mKey(g.tc || g.ws) === ck0) || xs[0];
-      const tcs = got.filter(g => g.tc), wss = got.filter(g => g.ws);
-      if (tcs.length) { const g = pickM(tcs); N.tc = { name: g.name, rows: g.tc, file: g.file }; }
-      if (wss.length) { const g = pickM(wss); N.ws = { name: g.name, rows: g.ws, file: g.file }; }
+      // 当月以外のタイムカード・勤務スケジュールは採用・定着の履歴にだけ使い、当月分は置き換えない
+      const ck0 = mKey(N.cur.rows), pickM = xs => xs.find(g => mKey(g.tc || g.ws) === ck0);
+      const tcG = pickM(got.filter(g => g.tc)), wsG = pickM(got.filter(g => g.ws));
+      if (tcG) N.tc = { name: tcG.name, rows: tcG.tc, file: tcG.file };
+      if (wsG) N.ws = { name: wsG.name, rows: wsG.ws, file: wsG.file };
       for (const g of got) {
         if (g.wage && !(opt.fresh && N.wage)) N.wage = { name: g.name, rows: g.wage, file: g.file };
         if (g.std && g.std.kind === 'lane') { if (!(opt.fresh && N.stdLane)) N.stdLane = { name: g.name, data: g.std, file: g.file }; }
@@ -1827,6 +2033,16 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
       if (N.tc && mKey(N.tc.rows) !== ck) { notes.push(`タイムカード（${fmtYM(N.tc.rows)}）が当年と別の月のため外しました`); N.tc = null; }
       if (N.ws && mKey(N.ws.rows) !== ck) { notes.push(`勤務スケジュール（${fmtYM(N.ws.rows)}）が当年と別の月のため外しました`); N.ws = null; }
       if (N.invFiles) N.invFiles = N.invFiles.filter(x => { const ok = mKey(x.rows) === ck; if (!ok) notes.push(`原価管理表（${fmtYM(x.rows)}）が当年と別の月のため外しました`); return ok; });
+      // 採用・定着：タイムカード（読み込んだすべての月）と時給データを履歴に積み上げる
+      const add = { tc: [], wage: [] };
+      gotRaw.filter(g => g.tc).forEach(g => { const x = tcSummary(g.tc); if (x) { if (g.area) x.area = g.area; add.tc.push(x); } });
+      const wg = gotRaw.find(g => g.wage);
+      if (wg) {
+        const H1 = mergeHistory(HIST, add), areas = [...new Set(Object.values(H1.tc).map(x => x.area || ''))];
+        areas.forEach(a => { const codes = new Set(Object.values(H1.tc).filter(x => (x.area || '') === a).flatMap(x => x.recs.map(r => r.c))); const w = wageSnapshot(wg.wage, codes, ymOf(maxD(N.cur.rows))); if (w && w.recs.length) { if (a) w.area = a; add.wage.push(w); } });
+      }
+      if (add.tc.length || add.wage.length) { HIST = mergeHistory(HIST, add); saveHist(add); }
+      if (add.tc.length > 1) notes.push(`タイムカード${add.tc.length}か月分を採用・定着の履歴に積み上げました`);
       N.savedAt = Date.now();
       N.v = DATA_VERSION;
       S = N;
@@ -1919,10 +2135,11 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
 
   function render() {
     const a = R.area;
-    $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor');
+    $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor'); $('tabTenure').setAttribute('aria-selected', tab === 'tenure');
     document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; });
     if (tab === 'cost') { renderCost(); return; }
     if (tab === 'labor') { renderLabor(); return; }
+    if (tab === 'tenure') { renderTenure(); return; }
     $('storeTblTitle').textContent = '店舗別 予算差と要因';
     $('period').textContent = `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
     const okN = R.stores.filter(s => s.diff >= 0).length;
@@ -1953,6 +2170,7 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
     if (!s) return;
     if (tab === 'cost') { renderStoreCost(s); return; }
     if (tab === 'labor') { renderStoreLabor(s); return; }
+    if (tab === 'tenure') { renderStoreTenure(s); return; }
     $('storeName').innerHTML = `${esc(s.name)} <span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '予算達成' : '予算未達'}</span>`;
     $('sKpis').innerHTML = kpi('売上', man(s.sales), `予算 ${man(s.budget)}`) + kpi('予算比', pct(s.rate), `差額 ${sman(s.diff)}`, cls(s.diff))
       + kpi('客数要因', sman(s.custEff), `客数 ${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`, cls(s.custEff))
@@ -2023,6 +2241,69 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
       + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
       + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr>`
       + '</tbody>';
+  }
+
+  /* ---------- 採用・定着 ---------- */
+  const NO_TENURE = 'タイムカード表と時給データ（入社年月日の入った店長資料）を読み込むと、勤務期間別の労働時間・新規採用・退社・退社リスクを分析します。毎月読み込むと履歴が積み上がり、前の月との比較ができるようになります。';
+  const hh = v => v == null ? '－' : Math.round(v) + 'h';
+  function renderTenure() {
+    const T = R.tenure;
+    $('storeTblTitle').textContent = '店舗別 勤務期間・採用・退社';
+    if (!T) { $('kpis').innerHTML = ''; $('areaComment').value = NO_TENURE; fit($('areaComment')); $('storeTbl').innerHTML = ''; $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join(''); renderStore(); return; }
+    const b = T.bands, ramp = b[1].n && b[3].n && b[3].avg ? b[1].avg / b[3].avg : null;
+    $('kpis').innerHTML = kpi('勤務したパート', `${T.n}名`, `${ymTxt(T.curYm)}・履歴${T.months.length}か月`)
+      + kpi('新規採用', `${T.hires.length}名`, '当月・前月入社')
+      + kpi('退社', `${T.leavers.filter(l => l.sure).length}名`, T.leavers.some(l => !l.sure) ? `可能性 ${T.leavers.filter(l => !l.sure).length}名` : '')
+      + kpi('退社リスク注意', `${T.risk.length}名`, `うち要注意 ${T.risk.filter(r => r.level === 'high').length}名`, T.risk.length ? 'neg' : '')
+      + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年 ${hh(b[1].avg)}／1年以上 ${hh(b[3].avg)}`, ramp < 0.6 ? 'neg' : '') : '');
+    $('areaComment').value = commentText(R.area.tenureLines || [], detail); fit($('areaComment'));
+    const rows = [...R.stores].sort((x, y) => ((y.tenure || {}).risk || []).length - ((x.tenure || {}).risk || []).length);
+    const cell = x => x && x.n ? `${x.n}名<span class="muted small">・${hh(x.avg)}</span>` : '<span class="muted">－</span>';
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">パート</th>${TENURE_LABELS.map(l => `<th class="n">${l}</th>`).join('')}<th class="n">入社日不明</th><th class="n">新規採用</th><th class="n">退社</th><th class="n">リスク注意</th></tr></thead><tbody>`
+      + rows.map(s => { const t = s.tenure; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
+        + (!t ? '<td class="n muted" colspan="9">履歴なし</td></tr>' : `<td class="n">${t.n}名</td>${t.bands.slice(0, 4).map(x => `<td class="n">${cell(x)}</td>`).join('')}<td class="n muted">${t.bands[4].n || '－'}</td><td class="n">${t.hires.length || '－'}</td><td class="n">${t.leavers.length || '－'}</td><td class="n ${t.risk.length ? 'neg' : ''}">${t.risk.length ? t.risk.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
+    $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
+      const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
+      tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+    $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+    renderStore();
+  }
+  const TENURE_LABELS = ['1か月未満', '1か月〜半年', '半年〜1年', '1年以上'];
+  function renderStoreTenure(s) {
+    $('storeName').textContent = s.name;
+    const T = R.tenure, t = s.tenure;
+    if (!T || !t) { $('sKpis').innerHTML = ''; $('storeComment').value = T ? '当月に勤務したパートの履歴がありません。' : NO_TENURE; fit($('storeComment')); $('rampChart').innerHTML = ''; $('bandTbl2').innerHTML = ''; $('tenurePeople').innerHTML = ''; return; }
+    const b = t.bands, ramp = b[1].n && b[3].n && b[3].avg ? b[1].avg / b[3].avg : null;
+    $('sKpis').innerHTML = kpi('勤務したパート', `${t.n}名`, ymTxt(T.curYm)) + kpi('新規採用', `${t.hires.length}名`, '当月・前月入社') + kpi('退社', `${t.leavers.length}名`, '') + kpi('退社リスク注意', `${t.risk.length}名`, '', t.risk.length ? 'neg' : '')
+      + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年／1年以上`, ramp < 0.6 ? 'neg' : '') : '');
+    $('storeComment').value = commentText(s.tenureLines, detail); fit($('storeComment'));
+    // 戦力化の棒（対象店全体）
+    const rp = T.ramp, W = 560, H2 = 210, L0 = 40, base = 160, top = 18, bw = (W - L0 - 10) / rp.length;
+    const mx = Math.max(1, ...rp.map(r => r.avg || 0));
+    let svg = `<svg viewBox="0 0 ${W} ${H2}" width="100%" style="max-width:${W * 1.3}px" role="img" aria-label="入社後の月数ごとの平均労働時間">`;
+    const step = [10, 20, 25, 50, 100].find(u => mx / u <= 4) || 100;
+    for (let v = 0; v <= mx; v += step) { const y = base - v / mx * (base - top); svg += `<line x1="${L0}" x2="${W - 4}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L0 - 4}" y="${y + 3}" text-anchor="end">${v}h</text>`; }
+    rp.forEach((r, i) => {
+      const x = L0 + 6 + i * bw, w = Math.min(28, bw - 8);
+      if (r.avg) { const h = r.avg / mx * (base - top), y = base - h, rr = Math.min(4, h);
+        svg += `<path d="M${x},${base} V${y + rr} Q${x},${y} ${x + rr},${y} H${x + w - rr} Q${x + w},${y} ${x + w},${y + rr} V${base} Z" fill="var(${i >= 7 ? '--c0' : '--c1'})"/>`;
+        svg += `<text x="${x + w / 2}" y="${y - 4}" text-anchor="middle" style="fill:var(--fg)">${Math.round(r.avg)}</text>`; }
+      svg += `<rect x="${x - 4}" y="${top}" width="${w + 8}" height="${base - top + 40}" fill="transparent" data-tip="${esc(`${r.label}|平均 ${hh(r.avg)}|延べ ${r.n}名`)}"/>`;
+      svg += `<text x="${x + w / 2}" y="${base + 14}" text-anchor="middle">${r.label.replace('か月目', '')}</text><text x="${x + w / 2}" y="${base + 27}" text-anchor="middle">${r.n}名</text>`;
+    });
+    $('rampChart').innerHTML = svg + '</svg>';
+    // 勤務期間別：店舗と全体
+    $('bandTbl2').innerHTML = `<thead><tr><th>勤務期間</th><th class="n">この店舗</th><th class="n">平均</th><th class="n">時間の割合</th><th class="n">全体の平均</th></tr></thead><tbody>`
+      + b.map((x, i) => `<tr><td>${x.label}</td><td class="n">${x.n || '－'}${x.n ? '名' : ''}</td><td class="n">${hh(x.avg)}</td><td class="n muted">${x.share != null && x.n ? pct(x.share) : '－'}</td><td class="n muted">${hh(T.bands[i].avg)}</td></tr>`).join('') + '</tbody>';
+    // 個人別
+    const months = T.months.slice(-6);
+    const flagOf = p => { const r = t.risk.find(x => x.emp === p.emp); if (r) return `<span class="${r.level === 'high' ? 'pill ng' : 'flag'}">${r.level === 'high' ? '要注意' : '注意'}</span>`; if (t.hires.some(x => x.emp === p.emp)) return '<span class="pill ok">新規</span>'; return ''; };
+    const list = R.tenure.peopleOf ? R.tenure.peopleOf(s.code) : [];
+    $('tenurePeople').innerHTML = `<thead><tr><th>氏名</th><th></th><th>入社日</th><th class="n">勤務期間</th>${months.map(m => `<th class="n">${+m.slice(5)}月${m === T.curYm && T.hasCur ? '<span class="muted small">見込</span>' : ''}</th>`).join('')}<th>理由</th></tr></thead><tbody>`
+      + list.map(p => { const r = t.risk.find(x => x.emp === p.emp); const hd = p.hire ? new Date(p.hire) : null;
+        return `<tr><td>${esc(p.name)}</td><td>${flagOf(p)}</td><td class="muted">${hd ? `${hd.getFullYear()}/${hd.getMonth() + 1}/${hd.getDate()}` : '不明'}</td><td class="n">${p.k == null ? '－' : p.k >= 12 ? `${Math.floor(p.k / 12)}年${p.k % 12 ? (p.k % 12) + 'か月' : ''}` : p.k + 'か月'}</td>${months.map(m => `<td class="n">${p.hrs[m] ? Math.round(p.hrs[m]) : '<span class="muted">－</span>'}</td>`).join('')}<td class="small muted" style="white-space:normal;min-width:14em">${r ? esc(r.why) : ''}</td></tr>`; }).join('')
+      + (t.leavers.length ? `<tr><td colspan="${5 + months.length}" class="small"><b>退社</b>：${t.leavers.map(l => `${esc(l.name)}（${esc(l.how)}）`).join('、')}</td></tr>` : '') + '</tbody>';
   }
 
   /* ---------- 人（労働時間・雑給・残業） ---------- */
@@ -2375,9 +2656,10 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
   $('tabSales').addEventListener('click', () => setTab('sales'));
   $('tabCost').addEventListener('click', () => setTab('cost'));
   $('tabLabor').addEventListener('click', () => setTab('labor'));
+  $('tabTenure').addEventListener('click', () => setTab('tenure'));
   $('copyAll').addEventListener('click', e => {
     const q = t => '"' + t.replace(/"/g, '""') + '"';
-    const key = tab === 'cost' ? 'costLines' : tab === 'labor' ? 'laborLines' : 'lines';
+    const key = tab === 'cost' ? 'costLines' : tab === 'labor' ? 'laborLines' : tab === 'tenure' ? 'tenureLines' : 'lines';
     const lines = [[R.scopeLabel, $('areaComment').value], ...R.stores.map(s => [s.name, s.code === cur ? $('storeComment').value : commentText(s[key] || [], detail)])];
     copy(lines.map(([n, c]) => `${n}\t${q(c)}`).join('\n'), e.currentTarget);
   });
@@ -2386,7 +2668,7 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
   $('clearNo').addEventListener('click', () => { $('clearAsk').hidden = true; $('clearBtn').hidden = false; });
   $('clearYes').addEventListener('click', async () => {
     try { await store.clear(); } catch (e) { /* なし */ }
-    S = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
+    S = null; HIST = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
     setStatus('保存データを削除しました。');
   });
 
@@ -2395,7 +2677,7 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
   $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
   if (GAS) startDrive();
-  else store.get().then(async v => {
+  else store.getK('history').then(h => { HIST = h || null; return store.get(); }).then(async v => {
     if (!v || !v.cur) return;
     let msg = '前回保存したデータを表示しています。新しいファイルを入れると更新されます。', err = false;
     if (v.v !== DATA_VERSION) {
@@ -2435,11 +2717,13 @@ if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, ext
       setStatus(`「${label}」のファイルを探しています…`);
       const list = await call('listFiles', ids);
       if (!list.length) throw new Error('フォルダにファイルがありません');
+      // 採用・定着の履歴（各エリアの「履歴データ」フォルダ）
+      try { const h = await call('getHistory', ids); HIST = mergeHistory(null, { tc: h.tc.map(x => JSON.parse(x)), wage: h.wage.map(x => JSON.parse(x)) }); } catch (e) { console.warn(e); HIST = null; }
       const files = []; let n = 0;
-      const b64ToFile = (r) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new File([u], r.name); };
+      const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name); f.__area = m.common ? null : m.folderId; return f; };
       // 4件ずつ並行して取得
       for (let i = 0; i < list.length; i += 4) {
-        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; setStatus(`共有ドライブから読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r); })));
+        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; setStatus(`共有ドライブから読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r, m); })));
         files.push(...part);
       }
       await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています。` });
