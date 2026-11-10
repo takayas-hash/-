@@ -1013,8 +1013,8 @@ function combineStd(normal, lane) {
     hasNormal: !!normal, hasLane: !!lane,
   };
 }
-// 店舗設定の初期値（見込君の初期入力と同じ）
-const STD_DEFAULT = { lunchWd: false, lunchHd: true, auto: false, t8: 3, hoursWd: 6, hoursHd: 12 };
+// 店舗設定の初期値（利用者の指定：自動案内あり・T8は2台）。店舗ごとに保存した設定があればそちらを使う
+const STD_DEFAULT = { lunchWd: false, lunchHd: true, auto: true, t8: 2, hoursWd: 6, hoursHd: 12 };
 /** 1日の標準時間（見込君「原本」シートの式と同じ）。type：1＝平日、2＝土日祝 */
 function stdHours(cust, type, st, tables, M, lane) {
   const rows = lane ? M.laneTables : M.tables; if (!rows || !rows.length || !tables) return null;
@@ -2761,14 +2761,17 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const nb = (id, label, v, step) => `<label class="small">${label} <input type="number" data-k="${id}" value="${v ?? ''}" step="${step || 1}" min="0" style="width:4.5em;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)"></label>`;
     $('stdSet').innerHTML = `<span class="label">${x.lane ? '特急レーン店・' : ''}店舗設定${x.custom ? '' : '（初期値のまま）'}</span>` + nb('tables', '卓数', x.tables) + yn('lunchWd', '平日ランチ営業', st.lunchWd) + yn('lunchHd', '休日ランチ営業', st.lunchHd)
       + (x.lane ? `<span class="small">変数（客数1人あたり） <b>${st.perCust}</b></span>` : yn('auto', '自動案内', st.auto) + nb('t8', 'T8台数', st.t8)) + nb('hoursWd', '営業時間 平日', st.hoursWd, 0.5) + nb('hoursHd', '営業時間 休日', st.hoursHd, 0.5)
-      + `<span class="small muted">${GAS ? '変更するとすぐ再計算し、全員共通の設定として保存します' : '変更するとすぐ再計算し、このブラウザに保存します'}</span>`;
-    $('stdSet').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
+      + (x.custom ? '' : `<button type="button" class="btn ghost" id="stdSave" style="padding:4px 10px">この内容で保存</button>`)
+      + `<span class="small muted">${GAS ? '一度保存すれば次回からこの設定（全員共通）。変更するとすぐ再計算して保存します' : '一度保存すれば次回からこの設定（このブラウザ）。変更するとすぐ再計算して保存します'}</span>`;
+    const saveNow = () => {
       const all = stdSettingsAll(), cur0 = { ...STD_DEFAULT, ...(all[s.code] || {}) };
       $('stdSet').querySelectorAll('[data-k]').forEach(e => { const k = e.dataset.k; cur0[k] = e.tagName === 'SELECT' ? e.value === '1' : +e.value; });
       all[s.code] = cur0; saveStdSetting(s.code, cur0, all);
       if (last) last[2] = { ...last[2], stdSettings: all };
       const keep = s.code; rerun(); cur = keep; render();
-    }));
+    };
+    $('stdSet').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', saveNow));
+    if ($('stdSave')) $('stdSave').addEventListener('click', saveNow);
     if (x.missing) { $('stdTbl').innerHTML = `<tbody><tr><td class="muted">${x.need === 'lane' ? '特急レーン店です。レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '通常店用の標準比マスタを読み込むと計算します。' : '卓数を入れると計算します。'}</td></tr></tbody>`; $('stdWeekTbl').innerHTML = ''; return; }
     const r2 = v => v == null ? '－' : v.toFixed(1);
     $('stdTbl').innerHTML = `<thead><tr><th>日</th><th>区分</th><th class="n">客数</th><th class="n">標準時間</th><th class="n">労働時間</th><th class="n">差異</th><th class="n">標準比</th><th class="n">人時来客</th></tr></thead><tbody>`

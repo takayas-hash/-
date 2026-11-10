@@ -600,8 +600,8 @@ function combineStd(normal, lane) {
     hasNormal: !!normal, hasLane: !!lane,
   };
 }
-// 店舗設定の初期値（見込君の初期入力と同じ）
-const STD_DEFAULT = { lunchWd: false, lunchHd: true, auto: false, t8: 3, hoursWd: 6, hoursHd: 12 };
+// 店舗設定の初期値（利用者の指定：自動案内あり・T8は2台）。店舗ごとに保存した設定があればそちらを使う
+const STD_DEFAULT = { lunchWd: false, lunchHd: true, auto: true, t8: 2, hoursWd: 6, hoursHd: 12 };
 /** 1日の標準時間（見込君「原本」シートの式と同じ）。type：1＝平日、2＝土日祝 */
 function stdHours(cust, type, st, tables, M, lane) {
   const rows = lane ? M.laneTables : M.tables; if (!rows || !rows.length || !tables) return null;
