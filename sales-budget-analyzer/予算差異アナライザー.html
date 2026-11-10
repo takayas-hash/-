@@ -163,7 +163,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 @media (max-width: 560px) { .cm-item { grid-template-columns: minmax(0, 1fr); } }
 .rp-page .cm { border-radius: 2mm; font-size: 9pt; line-height: 1.55; }
 .rp-page .cm-head { padding: 2mm 3mm; font-size: 10pt; } .rp-page .cm-sec { padding: 1.5mm 3mm .8mm; font-size: 8.5pt; }
-.rp-page .cm-item { grid-template-columns: 25mm minmax(0, 1fr); gap: 1mm 3mm; padding: 1.2mm 3mm; } .rp-page .cm-lbl { font-size: 8.5pt; } .rp-page .cm-sub { font-size: 8pt; }
+.rp-page .cm-item { grid-template-columns: 25mm minmax(0, 1fr); gap: 1mm 3mm; padding: 1.2mm 3mm; } .rp-page .cm-item.solo { grid-template-columns: minmax(0, 1fr); } .rp-page .cm-lbl { font-size: 8.5pt; } .rp-page .cm-sub { font-size: 8pt; }
 .rp-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4mm; }
 .rp-none { color: #5d6068; font-size: 9pt; border: 1px dashed #dddcd6; border-radius: 2mm; padding: 3mm; }
 @media print {
@@ -2516,7 +2516,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
   }
   function cmtHtml(text, editable) {
     const ce = editable ? ' contenteditable="true"' : '';
-    const mark = t => esc(t).replace(/(▲[\d.,]+(?:万円|円|pt|%|h|人|件|日)?)/g, '<b class="neg">$1</b>').replace(/(\+[\d.,]+(?:万円|円))/g, '<b class="pos">$1</b>');
+    const mark = t => esc(t).replace(/(▲[\d.,]+(?:万円|円|pt|%|h|人|件|日)?)/g, '<b class="neg">$1</b>').replace(/(\+(?!0(?:\.0)?(?:万円|円))[\d.,]+(?:万円|円))/g, '<b class="pos">$1</b>');
     const items = []; let head = null; const headSubs = [];
     text.split('\n').filter(l => l.trim()).forEach(l => {
       const h = l.match(/^【([^】]+)】(.*)$/);
