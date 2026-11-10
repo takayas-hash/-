@@ -1080,16 +1080,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (!T) { $('kpis').innerHTML = ''; setCmt('areaComment', NO_TENURE); $('storeTbl').innerHTML = ''; $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join(''); renderStore(); return; }
     const b = T.bands, ramp = b[1].n && b[3].n && b[3].avg ? b[1].avg / b[3].avg : null;
     $('kpis').innerHTML = kpi('勤務したパート', `${T.n}名`, `${ymTxt(T.curYm)}・履歴${T.months.length}か月`)
-      + kpi('新規採用', `${T.hires.length}名`, '当月・前月入社')
+      + kpi('新規採用', `${T.hires.length}名`, T.hires.some(p => p.hireEst) ? `当月・前月入社（うち推定 ${T.hires.filter(p => p.hireEst).length}名）` : '当月・前月入社')
       + kpi('退社', `${T.leavers.filter(l => l.sure).length}名`, T.leavers.some(l => !l.sure) ? `可能性 ${T.leavers.filter(l => !l.sure).length}名` : '')
       + kpi('退社リスク注意', `${T.risk.length}名`, `うち要注意 ${T.risk.filter(r => r.level === 'high').length}名`, T.risk.length ? 'neg' : '')
       + (ramp != null ? kpi('戦力化', Math.round(ramp * 100) + '%', `1か月〜半年 ${hh(b[1].avg)}／1年以上 ${hh(b[3].avg)}`, ramp < 0.6 ? 'neg' : '') : '');
     setCmt('areaComment', commentText(R.area.tenureLines || [], detail));
     const rows = [...R.stores].sort((x, y) => ((y.tenure || {}).risk || []).length - ((x.tenure || {}).risk || []).length);
     const cell = x => x && x.n ? `${x.n}名<span class="muted small">・${hh(x.avg)}</span>` : '<span class="muted">－</span>';
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">パート</th>${TENURE_LABELS.map(l => `<th class="n">${l}</th>`).join('')}<th class="n">入社日不明</th><th class="n">新規採用</th><th class="n">退社</th><th class="n">リスク注意</th></tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">パート</th>${TENURE_LABELS.map(l => `<th class="n">${l}</th>`).join('')}<th class="n">うち入社推定</th><th class="n">新規採用</th><th class="n">退社</th><th class="n">リスク注意</th></tr></thead><tbody>`
       + rows.map(s => { const t = s.tenure; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
-        + (!t ? '<td class="n muted" colspan="9">履歴なし</td></tr>' : `<td class="n">${t.n}名</td>${t.bands.slice(0, 4).map(x => `<td class="n">${cell(x)}</td>`).join('')}<td class="n muted">${t.bands[4].n || '－'}</td><td class="n">${t.hires.length || '－'}</td><td class="n">${t.leavers.length || '－'}</td><td class="n ${t.risk.length ? 'neg' : ''}">${t.risk.length ? t.risk.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
+        + (!t ? '<td class="n muted" colspan="9">履歴なし</td></tr>' : `<td class="n">${t.n}名</td>${t.bands.slice(0, 4).map(x => `<td class="n">${cell(x)}</td>`).join('')}<td class="n muted">${t.estN || '－'}</td><td class="n">${t.hires.length || '－'}</td><td class="n">${t.leavers.length || '－'}</td><td class="n ${t.risk.length ? 'neg' : ''}">${t.risk.length ? t.risk.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
       tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -1131,7 +1131,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const list = R.tenure.peopleOf ? R.tenure.peopleOf(s.code) : [];
     $('tenurePeople').innerHTML = `<thead><tr><th>氏名</th><th></th><th>入社日</th><th class="n">勤務期間</th>${months.map(m => `<th class="n">${+m.slice(5)}月${m === T.curYm && T.hasCur ? '<span class="muted small">見込</span>' : ''}</th>`).join('')}<th>減り方</th><th>理由</th></tr></thead><tbody>`
       + list.map(p => { const r = t.risk.find(x => x.emp === p.emp); const hd = p.hire ? new Date(p.hire) : null;
-        return `<tr><td>${esc(p.name)}</td><td>${flagOf(p)}</td><td class="muted">${hd ? `${hd.getFullYear()}/${hd.getMonth() + 1}/${hd.getDate()}` : '不明'}</td><td class="n">${p.k == null ? '－' : p.k >= 12 ? `${Math.floor(p.k / 12)}年${p.k % 12 ? (p.k % 12) + 'か月' : ''}` : p.k + 'か月'}</td>${months.map(m => `<td class="n">${p.hrs[m] ? `${Math.round(p.hrs[m])}h<span class="muted small">・${Math.round(p.days[m] || 0)}日</span>` : '<span class="muted">－</span>'}</td>`).join('')}<td>${r && r.kind ? KIND_PILL[r.kind] : ''}</td><td class="small muted" style="white-space:normal;min-width:20em">${r ? esc(r.why) : ''}</td></tr>`; }).join('')
+        return `<tr><td>${esc(p.name)}</td><td>${flagOf(p)}</td><td class="muted">${hd ? (p.hireEst ? `${hd.getFullYear()}/${hd.getMonth() + 1}<span class="small">（推定）</span>` : `${hd.getFullYear()}/${hd.getMonth() + 1}/${hd.getDate()}`) : '不明'}</td><td class="n">${p.k == null ? '－' : p.k >= 12 ? `${Math.floor(p.k / 12)}年${p.k % 12 ? (p.k % 12) + 'か月' : ''}` : p.k + 'か月'}</td>${months.map(m => `<td class="n">${p.hrs[m] ? `${Math.round(p.hrs[m])}h<span class="muted small">・${Math.round(p.days[m] || 0)}日</span>` : '<span class="muted">－</span>'}</td>`).join('')}<td>${r && r.kind ? KIND_PILL[r.kind] : ''}</td><td class="small muted" style="white-space:normal;min-width:20em">${r ? esc(r.why) : ''}</td></tr>`; }).join('')
       + (t.leavers.length ? `<tr><td colspan="${6 + months.length}" class="small"><b>退社</b>：${t.leavers.map(l => `${esc(l.name)}（${esc(l.how)}）`).join('、')}</td></tr>` : '') + '</tbody>';
   }
 

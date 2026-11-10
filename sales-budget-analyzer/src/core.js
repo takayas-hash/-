@@ -755,10 +755,28 @@ function analyzeTenure(H0, cur, opt) {
       curRate[x.emp] = { act: cur.cut ? x.mins / 60 / cur.cut : 0, plan: covered ? x.planMins / 60 / covered : null, actDays: x.days, planDays: x.planDays, covered };
     });
   });
-  const tenureK = (emp, ym) => { const i = info[emp]; if (!i || !i.h) return null; const h = new Date(i.h); return ymIdx(ym) - (h.getFullYear() * 12 + h.getMonth()); };
+  // 入社日：時給資料の入社年月日。載っていない人（利用者確認：基本的に前月入社）は推定する
+  //   タイムカードの履歴で前の月にいなかったことがわかれば、初めて出てきた月に入社。わからなければ「前月入社」（履歴にもっと前からいればその月）
+  const hireOf = {};
+  const curI = ymIdx(curYm);
+  // 店舗のパートの3割以上が時給資料にいないときは、時給資料が違う（その店舗が載っていない）とみなして推定しない
+  const miss = {}, tot = {};
+  Object.values(P).forEach(p => { tot[p.code] = (tot[p.code] || 0) + 1; if (!(info[p.emp] && info[p.emp].h)) miss[p.code] = (miss[p.code] || 0) + 1; });
+  const noWageStores = Object.keys(tot).filter(c => (miss[c] || 0) / tot[c] > 0.3);
+  Object.values(P).forEach(p => {
+    const i = info[p.emp];
+    if (i && i.h) { hireOf[p.emp] = { h: i.h, est: false }; return; }
+    if (noWageStores.includes(p.code)) return;
+    const ms = Object.keys(p.hrs).filter(m => p.hrs[m] > 0).sort();
+    if (!ms.length) return;
+    const first = ymIdx(ms[0]), knownBefore = useMonths.some(m => ymIdx(m) === first - 1);
+    const hi = knownBefore ? first : Math.min(first, curI - 1);
+    hireOf[p.emp] = { h: +new Date(Math.floor(hi / 12), hi % 12, 1), est: true };
+  });
+  const tenureK = (emp, ym) => { const i = hireOf[emp]; if (!i) return null; const h = new Date(i.h); return ymIdx(ym) - (h.getFullYear() * 12 + h.getMonth()); };
   const band = k => k == null ? null : TENURE.findIndex(b => b.test(k));
   // 当月の勤務期間別
-  const people = Object.values(P).map(p => ({ ...p, k: tenureK(p.emp, curYm), hire: info[p.emp] && info[p.emp].h ? info[p.emp].h : null, wage: info[p.emp] ? info[p.emp].w : null, cur: p.hrs[curYm] || 0 }));
+  const people = Object.values(P).map(p => ({ ...p, k: tenureK(p.emp, curYm), hire: hireOf[p.emp] ? hireOf[p.emp].h : null, hireEst: !!(hireOf[p.emp] && hireOf[p.emp].est), wage: info[p.emp] ? info[p.emp].w : null, cur: p.hrs[curYm] || 0 }));
   const working = people.filter(p => p.cur > 0);
   const bandStats = list => TENURE.map((b, i) => { const xs = list.filter(p => band(p.k) === i); const h = sum(xs, p => p.cur); return { key: b.key, label: b.label, n: xs.length, hours: h, avg: xs.length ? h / xs.length : null }; })
     .concat([(() => { const xs = list.filter(p => p.k == null); const h = sum(xs, p => p.cur); return { key: 'tx', label: '入社日不明', n: xs.length, hours: h, avg: xs.length ? h / xs.length : null }; })()]);
@@ -822,12 +840,13 @@ function analyzeTenure(H0, cur, opt) {
   working.forEach(p => { (byStore[p.code] = byStore[p.code] || []).push(p); });
   const stores = Object.entries(byStore).map(([code, xs]) => {
     const b = bandStats(xs), t = sum(xs, p => p.cur); b.forEach(x => { x.share = t ? x.hours / t : null; });
-    return { code, n: xs.length, bands: b, hires: hires.filter(h => h.code === code), leavers: leavers.filter(l => l.code === code), risk: risk.filter(r => r.code === code) };
+    return { code, n: xs.length, estN: xs.filter(p => p.hireEst).length, bands: b, hires: hires.filter(h => h.code === code), leavers: leavers.filter(l => l.code === code), risk: risk.filter(r => r.code === code) };
   });
   const order = p => (risk.find(r => r.emp === p.emp) ? 0 : hires.some(h => h.emp === p.emp) ? 1 : 2);
   const peopleOf = code => people.filter(p => p.code === code && Object.values(p.hrs).some(h => h > 0)).sort((a, b) => order(a) - order(b) || (a.k ?? 999) - (b.k ?? 999));
   const partialMonths = Object.keys(partial).filter(m => m !== curYm);
-  return { partialMonths, peopleOf, curYm, months: useMonths, wMonths, hasCur: !!Object.keys(curRate).length, bands, total, ramp, hires, leavers, risk, stores, preLeave: pre.length >= 3 ? { n: pre.length, ratio: avgOf(pre) } : null, n: working.length, noHire: working.filter(p => p.k == null).length };
+  const estN = working.filter(p => p.hireEst).length;
+  return { noWageStores, estN, partialMonths, peopleOf, curYm, months: useMonths, wMonths, hasCur: !!Object.keys(curRate).length, bands, total, ramp, hires, leavers, risk, stores, preLeave: pre.length >= 3 ? { n: pre.length, ratio: avgOf(pre) } : null, n: working.length, noHire: working.filter(p => p.k == null).length };
 }
 function tenureLines(T, st, isArea) {
   const out = [], push = (t, d) => out.push({ t, d: !!d });
@@ -843,10 +862,14 @@ function tenureLines(T, st, isArea) {
   }
   const known = b(0).hours + b(1).hours + b(2).hours + b(3).hours;
   if (known) push(`　入社1年未満の人が労働時間の${Math.round((b(0).hours + b(1).hours + b(2).hours) / known * 100)}%を担っています（入社日のわかる人のうち）。`, true);
-  if (b(4).n && b(4).n >= n * 0.2) push(`　※${b(4).n}名は時給データに入社日がありません（社員番号が見つからない、または別の店の所属など）。`, true);
+  const estN = st ? st.estN : T.estN;
+  const nw = st ? (T.noWageStores.includes(st.code) ? [st.code] : []) : T.noWageStores;
+  if (nw.length) push(`　※${st ? 'この店舗' : `${nw.length}店舗`}はパートの多くが時給資料に載っていないため、入社日を推定していません（時給資料が違う可能性。入社日不明として表示）。`);
+  if (estN) push(`　※時給資料に載っていない${estN}名は前月入社として推定しています（タイムカードの履歴で入社月がわかる人はその月）。次の月の時給資料を入れると正しい入社日に置き換わります。`, true);
   const hires = st ? st.hires : T.hires, leavers = st ? st.leavers : T.leavers, risk = st ? st.risk : T.risk;
   const nm = p => `${isArea && p.store ? p.store + '・' : ''}${p.name}`;
-  if (hires.length) push(`・新規採用（当月・前月入社）：${hires.length}名（${hires.slice(0, 6).map(p => `${nm(p)}${hh(p.cur)}`).join('、')}${hires.length > 6 ? ' ほか' : ''}）。`);
+  if (hires.length) { const e = hires.filter(p => p.hireEst).length;
+    push(`・新規採用（当月・前月入社）：${hires.length}名${e ? `（うち${e}名は時給資料に未掲載のため入社月を推定）` : ''}。${hires.slice(0, 6).map(p => `${nm(p)}${hh(p.cur)}`).join('、')}${hires.length > 6 ? ' ほか' : ''}。`); }
   if (leavers.length) push(`・退社：${leavers.filter(l => l.sure).length}名${leavers.some(l => !l.sure) ? `、退社の可能性${leavers.filter(l => !l.sure).length}名（2か月勤務なし）` : ''}（${leavers.slice(0, 6).map(l => `${nm(l)}${l.k != null ? `・入社${l.k}か月` : ''}`).join('、')}${leavers.length > 6 ? ' ほか' : ''}）。`);
   const KIND = { days: '日数が減少', len: '1回が短く', both: '日数・1回とも', none: '今月勤務なし' };
   if (risk.length) push(`・退社リスク注意（入社1年以内で、月間の労働時間が減る見込み）：${risk.slice(0, 6).map(p => `${nm(p)}（入社${p.k}か月、${Math.round(p.cur)}h・${Math.round(p.days[T.curYm] || 0)}日${p.kind ? '、' + KIND[p.kind] : ''}）`).join('、')}${risk.length > 6 ? ` ほか${risk.length - 6}名` : ''}。`);
