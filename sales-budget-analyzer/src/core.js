@@ -702,7 +702,7 @@ function mergeHistory(H, add) {
 /** 年月ごとにまとめ直す（エリアごとの分をつなげる） */
 function byMonth(obj) {
   const out = {};
-  Object.values(obj || {}).forEach(x => { const o = (out[x.ym] = out[x.ym] || { ym: x.ym, recs: [], seen: new Set() }); x.recs.forEach(r => { const k = r.e + '@' + r.c; if (!o.seen.has(k)) { o.seen.add(k); o.recs.push(r); } }); });
+  Object.values(obj || {}).forEach(x => { const o = (out[x.ym] = out[x.ym] || { ym: x.ym, recs: [], seen: new Set(), last: x.last, days: x.days }); if (x.last != null) o.last = Math.min(o.last ?? x.last, x.last); x.recs.forEach(r => { const k = r.e + '@' + r.c; if (!o.seen.has(k)) { o.seen.add(k); o.recs.push(r); } }); });
   return out;
 }
 const TENURE = [
@@ -731,10 +731,13 @@ function analyzeTenure(H0, cur, opt) {
   const lastW = wMonths[wMonths.length - 1];
   // 個人ごとの月別時間（パート）
   const P = {};
+  // 月の途中までしかない月（月末後に最終のタイムカードを入れていない月）は、確定日までの実績を月換算する
+  const partial = {};
+  useMonths.forEach(m => { const x = H.tc[m]; if (x.last && x.days && x.last < x.days) partial[m] = x.days / x.last; });
   useMonths.forEach(m => H.tc[m].recs.forEach(r => {
     if (r.s || (pick && !pick.has(r.c))) return;
     const p = (P[r.e] = P[r.e] || { emp: r.e, name: r.n, code: r.c, hrs: {}, days: {} });
-    p.hrs[m] = (p.hrs[m] || 0) + r.m / 60; p.days[m] = (p.days[m] || 0) + r.d; p.code = r.c; p.name = r.n;
+    p.hrs[m] = (p.hrs[m] || 0) + r.m / 60 * (partial[m] || 1); p.days[m] = (p.days[m] || 0) + r.d; p.code = r.c; p.name = r.n;
   }));
   // 当月は見込み（実績の1日あたり＋予定のある日の1日あたりで月換算）
   const curRate = {};
@@ -801,7 +804,8 @@ function analyzeTenure(H0, cur, opt) {
   });
   const order = p => (risk.find(r => r.emp === p.emp) ? 0 : hires.some(h => h.emp === p.emp) ? 1 : 2);
   const peopleOf = code => people.filter(p => p.code === code && Object.values(p.hrs).some(h => h > 0)).sort((a, b) => order(a) - order(b) || (a.k ?? 999) - (b.k ?? 999));
-  return { peopleOf, curYm, months: useMonths, wMonths, hasCur: !!Object.keys(curRate).length, bands, total, ramp, hires, leavers, risk, stores, preLeave: pre.length >= 3 ? { n: pre.length, ratio: avgOf(pre) } : null, n: working.length, noHire: working.filter(p => p.k == null).length };
+  const partialMonths = Object.keys(partial).filter(m => m !== curYm);
+  return { partialMonths, peopleOf, curYm, months: useMonths, wMonths, hasCur: !!Object.keys(curRate).length, bands, total, ramp, hires, leavers, risk, stores, preLeave: pre.length >= 3 ? { n: pre.length, ratio: avgOf(pre) } : null, n: working.length, noHire: working.filter(p => p.k == null).length };
 }
 function tenureLines(T, st, isArea) {
   const out = [], push = (t, d) => out.push({ t, d: !!d });
@@ -825,6 +829,7 @@ function tenureLines(T, st, isArea) {
   if (risk.length) push(`・退社リスク注意（入社1年以内で時間が減っている）：${risk.slice(0, 6).map(p => `${nm(p)}（入社${p.k}か月、${p.why}）`).join('、')}${risk.length > 6 ? ` ほか${risk.length - 6}名` : ''}。`);
   else push('・退社リスク注意：入社1年以内で時間が大きく減っている人はいません。');
   if (T.preLeave && !st) push(`　参考：これまでに退社した${T.preLeave.n}名は、最後の月の時間がそれまでの平均の${Math.round(T.preLeave.ratio * 100)}%でした。`, true);
+  if (T.partialMonths && T.partialMonths.length && !st) push(`　※${T.partialMonths.map(ymTxt).join('・')}は月の途中までのタイムカードしかないため、確定日までの実績を月換算しています（月末後に最終のタイムカードを入れると置き換わります）。`);
   if (T.months.length < 3 && !st) push(`　※履歴が${T.months.length}か月分のため、退社の判定・時間の推移は今後の積み上げで精度が上がります。`, true);
   return out;
 }

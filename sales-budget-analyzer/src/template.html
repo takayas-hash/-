@@ -353,6 +353,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const r = await readOneInner(f);
     r.file = { name: f.name, raw: await f.arrayBuffer() };
     r.area = f.__area || null; // ウェブアプリ：どのエリアのフォルダのファイルか
+    r.mtime = f.lastModified || 0; // 同じ月のファイルが重なったときに新しい方を使う
     return r;
   }
   async function readOneInner(f) {
@@ -485,6 +486,22 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   /** 同じ種類・同じ月のファイル（エリアごとの売上集計表など）は行をつなげて1つにする */
   const MERGE_KINDS = ['raw', 'pays', 'menu', 'tc', 'ws', 'hourly'];
+  /**
+   * 同じ種類・同じ月で店舗が重なるファイル（同じデータを何度も書き出したもの）は、いちばん新しいものだけ残す。
+   * 店舗が重ならないもの（エリアごとのファイル）は残して、あとで mergeSame でつなげる
+   */
+  function dropDup(got, notes) {
+    const codesOf = (g, k) => new Set(g[k].map(r => r.code));
+    const keep = [], dropped = [];
+    [...got].sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).forEach(g => {
+      const k = MERGE_KINDS.find(x => g[x]); if (!k) { keep.push(g); return; }
+      const cs = codesOf(g, k);
+      const dup = keep.find(x => x[k] && mKey(x[k]) === mKey(g[k]) && [...codesOf(x, k)].some(c => cs.has(c)));
+      if (dup) dropped.push(`「${g.name}」（「${dup.name}」の方が新しいため）`); else keep.push(g);
+    });
+    if (dropped.length) notes.push(`同じ月・同じ店舗のファイルが重なっていたため、古い方を使いませんでした：${dropped.join('、')}`);
+    return got.filter(g => keep.includes(g));
+  }
   function mergeSame(got) {
     const out = [], idx = {};
     for (const g of got) {
@@ -506,10 +523,12 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     try {
       let got = [];
       for (const f of files) got.push(await readOne(f));
+      const notes0 = [];
+      got = dropDup(got, notes0);
       const gotRaw = got;
       got = mergeSame(got);
       const N = S && !opt.fresh ? { ...S } : {};
-      const notes = [];
+      const notes = notes0;
       const book = got.find(g => g.cur);
       const raws = got.filter(g => g.raw).sort((a, b) => mKey(b.raw) - mKey(a.raw));
       if (book) {
@@ -1259,7 +1278,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       // 採用・定着の履歴（各エリアの「履歴データ」フォルダ）
       try { const h = await call('getHistory', ids); HIST = mergeHistory(null, { tc: h.tc.map(x => JSON.parse(x)), wage: h.wage.map(x => JSON.parse(x)) }); } catch (e) { console.warn(e); HIST = null; }
       const files = []; let n = 0;
-      const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name); f.__area = m.common ? null : m.folderId; return f; };
+      const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name, { lastModified: m.updated || Date.now() }); f.__area = m.common ? null : m.folderId; return f; };
       // 4件ずつ並行して取得
       for (let i = 0; i < list.length; i += 4) {
         const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; setStatus(`共有ドライブから読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r, m); })));
