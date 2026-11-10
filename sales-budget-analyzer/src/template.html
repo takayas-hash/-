@@ -245,6 +245,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       <textarea class="comment" id="storeComment" aria-label="店舗コメント" spellcheck="false"></textarea>
     </div>
     <div class="stack" data-tab="sales">
+    <div id="fuBox" hidden>
+      <h3 id="fuTitle">前月の課題のその後</h3>
+      <p class="small muted" style="margin:2px 0 8px">前の月に予算未達だった曜日区分・時間帯などが、次の月にどうなっているか。改善中＝+2pt以上、悪化＝▲2pt以上（ロス率は下がると改善）。</p>
+      <div class="tbl"><table id="fuTbl"></table></div>
+    </div>
     <div class="grid2">
       <div>
         <h3>曜日区分 × 時間帯の予算比</h3>
@@ -570,6 +575,30 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     renderSaved();
   }
 
+  /**
+   * 前月の課題のその後：保存している前後の月（表示中の月の翌月、なければ前月）を同じ対象で分析して比べる
+   */
+  function monthLabel(k, rows) { const d = maxD(rows.filter(r => r.sales > 0)) || maxD(rows); const full = d && d.getDate() === new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); return `${k % 12 + 1}月${full ? '' : '途中'}`; }
+  function attachFollowUp(eff) {
+    R.follow = null;
+    if (!STORE || S == null || S.k == null) return;
+    const has = k => STORE.months[k] && STORE.months[k].cur;
+    const other = has(S.k + 1) ? S.k + 1 : has(S.k - 1) ? S.k - 1 : null;
+    if (other == null) return;
+    const V = viewOf(STORE, other);
+    const R2 = analyze(V.cur.rows, V.prev ? V.prev.rows : [], { menu: V.menu ? V.menu.rows : [], pMenu: V.pMenu ? V.pMenu.rows : [], pays: V.pays ? V.pays.rows : [], pPays: V.pPays ? V.pPays.rows : [], scope: eff.scope, area: eff.area });
+    const later = other > S.k;
+    const [A0, A1] = later ? [R, R2] : [R2, R];
+    const [k0, k1] = later ? [S.k, other] : [other, S.k];
+    const L0 = monthLabel(k0, STORE.months[k0].cur.rows), L1 = monthLabel(k1, STORE.months[k1].cur.rows);
+    const viewingLater = !later; // 表示中の月が後の月か
+    const insert = (lines, line) => { if (!line) return; const i = lines.findIndex(l => /^・要因分解/.test(l.t)); lines.splice(i >= 0 ? i : lines.length, 0, line); };
+    R.follow = { k0, k1, L0, L1, viewingLater, stores: {} };
+    R.stores.forEach(s => { const s0 = (later ? s : A0.stores.find(x => x.code === s.code)), s1 = (later ? A1.stores.find(x => x.code === s.code) : s);
+      const items = followUp(s0, s1); R.follow.stores[s.code] = items; insert(s.lines, followUpLine(items, L0, L1, viewingLater)); });
+    const ai = followUp(A0.area, A1.area); R.follow.area = ai; insert(R.area.lines, followUpLine(ai, L0, L1, viewingLater));
+  }
+
   /** 同じ種類・同じ月のファイル（エリアごとの売上集計表など）は行をつなげて1つにする */
   const MERGE_KINDS = ['raw', 'pays', 'menu', 'tc', 'ws', 'hourly'];
   /**
@@ -681,6 +710,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     last = [curRows, prevRows, extra || {}];
     const eff = syncControls(curRows);
     R = analyze(curRows, prevRows, { ...(extra || {}), scope: eff.scope, area: eff.area });
+    try { attachFollowUp(eff); } catch (e) { console.warn('前月の課題の比較に失敗', e); }
     const worst = [...R.stores].sort((a, b) => a.diff - b.diff)[0];
     cur = worst ? worst.code : null;
     render();
@@ -797,6 +827,15 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       + kpi('前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし')
       + fcKpis(s.fc);
     $('storeComment').value = commentText(s.lines, detail); fit($('storeComment'));
+    const fu = R.follow && R.follow.stores[s.code];
+    $('fuBox').hidden = !(fu && fu.length);
+    if (fu && fu.length) {
+      const F = R.follow, fv = x => x.unit === 'loss' ? pct2(x.r1) : pct(x.r1), fv0 = x => x.unit === 'loss' ? pct2(x.r0) : pct(x.r0);
+      const pill = { solved: '<span class="pill ok">解消</span>', better: '<span class="pill ok">改善中</span>', flat: '<span class="flag">横ばい</span>', worse: '<span class="pill ng">悪化</span>' };
+      $('fuTitle').textContent = F.viewingLater ? `${F.L0}の課題のその後（${F.L1}）` : `${F.L0}の課題は${F.L1}でどうなっているか`;
+      $('fuTbl').innerHTML = `<thead><tr><th>項目</th><th class="n">${F.L0}</th><th class="n">${F.L1}</th><th class="n">差</th><th>状況</th></tr></thead><tbody>`
+        + fu.map(x => { const d = (x.r1 - x.r0) * 100; return `<tr><td>${esc(x.label)}</td><td class="n">${fv0(x)}</td><td class="n"><b>${fv(x)}</b></td><td class="n ${(x.lowerBetter ? -d : d) >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '▲'}${Math.abs(d).toFixed(x.unit === 'loss' ? 2 : 1)}pt</td><td>${pill[x.st]}</td></tr>`; }).join('') + '</tbody>';
+    }
 
     // ヒートマップ
     let h = '<div></div>' + BANDS.map(b => `<div class="h">${b.name}<br><span style="font-weight:400">${b.label}</span></div>`).join('');

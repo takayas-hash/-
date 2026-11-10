@@ -1485,6 +1485,40 @@ function areaCostComment(a, stores, ctx) {
   return L;
 }
 
+/* ===== 前月の課題のその後（連続する2か月を比べる） ===== */
+/** s0：前の月の店舗（または全体）、s1：次の月。前の月の課題ごとに、次の月の値と状況を返す */
+function followUp(s0, s1) {
+  if (!s0 || !s1) return [];
+  const out = [];
+  const add = (label, r0, r1, lowerBetter, unit) => { if (r0 == null || r1 == null || !isFinite(r0) || !isFinite(r1)) return;
+    const d = Math.round((r1 - r0) * (lowerBetter ? -1 : 1) * (unit === 'loss' ? 10000 : 1000)) / (unit === 'loss' ? 10000 : 1000); // 表示の桁で丸めてから判定
+    if (unit === 'loss' && Math.abs(d) < 0.0005) return; // ロス率は変化があるときだけ
+    const th = unit === 'loss' ? 0.0005 : 0.02;
+    const st = unit === 'rate' && !lowerBetter && r1 >= 1 ? 'solved' : d >= th ? 'better' : d <= -th ? 'worse' : 'flat';
+    out.push({ label, r0, r1, unit, lowerBetter, st }); };
+  add('予算比', s0.rate, s1.rate, false, 'rate');
+  // 未達だった曜日区分（未達額の大きい順に2つ）
+  s0.byType.filter(t => t.budget > 0 && t.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 2).forEach(t => { const u = s1.byType.find(x => x.key === t.key); if (u && u.budget > 0) add(t.key, t.rate, u.rate, false, 'rate'); });
+  // 未達だった時間帯（2つ）
+  s0.byBand.filter(b => b.budget > s0.budget * 0.02 && b.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 2).forEach(b => { const u = s1.byBand.find(x => x.key === b.key); if (u && u.budget > 0) add(b.name, b.rate, u.rate, false, 'rate'); });
+  // 最大の未達ポイント（曜日区分×時間帯）
+  let w = null; s0.grid.forEach((row, ti) => row.forEach((c, bi) => { const d = c.sales - c.budget; if (c.budget > 0 && d < 0 && (!w || d < w.d)) w = { d, ti, bi }; }));
+  if (w) { const c0 = s0.grid[w.ti][w.bi], c1 = s1.grid[w.ti][w.bi]; if (c1 && c1.budget > 0) add(`${DAYTYPES[w.ti]}×${BANDS[w.bi].name}`, c0.sales / c0.budget, c1.sales / c1.budget, false, 'rate'); }
+  if (s0.custRate != null && s0.custRate < 1 && s0.custEff < 0) add('客数予算比', s0.custRate, s1.custRate, false, 'rate');
+  if (s0.lossRate != null && s1.lossRate != null) add('ロス率', s0.lossRate, s1.lossRate, true, 'loss');
+  // 同じ名前が重なったら最初のものだけ
+  return out.filter((x, i) => out.findIndex(y => y.label === x.label) === i);
+}
+const FU_TXT = { solved: '解消（予算達成）', better: '改善中', flat: '横ばい（課題が続いている）', worse: '悪化' };
+/** 1行のコメント（状況ごとにまとめる）。L0・L1：月の呼び名（例「10月」「11月途中」） */
+function followUpLine(items, L0, L1, viewingLater) {
+  if (!items.length) return null;
+  const f = (x, v) => x.unit === 'loss' ? pct2(v) : pct(v);
+  const head = viewingLater ? `・${L0}の課題のその後（${L0}→${L1}）` : `・${L0}の課題の${L1}の状況（${L0}→${L1}）`;
+  const parts = ['worse', 'flat', 'better', 'solved'].map(st => { const xs = items.filter(x => x.st === st); return xs.length ? `${FU_TXT[st]}：${xs.map(x => `${x.label} ${f(x, x.r0)}→${f(x, x.r1)}`).join('、')}` : null; }).filter(Boolean);
+  return { t: `${head}：${parts.join('／')}。`, d: false };
+}
+
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
