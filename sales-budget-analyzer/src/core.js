@@ -793,12 +793,25 @@ function analyzeTenure(H0, cur, opt) {
     const sg0 = (v, u) => `${v >= 0 ? '+' : '▲'}${Math.abs(Math.round(v))}${u}`;
     const curD = p.days[curYm] || 0;
     if (prevAvg) { const prevD = avgOf(prevMs.map(m => p.days[m] || 0));
-      c.push({ ratio: p.cur / prevAvg, why: `今月の見込み${Math.round(p.cur)}h・${Math.round(curD)}日（前${prevMs.length}か月の平均${Math.round(prevAvg)}h・${Math.round(prevD)}日、${sg0(p.cur - prevAvg, 'h')}・${sg0(curD - prevD, '日')}）` }); }
+      c.push({ ratio: p.cur / prevAvg, base: prevAvg, baseD: prevD, vs: `前${prevMs.length}か月平均` }); }
     if (r && r.plan != null && r.act > 0 && r.actDays >= 3 && r.covered >= 5) { const pace = r.act * cur.N, paceD = cur.cut ? r.actDays / cur.cut * cur.N : 0;
-      c.push({ ratio: r.plan / r.act, why: `今月の見込み${Math.round(p.cur)}h・${Math.round(curD)}日（これまでのペースなら${Math.round(pace)}h・${Math.round(paceD)}日、${sg0(p.cur - pace, 'h')}・${sg0(curD - paceD, '日')}。今後のシフトが減っている）` }); }
+      c.push({ ratio: r.plan / r.act, base: pace, baseD: paceD, vs: 'これまでのペース' }); }
     const best = c.sort((a, b) => a.ratio - b.ratio)[0];
-    const ratio = best ? best.ratio : null, why = best ? best.why : '';
-    if (ratio != null && ratio <= RISK_WARN) risk.push({ ...p, ratio, why, level: ratio <= RISK_HIGH ? 'high' : 'warn' });
+    const ratio = best ? best.ratio : null;
+    let why = best ? `今月見込み${Math.round(p.cur)}h・${Math.round(curD)}日／${best.vs}${Math.round(best.base)}h・${Math.round(best.baseD)}日（${sg0(p.cur - best.base, 'h')}）` : '';
+    // 減り方の分解：総労働時間＝出勤日数×1回あたりの時間
+    //   日数の影響＝(今月の日数−比較の日数)×比較の1回あたり、1回あたりの影響＝(今月の1回あたり−比較の1回あたり)×今月の日数（合計は時間の差と一致）
+    let kind = null;
+    if (best && best.baseD > 0) {
+      const bh = best.base / best.baseD, ch = curD > 0 ? p.cur / curD : 0;
+      const effD = (curD - best.baseD) * bh, effL = (ch - bh) * curD, tot = effD + effL;
+      if (tot < 0) {
+        const shD = Math.min(0, effD) / Math.min(-0.01, Math.min(0, effD) + Math.min(0, effL));
+        kind = curD === 0 ? 'none' : shD >= 0.7 ? 'days' : shD <= 0.3 ? 'len' : 'both';
+        if (kind !== 'none') why += `。日数で${sg0(effD, 'h')}・1回あたり${bh.toFixed(1)}→${ch.toFixed(1)}hで${sg0(effL, 'h')}`;
+      }
+    }
+    if (ratio != null && ratio <= RISK_WARN) risk.push({ ...p, ratio, why, kind, level: ratio <= RISK_HIGH ? 'high' : 'warn' });
   });
   risk.sort((a, b) => a.ratio - b.ratio);
   // 店舗別
@@ -832,7 +845,14 @@ function tenureLines(T, st, isArea) {
   const nm = p => `${isArea && p.store ? p.store + '・' : ''}${p.name}`;
   if (hires.length) push(`・新規採用（当月・前月入社）：${hires.length}名（${hires.slice(0, 6).map(p => `${nm(p)}${hh(p.cur)}`).join('、')}${hires.length > 6 ? ' ほか' : ''}）。`);
   if (leavers.length) push(`・退社：${leavers.filter(l => l.sure).length}名${leavers.some(l => !l.sure) ? `、退社の可能性${leavers.filter(l => !l.sure).length}名（2か月勤務なし）` : ''}（${leavers.slice(0, 6).map(l => `${nm(l)}${l.k != null ? `・入社${l.k}か月` : ''}`).join('、')}${leavers.length > 6 ? ' ほか' : ''}）。`);
-  if (risk.length) push(`・退社リスク注意（入社1年以内で、月間の労働時間が減る見込み）：${risk.slice(0, 6).map(p => `${nm(p)}（入社${p.k}か月、${p.why}）`).join('、')}${risk.length > 6 ? ` ほか${risk.length - 6}名` : ''}。`);
+  const KIND = { days: '日数が減少', len: '1回が短く', both: '日数・1回とも', none: '今月勤務なし' };
+  if (risk.length) push(`・退社リスク注意（入社1年以内で、月間の労働時間が減る見込み）：${risk.slice(0, 6).map(p => `${nm(p)}（入社${p.k}か月、${Math.round(p.cur)}h・${Math.round(p.days[T.curYm] || 0)}日${p.kind ? '、' + KIND[p.kind] : ''}）`).join('、')}${risk.length > 6 ? ` ほか${risk.length - 6}名` : ''}。`);
+  if (risk.length) { const kc = k => risk.filter(x => x.kind === k).length, parts = [];
+    if (kc('days')) parts.push(`日数が減っている${kc('days')}名は本人の都合（掛け持ち・学業・家庭など）の可能性→面談で確認`);
+    if (kc('len')) parts.push(`1回が短くなっている${kc('len')}名はシフトの組み方（短い時間の割り当て）を確認`);
+    if (kc('both')) parts.push(`日数・1回とも減っている${kc('both')}名は本人の事情とシフトの両方を確認`);
+    if (kc('none')) parts.push(`今月勤務のない${kc('none')}名は在籍・連絡状況を確認`);
+    push(`　減り方：${parts.join('。')}。`); }
   else push('・退社リスク注意：入社1年以内で時間が大きく減っている人はいません。');
   if (T.preLeave && !st) push(`　参考：これまでに退社した${T.preLeave.n}名は、最後の月の時間がそれまでの平均の${Math.round(T.preLeave.ratio * 100)}%でした。`, true);
   if (T.partialMonths && T.partialMonths.length && !st) push(`　※${T.partialMonths.map(ymTxt).join('・')}は月の途中までのタイムカードしかないため、確定日までの実績を月換算しています（月末後に最終のタイムカードを入れると置き換わります）。`);

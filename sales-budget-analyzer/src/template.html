@@ -243,7 +243,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       </div>
       <div>
         <h3>パート個人別の推移</h3>
-        <p class="small muted" style="margin:2px 0 8px">月ごとの総労働時間・出勤日数（当月は見込みで月換算）。入社1年以内で、今月の見込みが前の月の平均より30%以上少ない人、または今後のシフトがこれまでのペースより30%以上少ない人を「注意」（50%以上少ないと「要注意」）。理由は月間の総労働時間・出勤日数で表示。</p>
+        <p class="small muted" style="margin:2px 0 8px">月ごとの総労働時間・出勤日数（当月は見込みで月換算）。入社1年以内で、今月の見込みが前の月の平均より30%以上少ない人、または今後のシフトがこれまでのペースより30%以上少ない人を「注意」（50%以上少ないと「要注意」）。理由は月間の総労働時間・出勤日数で表示。減り方は「日数が減っている（本人の都合の可能性→面談）」「1回あたりが短くなっている（シフトの組み方を確認）」に分けています（総労働時間＝出勤日数×1回あたりの時間で分解）。</p>
         <div class="tbl" style="max-height:520px;overflow-y:auto"><table id="tenurePeople"></table></div>
       </div>
     </div>
@@ -827,6 +827,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
     renderStore();
   }
+  const KIND_PILL = { days: '<span class="flag" title="1回あたりはほぼ同じで日数が減少。本人の都合の可能性→面談で確認">日数が減少</span>', len: '<span class="flag" title="日数はほぼ同じで1回あたりが短く。シフトの組み方を確認">1回が短く</span>', both: '<span class="flag" title="本人の事情とシフトの両方を確認">日数・1回とも</span>', none: '<span class="pill ng" title="在籍・連絡状況を確認">勤務なし</span>' };
   const TENURE_LABELS = ['1か月未満', '1か月〜半年', '半年〜1年', '1年以上'];
   function renderStoreTenure(s) {
     $('storeName').textContent = s.name;
@@ -858,10 +859,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const months = T.months.slice(-6);
     const flagOf = p => { const r = t.risk.find(x => x.emp === p.emp); if (r) return `<span class="${r.level === 'high' ? 'pill ng' : 'flag'}">${r.level === 'high' ? '要注意' : '注意'}</span>`; if (t.hires.some(x => x.emp === p.emp)) return '<span class="pill ok">新規</span>'; return ''; };
     const list = R.tenure.peopleOf ? R.tenure.peopleOf(s.code) : [];
-    $('tenurePeople').innerHTML = `<thead><tr><th>氏名</th><th></th><th>入社日</th><th class="n">勤務期間</th>${months.map(m => `<th class="n">${+m.slice(5)}月${m === T.curYm && T.hasCur ? '<span class="muted small">見込</span>' : ''}</th>`).join('')}<th>理由</th></tr></thead><tbody>`
+    $('tenurePeople').innerHTML = `<thead><tr><th>氏名</th><th></th><th>入社日</th><th class="n">勤務期間</th>${months.map(m => `<th class="n">${+m.slice(5)}月${m === T.curYm && T.hasCur ? '<span class="muted small">見込</span>' : ''}</th>`).join('')}<th>減り方</th><th>理由</th></tr></thead><tbody>`
       + list.map(p => { const r = t.risk.find(x => x.emp === p.emp); const hd = p.hire ? new Date(p.hire) : null;
-        return `<tr><td>${esc(p.name)}</td><td>${flagOf(p)}</td><td class="muted">${hd ? `${hd.getFullYear()}/${hd.getMonth() + 1}/${hd.getDate()}` : '不明'}</td><td class="n">${p.k == null ? '－' : p.k >= 12 ? `${Math.floor(p.k / 12)}年${p.k % 12 ? (p.k % 12) + 'か月' : ''}` : p.k + 'か月'}</td>${months.map(m => `<td class="n">${p.hrs[m] ? `${Math.round(p.hrs[m])}h<span class="muted small">・${Math.round(p.days[m] || 0)}日</span>` : '<span class="muted">－</span>'}</td>`).join('')}<td class="small muted" style="white-space:normal;min-width:14em">${r ? esc(r.why) : ''}</td></tr>`; }).join('')
-      + (t.leavers.length ? `<tr><td colspan="${5 + months.length}" class="small"><b>退社</b>：${t.leavers.map(l => `${esc(l.name)}（${esc(l.how)}）`).join('、')}</td></tr>` : '') + '</tbody>';
+        return `<tr><td>${esc(p.name)}</td><td>${flagOf(p)}</td><td class="muted">${hd ? `${hd.getFullYear()}/${hd.getMonth() + 1}/${hd.getDate()}` : '不明'}</td><td class="n">${p.k == null ? '－' : p.k >= 12 ? `${Math.floor(p.k / 12)}年${p.k % 12 ? (p.k % 12) + 'か月' : ''}` : p.k + 'か月'}</td>${months.map(m => `<td class="n">${p.hrs[m] ? `${Math.round(p.hrs[m])}h<span class="muted small">・${Math.round(p.days[m] || 0)}日</span>` : '<span class="muted">－</span>'}</td>`).join('')}<td>${r && r.kind ? KIND_PILL[r.kind] : ''}</td><td class="small muted" style="white-space:normal;min-width:20em">${r ? esc(r.why) : ''}</td></tr>`; }).join('')
+      + (t.leavers.length ? `<tr><td colspan="${6 + months.length}" class="small"><b>退社</b>：${t.leavers.map(l => `${esc(l.name)}（${esc(l.how)}）`).join('、')}</td></tr>` : '') + '</tbody>';
   }
 
   /* ---------- 人（労働時間・雑給・残業） ---------- */
