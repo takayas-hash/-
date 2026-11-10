@@ -565,25 +565,44 @@ function extractStd(XLSX, wb) {
   // 店舗情報（卓数）
   const S = aoaOf('店舗情報・予算標準比'), info = {};
   const sh = S.findIndex(r => r && r.some(v => t(v) === '店舗コード') && r.some(v => t(v) === '卓数'));
-  if (sh >= 0) { const H = S[sh].map(t), ci = H.indexOf('店舗コード'), ti = H.indexOf('卓数'), ni = H.indexOf('店舗名');
-    for (let k = sh + 1; k < S.length; k++) { const r = S[k]; if (!r || r[ci] == null || r[ci] === '') continue; info[t(r[ci])] = { tables: num(r[ti]), name: ni >= 0 ? t(r[ni]).replace(/^焼肉きんぐ/, '') : '' }; } }
+  if (sh >= 0) { const H = S[sh].map(t), ci = H.indexOf('店舗コード'), ti = H.indexOf('卓数'), ni = H.indexOf('店舗名'), fi = H.indexOf('フラグ'), vi = H.indexOf('変数');
+    for (let k = sh + 1; k < S.length; k++) { const r = S[k]; if (!r || r[ci] == null || r[ci] === '') continue;
+      const flag = fi >= 0 ? t(r[fi]) : '', per = vi >= 0 && typeof r[vi] === 'number' ? r[vi] : null;
+      info[t(r[ci])] = { tables: num(r[ti]), name: ni >= 0 ? t(r[ni]).replace(/^焼肉きんぐ/, '') : '', flag, perCust: per }; } }
   // 祝日（カレンダーマスタの曜日が「祝」の日。会社の休日扱いの日を含む）
   const holidays = [];
   aoaOf('カレンダーマスタ').forEach(r => { if (!r) return; const j = r.findIndex(v => t(v) === '祝'); if (j > 0) { const d = toDate(r[j - 1]); if (d) holidays.push(+d); } });
   // 係数（原本シートの値。なければ既定値）
   const O = aoaOf('原本'), near = (label, dx) => { for (const r of O) { if (!r) continue; const j = r.findIndex(v => t(v) === label); if (j >= 0 && typeof r[j + dx] === 'number') return r[j + dx]; } return null; };
   const k = { perCust: near('変数', 1) ?? 0.33, roboNoL: near('L無し', 1) ?? 1.38, roboL: near('Lあり', 1) ?? 4.14, auto: near('自動案内係数', 1) ?? -0.007 };
-  return { tables, budget, info, holidays, k, date: Date.now() };
+  // レーン店（特急レーン）用のブック：店舗情報に「変数」（客数1人あたりの時間）があり、式は 切片＋客数×変数
+  const lane = Object.values(info).some(x => x.perCust != null);
+  return { kind: lane ? 'lane' : 'normal', tables, budget, info, holidays, k, date: Date.now() };
+}
+/** 通常店とレーン店の標準比マスタを1つにまとめる（どちらか片方だけでもよい） */
+function combineStd(normal, lane) {
+  if (!normal && !lane) return null;
+  const base = normal || lane, info = {};
+  Object.entries((normal || {}).info || {}).forEach(([c, x]) => { info[c] = { ...x, lane: false }; });
+  Object.entries((lane || {}).info || {}).forEach(([c, x]) => { if (x.perCust != null && /特急|レーン/.test(x.flag || '')) info[c] = { ...(info[c] || {}), ...x, lane: true }; else if (!info[c]) info[c] = { ...x, lane: false }; });
+  return {
+    tables: normal ? normal.tables : [], laneTables: lane ? lane.tables : [],
+    budget: { ...((lane || {}).budget || {}), ...((normal || {}).budget || {}) },
+    info, holidays: [...new Set([...((normal || {}).holidays || []), ...((lane || {}).holidays || [])])], k: normal ? normal.k : base.k,
+    hasNormal: !!normal, hasLane: !!lane,
+  };
 }
 // 店舗設定の初期値（見込君の初期入力と同じ）
 const STD_DEFAULT = { lunchWd: false, lunchHd: true, auto: false, t8: 3, hoursWd: 6, hoursHd: 12 };
 /** 1日の標準時間（見込君「原本」シートの式と同じ）。type：1＝平日、2＝土日祝 */
-function stdHours(cust, type, st, tables, M) {
-  const rows = M.tables; if (!rows.length || !tables) return null;
+function stdHours(cust, type, st, tables, M, lane) {
+  const rows = lane ? M.laneTables : M.tables; if (!rows || !rows.length || !tables) return null;
   const tk = Math.min(Math.max(Math.round(tables), rows[0].tables), rows[rows.length - 1].tables);
   const row = rows.find(r => r.tables === tk) || rows[0];
   const lunch = type === 1 ? st.lunchWd : st.lunchHd;
   const adj = type === 1 ? ((st.lunchWd ? st.hoursWd - 12 : st.hoursWd - 6) * 2) : (st.hoursHd - 12) * 2;
+  // レーン店：切片＋客数×変数（ロボ控除・自動案内なし）
+  if (lane) return (st.perCust || 0) * cust + (lunch ? row.L : row.noL) + adj;
   let h = M.k.perCust * cust + (lunch ? row.L : row.noL) + adj - (lunch ? M.k.roboL : M.k.roboNoL) * st.t8;
   // 自動案内（原本の式どおり、平日のランチ営業日は控除しない）
   if (st.auto && !(type === 1 && st.lunchWd)) h += cust * 0.9 * M.k.auto;
@@ -593,8 +612,11 @@ function stdHours(cust, type, st, tables, M) {
 function analyzeStd(s, lab, L, std, settings, salesLast) {
   if (!lab || !std) return null;
   const info = std.info[s.code] || {}, set = settings && settings[s.code];
+  const lane = !!info.lane;
   const st = { ...STD_DEFAULT, ...(set || {}) }, tables = (set && set.tables) || info.tables;
+  if (lane) st.perCust = info.perCust;
   if (!tables) return { missing: true };
+  if (lane ? !(std.laneTables && std.laneTables.length) : !(std.tables && std.tables.length)) return { missing: true, need: lane ? 'lane' : 'normal' };
   const hol = new Set(std.holidays);
   const typeOf = date => hol.has(+date) || date.getDay() === 0 || date.getDay() === 6 ? 2 : 1;
   const actCust = {}; s.daily.forEach(d => { actCust[d.date.getDate()] = d.cust; });
@@ -603,7 +625,7 @@ function analyzeStd(s, lab, L, std, settings, salesLast) {
     const n = i + 1, type = typeOf(d.date);
     const useAct = n <= salesLast && actCust[n] != null;
     const cust = useAct ? actCust[n] : fcCust[n] != null ? fcCust[n] : null;
-    const sh = cust != null ? stdHours(cust, type, st, tables, std) : null;
+    const sh = cust != null ? stdHours(cust, type, st, tables, std, lane) : null;
     return { date: d.date, type, cust, custEst: !useAct, hours: d.mins / 60, done: d.done, est: d.est, std: sh };
   });
   const ok = days.filter(d => d.std != null);
@@ -612,7 +634,7 @@ function analyzeStd(s, lab, L, std, settings, salesLast) {
   const mo = days[0].date.getMonth() + 1, br = (std.budget[s.code] || {})[mo] ?? null;
   const landStd = SH(all), landH = H(all);
   const r = {
-    settings: st, custom: !!set, tables, budgetRate: br, days,
+    settings: st, custom: !!set, tables, lane, budgetRate: br, days,
     cutStd: SH(past), cutHours: H(past), cutCust: C(past), cutRate: SH(past) ? H(past) / SH(past) : null,
     landStd, landHours: landH, landCust: C(all), landRate: landStd ? landH / landStd : null,
     remDays: days.filter(d => !d.done).length, complete: ok.length === days.length,
@@ -627,9 +649,9 @@ function analyzeStd(s, lab, L, std, settings, salesLast) {
 const p0 = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
 function stdLines(x, ctx) {
   if (!x) return [];
-  if (x.missing) return [{ t: '・標準比：卓数がわからないため計算できません（標準比マスタに店舗がないか、店舗設定で卓数を入れてください）。', d: false }];
+  if (x.missing) return [{ t: x.need === 'lane' ? '・標準比：特急レーン店のため、レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '・標準比：通常店用の標準比マスタを読み込むと計算します。' : '・標準比：卓数がわからないため計算できません（標準比マスタに店舗がないか、店舗設定で卓数を入れてください）。', d: false }];
   const out = [];
-  let t = `・標準比：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
+  let t = `・標準比${x.lane ? '（特急レーン店）' : ''}：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
   if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は客数見込み×勤務予定）`;
   if (x.budgetRate != null) t += `。予算標準比${p0(x.budgetRate)}`;
   out.push({ t: t + '。', d: false });
@@ -639,7 +661,7 @@ function stdLines(x, ctx) {
   }
   const bad = x.weeks.filter(w => w.n >= 3 && w.rate != null && w.rate >= 1.05).sort((a, b) => b.rate - a.rate)[0];
   if (bad) out.push({ t: `　週別で最も高いのは${md(bad.from)}〜${md(bad.to)}の${p0(bad.rate)}${bad.done ? '' : '（見込みを含む）'}。`, d: true });
-  if (!x.custom) out.push({ t: '　※店舗設定（ランチ営業・T8台数・営業時間・自動案内）が初期値のままです。「人」タブの店舗詳細で確認してください。', d: true });
+  if (!x.custom) out.push({ t: `　※店舗設定（ランチ営業・${x.lane ? '' : 'T8台数・'}営業時間${x.lane ? '' : '・自動案内'}）が初期値のままです。「人」タブの店舗詳細で確認してください。`, d: true });
   return out;
 }
 
@@ -1259,4 +1281,4 @@ function areaCostComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };

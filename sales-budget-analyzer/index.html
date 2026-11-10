@@ -129,7 +129,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君。通常店・特急レーン店）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -238,7 +238,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       </div>
       <div id="stdBox">
         <h3>標準比（日別・週別）</h3>
-        <p class="small muted" style="margin:2px 0 8px">標準時間＝見込君と同じ式（客数×0.33＋卓数の切片＋営業時間の補正−ロボ控除×T8台数＋自動案内）。確定日までは客数・労働時間とも実績、以降は客数見込み（客数予算×ここまでの曜日区分別の客数予算比）と勤務予定。<b>見</b>＝見込み。</p>
+        <p class="small muted" style="margin:2px 0 8px">標準時間＝見込君と同じ式。通常店：客数×0.33＋卓数の切片＋営業時間の補正−ロボ控除×T8台数＋自動案内。特急レーン店：客数×店舗ごとの変数＋卓数の切片（レーン店用）＋営業時間の補正。確定日までは客数・労働時間とも実績、以降は客数見込み（客数予算×ここまでの曜日区分別の客数予算比）と勤務予定。<b>見</b>＝見込み。</p>
         <div class="row" style="justify-content:flex-start;gap:8px 16px;margin-bottom:10px" id="stdSet"></div>
         <div class="grid2">
           <div class="tbl" style="max-height:520px;overflow-y:auto"><table id="stdTbl"></table></div>
@@ -855,25 +855,44 @@ function extractStd(XLSX, wb) {
   // 店舗情報（卓数）
   const S = aoaOf('店舗情報・予算標準比'), info = {};
   const sh = S.findIndex(r => r && r.some(v => t(v) === '店舗コード') && r.some(v => t(v) === '卓数'));
-  if (sh >= 0) { const H = S[sh].map(t), ci = H.indexOf('店舗コード'), ti = H.indexOf('卓数'), ni = H.indexOf('店舗名');
-    for (let k = sh + 1; k < S.length; k++) { const r = S[k]; if (!r || r[ci] == null || r[ci] === '') continue; info[t(r[ci])] = { tables: num(r[ti]), name: ni >= 0 ? t(r[ni]).replace(/^焼肉きんぐ/, '') : '' }; } }
+  if (sh >= 0) { const H = S[sh].map(t), ci = H.indexOf('店舗コード'), ti = H.indexOf('卓数'), ni = H.indexOf('店舗名'), fi = H.indexOf('フラグ'), vi = H.indexOf('変数');
+    for (let k = sh + 1; k < S.length; k++) { const r = S[k]; if (!r || r[ci] == null || r[ci] === '') continue;
+      const flag = fi >= 0 ? t(r[fi]) : '', per = vi >= 0 && typeof r[vi] === 'number' ? r[vi] : null;
+      info[t(r[ci])] = { tables: num(r[ti]), name: ni >= 0 ? t(r[ni]).replace(/^焼肉きんぐ/, '') : '', flag, perCust: per }; } }
   // 祝日（カレンダーマスタの曜日が「祝」の日。会社の休日扱いの日を含む）
   const holidays = [];
   aoaOf('カレンダーマスタ').forEach(r => { if (!r) return; const j = r.findIndex(v => t(v) === '祝'); if (j > 0) { const d = toDate(r[j - 1]); if (d) holidays.push(+d); } });
   // 係数（原本シートの値。なければ既定値）
   const O = aoaOf('原本'), near = (label, dx) => { for (const r of O) { if (!r) continue; const j = r.findIndex(v => t(v) === label); if (j >= 0 && typeof r[j + dx] === 'number') return r[j + dx]; } return null; };
   const k = { perCust: near('変数', 1) ?? 0.33, roboNoL: near('L無し', 1) ?? 1.38, roboL: near('Lあり', 1) ?? 4.14, auto: near('自動案内係数', 1) ?? -0.007 };
-  return { tables, budget, info, holidays, k, date: Date.now() };
+  // レーン店（特急レーン）用のブック：店舗情報に「変数」（客数1人あたりの時間）があり、式は 切片＋客数×変数
+  const lane = Object.values(info).some(x => x.perCust != null);
+  return { kind: lane ? 'lane' : 'normal', tables, budget, info, holidays, k, date: Date.now() };
+}
+/** 通常店とレーン店の標準比マスタを1つにまとめる（どちらか片方だけでもよい） */
+function combineStd(normal, lane) {
+  if (!normal && !lane) return null;
+  const base = normal || lane, info = {};
+  Object.entries((normal || {}).info || {}).forEach(([c, x]) => { info[c] = { ...x, lane: false }; });
+  Object.entries((lane || {}).info || {}).forEach(([c, x]) => { if (x.perCust != null && /特急|レーン/.test(x.flag || '')) info[c] = { ...(info[c] || {}), ...x, lane: true }; else if (!info[c]) info[c] = { ...x, lane: false }; });
+  return {
+    tables: normal ? normal.tables : [], laneTables: lane ? lane.tables : [],
+    budget: { ...((lane || {}).budget || {}), ...((normal || {}).budget || {}) },
+    info, holidays: [...new Set([...((normal || {}).holidays || []), ...((lane || {}).holidays || [])])], k: normal ? normal.k : base.k,
+    hasNormal: !!normal, hasLane: !!lane,
+  };
 }
 // 店舗設定の初期値（見込君の初期入力と同じ）
 const STD_DEFAULT = { lunchWd: false, lunchHd: true, auto: false, t8: 3, hoursWd: 6, hoursHd: 12 };
 /** 1日の標準時間（見込君「原本」シートの式と同じ）。type：1＝平日、2＝土日祝 */
-function stdHours(cust, type, st, tables, M) {
-  const rows = M.tables; if (!rows.length || !tables) return null;
+function stdHours(cust, type, st, tables, M, lane) {
+  const rows = lane ? M.laneTables : M.tables; if (!rows || !rows.length || !tables) return null;
   const tk = Math.min(Math.max(Math.round(tables), rows[0].tables), rows[rows.length - 1].tables);
   const row = rows.find(r => r.tables === tk) || rows[0];
   const lunch = type === 1 ? st.lunchWd : st.lunchHd;
   const adj = type === 1 ? ((st.lunchWd ? st.hoursWd - 12 : st.hoursWd - 6) * 2) : (st.hoursHd - 12) * 2;
+  // レーン店：切片＋客数×変数（ロボ控除・自動案内なし）
+  if (lane) return (st.perCust || 0) * cust + (lunch ? row.L : row.noL) + adj;
   let h = M.k.perCust * cust + (lunch ? row.L : row.noL) + adj - (lunch ? M.k.roboL : M.k.roboNoL) * st.t8;
   // 自動案内（原本の式どおり、平日のランチ営業日は控除しない）
   if (st.auto && !(type === 1 && st.lunchWd)) h += cust * 0.9 * M.k.auto;
@@ -883,8 +902,11 @@ function stdHours(cust, type, st, tables, M) {
 function analyzeStd(s, lab, L, std, settings, salesLast) {
   if (!lab || !std) return null;
   const info = std.info[s.code] || {}, set = settings && settings[s.code];
+  const lane = !!info.lane;
   const st = { ...STD_DEFAULT, ...(set || {}) }, tables = (set && set.tables) || info.tables;
+  if (lane) st.perCust = info.perCust;
   if (!tables) return { missing: true };
+  if (lane ? !(std.laneTables && std.laneTables.length) : !(std.tables && std.tables.length)) return { missing: true, need: lane ? 'lane' : 'normal' };
   const hol = new Set(std.holidays);
   const typeOf = date => hol.has(+date) || date.getDay() === 0 || date.getDay() === 6 ? 2 : 1;
   const actCust = {}; s.daily.forEach(d => { actCust[d.date.getDate()] = d.cust; });
@@ -893,7 +915,7 @@ function analyzeStd(s, lab, L, std, settings, salesLast) {
     const n = i + 1, type = typeOf(d.date);
     const useAct = n <= salesLast && actCust[n] != null;
     const cust = useAct ? actCust[n] : fcCust[n] != null ? fcCust[n] : null;
-    const sh = cust != null ? stdHours(cust, type, st, tables, std) : null;
+    const sh = cust != null ? stdHours(cust, type, st, tables, std, lane) : null;
     return { date: d.date, type, cust, custEst: !useAct, hours: d.mins / 60, done: d.done, est: d.est, std: sh };
   });
   const ok = days.filter(d => d.std != null);
@@ -902,7 +924,7 @@ function analyzeStd(s, lab, L, std, settings, salesLast) {
   const mo = days[0].date.getMonth() + 1, br = (std.budget[s.code] || {})[mo] ?? null;
   const landStd = SH(all), landH = H(all);
   const r = {
-    settings: st, custom: !!set, tables, budgetRate: br, days,
+    settings: st, custom: !!set, tables, lane, budgetRate: br, days,
     cutStd: SH(past), cutHours: H(past), cutCust: C(past), cutRate: SH(past) ? H(past) / SH(past) : null,
     landStd, landHours: landH, landCust: C(all), landRate: landStd ? landH / landStd : null,
     remDays: days.filter(d => !d.done).length, complete: ok.length === days.length,
@@ -917,9 +939,9 @@ function analyzeStd(s, lab, L, std, settings, salesLast) {
 const p0 = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
 function stdLines(x, ctx) {
   if (!x) return [];
-  if (x.missing) return [{ t: '・標準比：卓数がわからないため計算できません（標準比マスタに店舗がないか、店舗設定で卓数を入れてください）。', d: false }];
+  if (x.missing) return [{ t: x.need === 'lane' ? '・標準比：特急レーン店のため、レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '・標準比：通常店用の標準比マスタを読み込むと計算します。' : '・標準比：卓数がわからないため計算できません（標準比マスタに店舗がないか、店舗設定で卓数を入れてください）。', d: false }];
   const out = [];
-  let t = `・標準比：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
+  let t = `・標準比${x.lane ? '（特急レーン店）' : ''}：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
   if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は客数見込み×勤務予定）`;
   if (x.budgetRate != null) t += `。予算標準比${p0(x.budgetRate)}`;
   out.push({ t: t + '。', d: false });
@@ -929,7 +951,7 @@ function stdLines(x, ctx) {
   }
   const bad = x.weeks.filter(w => w.n >= 3 && w.rate != null && w.rate >= 1.05).sort((a, b) => b.rate - a.rate)[0];
   if (bad) out.push({ t: `　週別で最も高いのは${md(bad.from)}〜${md(bad.to)}の${p0(bad.rate)}${bad.done ? '' : '（見込みを含む）'}。`, d: true });
-  if (!x.custom) out.push({ t: '　※店舗設定（ランチ営業・T8台数・営業時間・自動案内）が初期値のままです。「人」タブの店舗詳細で確認してください。', d: true });
+  if (!x.custom) out.push({ t: `　※店舗設定（ランチ営業・${x.lane ? '' : 'T8台数・'}営業時間${x.lane ? '' : '・自動案内'}）が初期値のままです。「人」タブの店舗詳細で確認してください。`, d: true });
   return out;
 }
 
@@ -1549,7 +1571,7 @@ function areaCostComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
 
 </script>
 <script>
@@ -1675,7 +1697,7 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
   const DATA_VERSION = 3;
   async function reparse(v) {
     const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage'];
-    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : [])];
+    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : []), ...(v.stdLane ? [v.stdLane] : [])];
     if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
     const cache = new Map();
     const parse = async f => { if (!cache.has(f.raw)) cache.set(f.raw, await readOneInner(new File([f.raw], f.name))); return cache.get(f.raw); };
@@ -1688,6 +1710,7 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
     }
     delete N.usage;
     if (v.stdBook) { const g = await parse(v.stdBook.file); if (g.std) N.stdBook = { ...v.stdBook, data: g.std }; }
+    if (v.stdLane) { const g = await parse(v.stdLane.file); if (g.std) N.stdLane = { ...v.stdLane, data: g.std }; }
     if (v.invFiles) { N.invFiles = []; for (const x of v.invFiles) { const g = await parse(x.file); const keep = new Set(x.rows.map(r => r.code)); N.invFiles.push({ ...x, rows: (g.inv || []).filter(r => keep.has(r.code)) }); } }
     N.v = DATA_VERSION;
     return N;
@@ -1702,7 +1725,8 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
     if (!S || !S.cur) { box.hidden = true; return; }
     const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
     $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
-      + (S.stdBook ? `<li><span class="label">標準比マスタ</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ</span> なし</li>')
+      + (S.stdBook ? `<li><span class="label">標準比マスタ（通常店）</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（通常店）</span> なし</li>')
+      + (S.stdLane ? `<li><span class="label">標準比マスタ（特急レーン店）</span> ${esc(S.stdLane.name)} <span class="muted">レーン店${Object.values(S.stdLane.data.info).filter(x => x.perCust != null && /特急|レーン/.test(x.flag || '')).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（特急レーン店）</span> なし</li>')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
@@ -1711,7 +1735,7 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: S.stdBook ? S.stdBook.data : null, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -1788,7 +1812,8 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
       if (wss.length) { const g = pickM(wss); N.ws = { name: g.name, rows: g.ws, file: g.file }; }
       for (const g of got) {
         if (g.wage && !(opt.fresh && N.wage)) N.wage = { name: g.name, rows: g.wage, file: g.file };
-        if (g.std && !(opt.fresh && N.stdBook)) N.stdBook = { name: g.name, data: g.std, file: g.file };
+        if (g.std && g.std.kind === 'lane') { if (!(opt.fresh && N.stdLane)) N.stdLane = { name: g.name, data: g.std, file: g.file }; }
+        else if (g.std && !(opt.fresh && N.stdBook)) N.stdBook = { name: g.name, data: g.std, file: g.file };
       }
       if (hourly.length) N.hourly = { name: hourly[0].name, rows: hourly[0].hourly, file: hourly[0].file };
       // 月が合わない保存データは外す
@@ -2044,7 +2069,8 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
     const st = x.settings || STD_DEFAULT;
     const yn = (id, label, v) => `<label class="small">${label} <select class="btn ghost" data-k="${id}" style="padding:4px 8px"><option value="1"${v ? ' selected' : ''}>○</option><option value="0"${v ? '' : ' selected'}>×</option></select></label>`;
     const nb = (id, label, v, step) => `<label class="small">${label} <input type="number" data-k="${id}" value="${v ?? ''}" step="${step || 1}" min="0" style="width:4.5em;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)"></label>`;
-    $('stdSet').innerHTML = `<span class="label">店舗設定${x.custom ? '' : '（初期値のまま）'}</span>` + nb('tables', '卓数', x.tables) + yn('lunchWd', '平日ランチ営業', st.lunchWd) + yn('lunchHd', '休日ランチ営業', st.lunchHd) + yn('auto', '自動案内', st.auto) + nb('t8', 'T8台数', st.t8) + nb('hoursWd', '営業時間 平日', st.hoursWd, 0.5) + nb('hoursHd', '営業時間 休日', st.hoursHd, 0.5)
+    $('stdSet').innerHTML = `<span class="label">${x.lane ? '特急レーン店・' : ''}店舗設定${x.custom ? '' : '（初期値のまま）'}</span>` + nb('tables', '卓数', x.tables) + yn('lunchWd', '平日ランチ営業', st.lunchWd) + yn('lunchHd', '休日ランチ営業', st.lunchHd)
+      + (x.lane ? `<span class="small">変数（客数1人あたり） <b>${st.perCust}</b></span>` : yn('auto', '自動案内', st.auto) + nb('t8', 'T8台数', st.t8)) + nb('hoursWd', '営業時間 平日', st.hoursWd, 0.5) + nb('hoursHd', '営業時間 休日', st.hoursHd, 0.5)
       + `<span class="small muted">${GAS ? '変更するとすぐ再計算し、全員共通の設定として保存します' : '変更するとすぐ再計算し、このブラウザに保存します'}</span>`;
     $('stdSet').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
       const all = stdSettingsAll(), cur0 = { ...STD_DEFAULT, ...(all[s.code] || {}) };
@@ -2053,7 +2079,7 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
       if (last) last[2] = { ...last[2], stdSettings: all };
       const keep = s.code; rerun(); cur = keep; render();
     }));
-    if (x.missing) { $('stdTbl').innerHTML = '<tbody><tr><td class="muted">卓数を入れると計算します。</td></tr></tbody>'; $('stdWeekTbl').innerHTML = ''; return; }
+    if (x.missing) { $('stdTbl').innerHTML = `<tbody><tr><td class="muted">${x.need === 'lane' ? '特急レーン店です。レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '通常店用の標準比マスタを読み込むと計算します。' : '卓数を入れると計算します。'}</td></tr></tbody>`; $('stdWeekTbl').innerHTML = ''; return; }
     const r2 = v => v == null ? '－' : v.toFixed(1);
     $('stdTbl').innerHTML = `<thead><tr><th>日</th><th>区分</th><th class="n">客数</th><th class="n">標準時間</th><th class="n">労働時間</th><th class="n">差異</th><th class="n">標準比</th><th class="n">人時来客</th></tr></thead><tbody>`
       + x.days.map(d => { const wd = WEEKDAYS[(d.date.getDay() + 6) % 7], r = d.std ? d.hours / d.std : null;

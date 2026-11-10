@@ -127,7 +127,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君。通常店・特急レーン店）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -236,7 +236,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       </div>
       <div id="stdBox">
         <h3>標準比（日別・週別）</h3>
-        <p class="small muted" style="margin:2px 0 8px">標準時間＝見込君と同じ式（客数×0.33＋卓数の切片＋営業時間の補正−ロボ控除×T8台数＋自動案内）。確定日までは客数・労働時間とも実績、以降は客数見込み（客数予算×ここまでの曜日区分別の客数予算比）と勤務予定。<b>見</b>＝見込み。</p>
+        <p class="small muted" style="margin:2px 0 8px">標準時間＝見込君と同じ式。通常店：客数×0.33＋卓数の切片＋営業時間の補正−ロボ控除×T8台数＋自動案内。特急レーン店：客数×店舗ごとの変数＋卓数の切片（レーン店用）＋営業時間の補正。確定日までは客数・労働時間とも実績、以降は客数見込み（客数予算×ここまでの曜日区分別の客数予算比）と勤務予定。<b>見</b>＝見込み。</p>
         <div class="row" style="justify-content:flex-start;gap:8px 16px;margin-bottom:10px" id="stdSet"></div>
         <div class="grid2">
           <div class="tbl" style="max-height:520px;overflow-y:auto"><table id="stdTbl"></table></div>
@@ -411,7 +411,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   const DATA_VERSION = 3;
   async function reparse(v) {
     const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage'];
-    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : [])];
+    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : []), ...(v.stdLane ? [v.stdLane] : [])];
     if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
     const cache = new Map();
     const parse = async f => { if (!cache.has(f.raw)) cache.set(f.raw, await readOneInner(new File([f.raw], f.name))); return cache.get(f.raw); };
@@ -424,6 +424,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     }
     delete N.usage;
     if (v.stdBook) { const g = await parse(v.stdBook.file); if (g.std) N.stdBook = { ...v.stdBook, data: g.std }; }
+    if (v.stdLane) { const g = await parse(v.stdLane.file); if (g.std) N.stdLane = { ...v.stdLane, data: g.std }; }
     if (v.invFiles) { N.invFiles = []; for (const x of v.invFiles) { const g = await parse(x.file); const keep = new Set(x.rows.map(r => r.code)); N.invFiles.push({ ...x, rows: (g.inv || []).filter(r => keep.has(r.code)) }); } }
     N.v = DATA_VERSION;
     return N;
@@ -438,7 +439,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (!S || !S.cur) { box.hidden = true; return; }
     const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
     $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
-      + (S.stdBook ? `<li><span class="label">標準比マスタ</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ</span> なし</li>')
+      + (S.stdBook ? `<li><span class="label">標準比マスタ（通常店）</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（通常店）</span> なし</li>')
+      + (S.stdLane ? `<li><span class="label">標準比マスタ（特急レーン店）</span> ${esc(S.stdLane.name)} <span class="muted">レーン店${Object.values(S.stdLane.data.info).filter(x => x.perCust != null && /特急|レーン/.test(x.flag || '')).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（特急レーン店）</span> なし</li>')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
@@ -447,7 +449,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: S.stdBook ? S.stdBook.data : null, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -524,7 +526,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       if (wss.length) { const g = pickM(wss); N.ws = { name: g.name, rows: g.ws, file: g.file }; }
       for (const g of got) {
         if (g.wage && !(opt.fresh && N.wage)) N.wage = { name: g.name, rows: g.wage, file: g.file };
-        if (g.std && !(opt.fresh && N.stdBook)) N.stdBook = { name: g.name, data: g.std, file: g.file };
+        if (g.std && g.std.kind === 'lane') { if (!(opt.fresh && N.stdLane)) N.stdLane = { name: g.name, data: g.std, file: g.file }; }
+        else if (g.std && !(opt.fresh && N.stdBook)) N.stdBook = { name: g.name, data: g.std, file: g.file };
       }
       if (hourly.length) N.hourly = { name: hourly[0].name, rows: hourly[0].hourly, file: hourly[0].file };
       // 月が合わない保存データは外す
@@ -780,7 +783,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const st = x.settings || STD_DEFAULT;
     const yn = (id, label, v) => `<label class="small">${label} <select class="btn ghost" data-k="${id}" style="padding:4px 8px"><option value="1"${v ? ' selected' : ''}>○</option><option value="0"${v ? '' : ' selected'}>×</option></select></label>`;
     const nb = (id, label, v, step) => `<label class="small">${label} <input type="number" data-k="${id}" value="${v ?? ''}" step="${step || 1}" min="0" style="width:4.5em;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)"></label>`;
-    $('stdSet').innerHTML = `<span class="label">店舗設定${x.custom ? '' : '（初期値のまま）'}</span>` + nb('tables', '卓数', x.tables) + yn('lunchWd', '平日ランチ営業', st.lunchWd) + yn('lunchHd', '休日ランチ営業', st.lunchHd) + yn('auto', '自動案内', st.auto) + nb('t8', 'T8台数', st.t8) + nb('hoursWd', '営業時間 平日', st.hoursWd, 0.5) + nb('hoursHd', '営業時間 休日', st.hoursHd, 0.5)
+    $('stdSet').innerHTML = `<span class="label">${x.lane ? '特急レーン店・' : ''}店舗設定${x.custom ? '' : '（初期値のまま）'}</span>` + nb('tables', '卓数', x.tables) + yn('lunchWd', '平日ランチ営業', st.lunchWd) + yn('lunchHd', '休日ランチ営業', st.lunchHd)
+      + (x.lane ? `<span class="small">変数（客数1人あたり） <b>${st.perCust}</b></span>` : yn('auto', '自動案内', st.auto) + nb('t8', 'T8台数', st.t8)) + nb('hoursWd', '営業時間 平日', st.hoursWd, 0.5) + nb('hoursHd', '営業時間 休日', st.hoursHd, 0.5)
       + `<span class="small muted">${GAS ? '変更するとすぐ再計算し、全員共通の設定として保存します' : '変更するとすぐ再計算し、このブラウザに保存します'}</span>`;
     $('stdSet').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
       const all = stdSettingsAll(), cur0 = { ...STD_DEFAULT, ...(all[s.code] || {}) };
@@ -789,7 +793,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       if (last) last[2] = { ...last[2], stdSettings: all };
       const keep = s.code; rerun(); cur = keep; render();
     }));
-    if (x.missing) { $('stdTbl').innerHTML = '<tbody><tr><td class="muted">卓数を入れると計算します。</td></tr></tbody>'; $('stdWeekTbl').innerHTML = ''; return; }
+    if (x.missing) { $('stdTbl').innerHTML = `<tbody><tr><td class="muted">${x.need === 'lane' ? '特急レーン店です。レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '通常店用の標準比マスタを読み込むと計算します。' : '卓数を入れると計算します。'}</td></tr></tbody>`; $('stdWeekTbl').innerHTML = ''; return; }
     const r2 = v => v == null ? '－' : v.toFixed(1);
     $('stdTbl').innerHTML = `<thead><tr><th>日</th><th>区分</th><th class="n">客数</th><th class="n">標準時間</th><th class="n">労働時間</th><th class="n">差異</th><th class="n">標準比</th><th class="n">人時来客</th></tr></thead><tbody>`
       + x.days.map(d => { const wd = WEEKDAYS[(d.date.getDay() + 6) % 7], r = d.std ? d.hours / d.std : null;
