@@ -119,6 +119,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .foot p { margin: 0; max-width: 80ch; }
 @media (prefers-reduced-motion: no-preference) { tr.pick td { transition: background .12s; } }
 /* ===== 訪問資料（A4縦・1店舗4ページ） ===== */
+/* 印刷設定の「背景のグラフィック」がオフでも、ヒートマップ・棒グラフ・見出しの色を印刷する */
+.rp-page, .rp-page * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 #repWrap { position: fixed; inset: 0; z-index: 30; background: color-mix(in oklab, var(--bg) 70%, #000 30%); overflow: auto; padding: 16px; }
 #repBar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; max-width: 210mm; margin: 0 auto 16px; }
 .rp-page { width: 210mm; height: 297mm; margin: 0 auto 16px; background: #fff; color: #1d1f24; box-shadow: 0 2px 12px rgba(0,0,0,.25); padding: 12mm 12mm 10mm; display: flex; flex-direction: column; gap: 4mm; overflow: hidden; font-size: 10pt; line-height: 1.5;
@@ -371,7 +373,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 <div class="tip" id="tip" hidden></div>
 <div id="repWrap" hidden>
   <div id="repBar">
-    <div><b id="repTitle">訪問資料</b><div class="small muted">コメントはクリックして直接書き換えられます。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・縦、余白なし、背景のグラフィックをオン）。</div></div>
+    <div><b id="repTitle">訪問資料</b><div class="small muted">コメントはクリックして直接書き換えられます。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・縦、余白なし）。</div></div>
     <div class="row" style="gap:8px"><button type="button" class="btn" id="repPrint">印刷・PDF保存</button><button type="button" class="btn ghost" id="repClose">閉じる</button></div>
   </div>
   <div id="rep"></div>
