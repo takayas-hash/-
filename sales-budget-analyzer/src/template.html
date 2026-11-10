@@ -127,7 +127,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <label class="drop" id="drop" for="file">
       <span class="btn">ファイルを選択</span>
-      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>を入れると、労働時間・雑給・残業の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br><b>タイムカード表</b>・<b>勤務スケジュール表</b>・<b>時給データ</b>・<b>標準比マスタ（見込君）</b>を入れると、労働時間・雑給・残業・標準比の見込みが出ます<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
@@ -227,6 +227,15 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         <p class="small muted" style="margin:2px 0 0" id="laborNote"></p>
         <div class="lg"><span><i style="background:var(--c1)"></i>実績（タイムカード）</span><span><i style="background:var(--c0)"></i>勤務予定</span><span><i style="background:repeating-linear-gradient(135deg,var(--c0) 0 2px,transparent 2px 4px);outline:1px solid var(--c0)"></i>予定未作成（実績平均で補完）</span></div>
         <div class="chart" id="laborDaily"></div>
+      </div>
+      <div id="stdBox">
+        <h3>標準比（日別・週別）</h3>
+        <p class="small muted" style="margin:2px 0 8px">標準時間＝見込君と同じ式（客数×0.33＋卓数の切片＋営業時間の補正−ロボ控除×T8台数＋自動案内）。確定日までは客数・労働時間とも実績、以降は客数見込み（客数予算×ここまでの曜日区分別の客数予算比）と勤務予定。<b>見</b>＝見込み。</p>
+        <div class="row" style="justify-content:flex-start;gap:8px 16px;margin-bottom:10px" id="stdSet"></div>
+        <div class="grid2">
+          <div class="tbl" style="max-height:520px;overflow-y:auto"><table id="stdTbl"></table></div>
+          <div><div class="tbl"><table id="stdWeekTbl"></table></div></div>
+        </div>
       </div>
       <div>
         <h3>個人別の労働時間・残業見込み</h3>
@@ -332,6 +341,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true, sheets: [SHEET_CUR, SHEET_PREV] });
       if (!findSheet(wb, SHEET_CUR)) wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true });
     }
+    // 標準比マスタ（見込君）
+    if (isStdBook(wb)) return { name: f.name, std: extractStd(XLSX, wb) };
     // 原価管理表：店舗ごとのシートをまとめて読む
     const invs = wb.SheetNames.filter(n => isInventorySheet(XLSX, wb.Sheets[n])).map(n => extractInventory(XLSX, wb.Sheets[n])).filter(Boolean);
     if (invs.length) return { name: f.name, inv: invs };
@@ -385,7 +396,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   const DATA_VERSION = 3;
   async function reparse(v) {
     const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage'];
-    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || [])];
+    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : [])];
     if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
     const cache = new Map();
     const parse = async f => { if (!cache.has(f.raw)) cache.set(f.raw, await readOneInner(new File([f.raw], f.name))); return cache.get(f.raw); };
@@ -397,6 +408,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       N[k] = { ...x, rows: rows || [] };
     }
     delete N.usage;
+    if (v.stdBook) { const g = await parse(v.stdBook.file); if (g.std) N.stdBook = { ...v.stdBook, data: g.std }; }
     if (v.invFiles) { N.invFiles = []; for (const x of v.invFiles) { const g = await parse(x.file); const keep = new Set(x.rows.map(r => r.code)); N.invFiles.push({ ...x, rows: (g.inv || []).filter(r => keep.has(r.code)) }); } }
     N.v = DATA_VERSION;
     return N;
@@ -411,6 +423,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (!S || !S.cur) { box.hidden = true; return; }
     const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
     $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
+      + (S.stdBook ? `<li><span class="label">標準比マスタ</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ</span> なし</li>')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = `保存日時 ${fmtTime(new Date(S.savedAt))}`;
@@ -418,7 +431,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: S.stdBook ? S.stdBook.data : null, stdSettings: pref.get('stdSettings', {}), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -475,6 +488,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         if (g.tc) N.tc = { name: g.name, rows: g.tc, file: g.file };
         if (g.ws) N.ws = { name: g.name, rows: g.ws, file: g.file };
         if (g.wage) N.wage = { name: g.name, rows: g.wage, file: g.file };
+        if (g.std) N.stdBook = { name: g.name, data: g.std, file: g.file };
       }
       if (hourly.length) N.hourly = { name: hourly[0].name, rows: hourly[0].hourly, file: hourly[0].file };
       // 月が合わない保存データは外す
@@ -702,15 +716,19 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       + (land ? kpi('労働時間（着地見込み）', hrs0(a.landMins), `残り予定 ${hrs0(a.planMins)}${a.estDays ? `・未作成${a.estDays}日を補完` : ''}`) : '')
       + (L.hasWage ? kpi('雑給（着地見込み）', man(a.landCost), `実績 ${man(a.cost)}${a.wageless ? `・${a.wageless}店除く` : ''}`) : '')
       + (L.hasWage && full && R.area.fc ? kpi('雑給率（見込み）', pct(a.landCost / R.area.fc.landing), `売上見込み ${man(R.area.fc.landing)}`) : '')
-      + kpi('残業アラート', `${a.alerts.length}名`, `60h以上 ${a.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, a.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '');
+      + kpi('残業アラート', `${a.alerts.length}名`, `60h以上 ${a.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, a.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '')
+      + (R.area.std ? kpi('標準比（実績）', pct(R.area.std.cutRate), `${L.mo + 1}/${L.cut}時点`) + (land ? kpi('標準比（着地見込み）', pct(R.area.std.landRate), R.area.std.budgetRate != null ? `予算標準比 ${pct(R.area.std.budgetRate)}` : '', R.area.std.budgetRate != null && R.area.std.landRate > R.area.std.budgetRate ? 'neg' : 'pos') : '') : '');
     $('areaComment').value = commentText(R.area.laborLines, detail); fit($('areaComment'));
+    const hasStd = !!R.area.std;
+    const stdCells = (s, land) => { if (!hasStd) return ''; const x = s.std; if (!x || x.missing) return `<td class="n muted" colspan="${land ? 4 : 2}">卓数なし</td>`;
+      return `<td class="n">${pct(x.cutRate)}</td>${land ? `<td class="n ${x.budgetRate != null && x.landRate > x.budgetRate ? 'neg' : ''}"><b>${pct(x.landRate)}</b></td>` : ''}<td class="n muted">${pct(x.budgetRate)}</td>${land ? `<td class="n ${x.over > 0 ? 'neg' : 'pos'}">${x.over != null ? (x.over > 0 ? '+' : '▲') + hrs0(Math.abs(x.over) * 60) : '－'}</td>` : ''}`; };
     const rows = [...R.stores].sort((x, y) => (lRate(y) ?? -1) - (lRate(x) ?? -1));
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}<th class="n">雑給率（見込み）</th><th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th></tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}<th class="n">雑給率（見込み）</th><th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th>${hasStd ? `<th class="n">標準比（実績）</th>${land ? '<th class="n">標準比（着地）</th>' : ''}<th class="n">予算標準比</th>${land ? '<th class="n">予算との差</th>' : ''}` : ''}</tr></thead><tbody>`
       + rows.map(s => { const l = s.labor; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
         + (!l ? `<td class="n muted" colspan="9">勤怠データなし</td></tr>` :
         `<td class="n">${hrs0(l.mins)}</td><td class="n muted">${hrs0(l.staffMins)}</td>${land ? `<td class="n">${hrs0(l.planMins)}</td><td class="n"><b>${hrs0(l.landMins)}</b></td><td class="n ${l.estDays ? 'neg' : ''}">${l.estDays ? l.estDays + '日' : '－'}</td>` : ''}`
         + (L.hasWage ? (l.wageless ? `<td class="n muted" colspan="${land ? 4 : 3}">時給データなし</td>` : `<td class="n">${man(l.cost)}</td>${land ? `<td class="n"><b>${man(l.landCost)}</b></td>` : ''}<td class="n">${pct(lRate(s))}</td><td class="n ${l.noWage ? 'neg' : 'muted'}">${l.noWage ? l.noWage + '名' : '－'}</td>`) : '')
-        + `<td class="n ${l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : ''}">${l.alerts.length ? l.alerts.length + '名' : '－'}</td></tr>`); }).join('') + '</tbody>';
+        + `<td class="n ${l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : ''}">${l.alerts.length ? l.alerts.length + '名' : '－'}</td>` + stdCells(s, land) + '</tr>'); }).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
       tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -718,15 +736,43 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
     renderStore();
   }
+  /** 標準比：店舗設定・日別・週別 */
+  function renderStd(s) {
+    const x = s.std;
+    $('stdBox').hidden = !x;
+    if (!x) return;
+    const st = x.settings || STD_DEFAULT;
+    const yn = (id, label, v) => `<label class="small">${label} <select class="btn ghost" data-k="${id}" style="padding:4px 8px"><option value="1"${v ? ' selected' : ''}>○</option><option value="0"${v ? '' : ' selected'}>×</option></select></label>`;
+    const nb = (id, label, v, step) => `<label class="small">${label} <input type="number" data-k="${id}" value="${v ?? ''}" step="${step || 1}" min="0" style="width:4.5em;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)"></label>`;
+    $('stdSet').innerHTML = `<span class="label">店舗設定${x.custom ? '' : '（初期値のまま）'}</span>` + nb('tables', '卓数', x.tables) + yn('lunchWd', '平日ランチ営業', st.lunchWd) + yn('lunchHd', '休日ランチ営業', st.lunchHd) + yn('auto', '自動案内', st.auto) + nb('t8', 'T8台数', st.t8) + nb('hoursWd', '営業時間 平日', st.hoursWd, 0.5) + nb('hoursHd', '営業時間 休日', st.hoursHd, 0.5)
+      + `<span class="small muted">変更するとすぐ再計算し、このブラウザに保存します</span>`;
+    $('stdSet').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
+      const all = pref.get('stdSettings', {}), cur0 = { ...STD_DEFAULT, ...(all[s.code] || {}) };
+      $('stdSet').querySelectorAll('[data-k]').forEach(e => { const k = e.dataset.k; cur0[k] = e.tagName === 'SELECT' ? e.value === '1' : +e.value; });
+      all[s.code] = cur0; pref.set('stdSettings', all);
+      if (last) last[2] = { ...last[2], stdSettings: all };
+      const keep = s.code; rerun(); cur = keep; render();
+    }));
+    if (x.missing) { $('stdTbl').innerHTML = '<tbody><tr><td class="muted">卓数を入れると計算します。</td></tr></tbody>'; $('stdWeekTbl').innerHTML = ''; return; }
+    const r2 = v => v == null ? '－' : v.toFixed(1);
+    $('stdTbl').innerHTML = `<thead><tr><th>日</th><th>区分</th><th class="n">客数</th><th class="n">標準時間</th><th class="n">労働時間</th><th class="n">差異</th><th class="n">標準比</th><th class="n">人時来客</th></tr></thead><tbody>`
+      + x.days.map(d => { const wd = WEEKDAYS[(d.date.getDay() + 6) % 7], r = d.std ? d.hours / d.std : null;
+        return `<tr><td>${d.date.getDate()}（${wd}）</td><td class="muted">${d.type === 2 ? '土日祝' : '平日'}</td><td class="n">${d.cust != null ? Math.round(d.cust).toLocaleString('ja-JP') : '－'}${d.custEst ? ' <span class="muted small">見</span>' : ''}</td><td class="n">${r2(d.std)}</td><td class="n">${r2(d.hours)}${d.done ? '' : ` <span class="muted small">${d.est ? '補' : '予'}</span>`}</td><td class="n ${d.std && d.hours - d.std > 0 ? 'neg' : 'pos'}">${d.std ? (d.hours - d.std >= 0 ? '+' : '▲') + Math.abs(d.hours - d.std).toFixed(1) : '－'}</td><td class="n ${r != null && r >= 1 ? 'neg' : 'pos'}">${pct(r)}</td><td class="n muted">${d.cust != null && d.hours ? (d.cust / d.hours).toFixed(2) : '－'}</td></tr>`; }).join('')
+      + `<tr><td><b>月間</b></td><td></td><td class="n"><b>${Math.round(x.landCust).toLocaleString('ja-JP')}</b></td><td class="n"><b>${x.landStd.toFixed(1)}</b></td><td class="n"><b>${x.landHours.toFixed(1)}</b></td><td class="n"><b>${(x.landHours - x.landStd >= 0 ? '+' : '▲') + Math.abs(x.landHours - x.landStd).toFixed(1)}</b></td><td class="n"><b>${pct(x.landRate)}</b></td><td class="n">${(x.landCust / x.landHours).toFixed(2)}</td></tr></tbody>`;
+    $('stdWeekTbl').innerHTML = `<thead><tr><th>週</th><th class="n">客数</th><th class="n">標準時間</th><th class="n">労働時間</th><th class="n">標準比</th><th>判定</th></tr></thead><tbody>`
+      + x.weeks.map((w, i) => `<tr><td>第${i + 1}週 <span class="muted small">${md(w.from)}〜${md(w.to)}${w.done ? '' : w.mixed ? '・一部見込み' : '・見込み'}</span></td><td class="n">${Math.round(w.cust).toLocaleString('ja-JP')}</td><td class="n">${w.std.toFixed(1)}</td><td class="n">${w.hours.toFixed(1)}</td><td class="n"><b>${pct(w.rate)}</b></td><td>${w.rate < 1 ? '<span class="pill ok">○</span>' : '<span class="pill ng">×</span>'}</td></tr>`).join('')
+      + `<tr><td colspan="6" class="small muted" style="white-space:normal">確定日まで：標準比 ${pct(x.cutRate)}（標準${x.cutStd.toFixed(1)}h・実働${x.cutHours.toFixed(1)}h）${x.budgetRate != null ? `／予算標準比 ${pct(x.budgetRate)}（目標時間 ${hrs0(x.target * 60)}）` : ''}</td></tr></tbody>`;
+  }
   function renderStoreLabor(s) {
     $('storeName').textContent = s.name;
     const l = s.labor, L = R.labor;
-    if (!l) { $('sKpis').innerHTML = ''; $('storeComment').value = L ? '勤怠データにこの店舗がありません。' : NO_LABOR; fit($('storeComment')); $('laborDaily').innerHTML = ''; $('peopleTbl').innerHTML = ''; $('laborNote').textContent = ''; return; }
+    if (!l) { $('stdBox').hidden = true; $('sKpis').innerHTML = ''; $('storeComment').value = L ? '勤怠データにこの店舗がありません。' : NO_LABOR; fit($('storeComment')); $('laborDaily').innerHTML = ''; $('peopleTbl').innerHTML = ''; $('laborNote').textContent = ''; return; }
     const land = L.cut < L.N;
     $('sKpis').innerHTML = kpi('労働時間（実績）', hrs0(l.mins), `${L.mo + 1}/${L.cut}時点・社員 ${hrs0(l.staffMins)}`)
       + (land ? kpi('労働時間（着地見込み）', hrs0(l.landMins), `残り予定 ${hrs0(l.planMins)}`) : '')
       + (L.hasWage && !l.wageless ? kpi('雑給（着地見込み）', man(l.landCost), `実績 ${man(l.cost)}`) + (lRate(s) != null ? kpi('雑給率（見込み）', pct(lRate(s)), `売上見込み ${man(s.fc.landing)}`) : '') : '')
-      + kpi('残業アラート', `${l.alerts.length}名`, `60h以上 ${l.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '');
+      + kpi('残業アラート', `${l.alerts.length}名`, `60h以上 ${l.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '')
+      + (s.std && !s.std.missing ? kpi('標準比（着地見込み）', pct(s.std.landRate), `実績 ${pct(s.std.cutRate)}${s.std.budgetRate != null ? `・予算 ${pct(s.std.budgetRate)}` : ''}`, s.std.budgetRate != null && s.std.landRate > s.std.budgetRate ? 'neg' : 'pos') : '');
     $('storeComment').value = commentText(s.laborLines, detail); fit($('storeComment'));
     $('laborNote').textContent = `${L.mo + 1}/${L.cut}までは実績、${L.cut + 1}日以降は${L.hasSchedule ? '勤務スケジュール表' : 'タイムカードの勤務予定'}の予定労働時間です。`;
     // 日別の棒
@@ -746,6 +792,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       svg += `<text x="${x + w / 2}" y="${base + 14}" text-anchor="middle">${d.date.getDate()}</text><text x="${x + w / 2}" y="${base + 27}" text-anchor="middle" style="${we ? 'font-weight:700;fill:var(--fg)' : ''}">${wd}</text>`;
     });
     $('laborDaily').innerHTML = svg + '</svg>';
+    renderStd(s);
     // 個人別
     const ps = [...l.people].sort((a, b) => b.totalOt - a.totalOt || b.totalMins - a.totalMins);
     const flag = p => p.totalOt >= OT_LIMIT ? '<span class="pill ng">60h以上</span>' : p.totalOt >= OT_WARN ? '<span class="flag">45h以上</span>' : '';

@@ -349,7 +349,7 @@ function analyzeStore(cur, prev, monthDays) {
   const weather = { rainDays: rain.length, rainRate: rr(rain), fineDays: fine.length, fineRate: rr(fine), rainDiff: sum(rain, d => d.sales - d.budget) };
 
   // 日別（ワースト・ベスト）
-  const daily = act.filter(d => d.budget > 0).map(d => ({ date: d.date, wd: d.wd, dt: d.dt, weather: d.weather, sales: d.sales, budget: d.budget, diff: d.sales - d.budget, rate: d.sales / d.budget, cust: d.cust, loss: d.loss }))
+  const daily = act.filter(d => d.budget > 0).map(d => ({ date: d.date, wd: d.wd, dt: d.dt, weather: d.weather, sales: d.sales, budget: d.budget, diff: d.sales - d.budget, rate: d.sales / d.budget, cust: d.cust, custBudget: d.custBudget, loss: d.loss }))
     .sort((a, b) => a.date - b.date);
   const worst = [...daily].sort((a, b) => a.diff - b.diff).slice(0, 3).filter(d => d.diff < 0);
   const best = [...daily].sort((a, b) => b.diff - a.diff).slice(0, 3).filter(d => d.diff > 0);
@@ -546,6 +546,103 @@ function laborLines(s, L, f, sales, ctx) {
   return out;
 }
 
+/* ===== 標準比（標準比＆人件費 見込君のマスタ） ===== */
+/** 標準比のブック：シート「マスタ」「予算標準比」があるもの */
+function isStdBook(wb) { return !!(findSheet(wb, 'マスタ') && findSheet(wb, '予算標準比')); }
+function extractStd(XLSX, wb) {
+  const aoaOf = n => { const ws = findSheet(wb, n); return ws ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null }) : []; };
+  const t = v => String(v == null ? '' : v).trim();
+  // 卓数ごとの切片（ランチ無し日／ランチ有り日）
+  const M = aoaOf('マスタ'), tables = [];
+  M.forEach((r, i) => { const j = r ? r.findIndex(v => t(v) === '焼肉卓数') : -1; if (j < 0) return;
+    for (let k = i + 1; k < M.length; k++) { const x = M[k]; if (!x || typeof x[j] !== 'number') break; tables.push({ tables: x[j], noL: num(x[j + 1]), L: num(x[j + 2]) }); } });
+  // 予算標準比（店舗×月）
+  const B = aoaOf('予算標準比'), budget = {};
+  const bh = B.findIndex(r => r && r.some(v => t(v) === '店舗コード'));
+  if (bh >= 0) { const H = B[bh], ci = H.findIndex(v => t(v) === '店舗コード');
+    for (let k = bh + 1; k < B.length; k++) { const r = B[k]; if (!r || r[ci] == null || r[ci] === '') continue; const m = {};
+      H.forEach((h, j) => { const mo = typeof h === 'number' ? h : parseInt(t(h), 10); if (mo >= 1 && mo <= 12 && typeof r[j] === 'number') m[mo] = r[j]; }); budget[t(r[ci])] = m; } }
+  // 店舗情報（卓数）
+  const S = aoaOf('店舗情報・予算標準比'), info = {};
+  const sh = S.findIndex(r => r && r.some(v => t(v) === '店舗コード') && r.some(v => t(v) === '卓数'));
+  if (sh >= 0) { const H = S[sh].map(t), ci = H.indexOf('店舗コード'), ti = H.indexOf('卓数'), ni = H.indexOf('店舗名');
+    for (let k = sh + 1; k < S.length; k++) { const r = S[k]; if (!r || r[ci] == null || r[ci] === '') continue; info[t(r[ci])] = { tables: num(r[ti]), name: ni >= 0 ? t(r[ni]).replace(/^焼肉きんぐ/, '') : '' }; } }
+  // 祝日（カレンダーマスタの曜日が「祝」の日。会社の休日扱いの日を含む）
+  const holidays = [];
+  aoaOf('カレンダーマスタ').forEach(r => { if (!r) return; const j = r.findIndex(v => t(v) === '祝'); if (j > 0) { const d = toDate(r[j - 1]); if (d) holidays.push(+d); } });
+  // 係数（原本シートの値。なければ既定値）
+  const O = aoaOf('原本'), near = (label, dx) => { for (const r of O) { if (!r) continue; const j = r.findIndex(v => t(v) === label); if (j >= 0 && typeof r[j + dx] === 'number') return r[j + dx]; } return null; };
+  const k = { perCust: near('変数', 1) ?? 0.33, roboNoL: near('L無し', 1) ?? 1.38, roboL: near('Lあり', 1) ?? 4.14, auto: near('自動案内係数', 1) ?? -0.007 };
+  return { tables, budget, info, holidays, k, date: Date.now() };
+}
+// 店舗設定の初期値（見込君の初期入力と同じ）
+const STD_DEFAULT = { lunchWd: false, lunchHd: true, auto: false, t8: 3, hoursWd: 6, hoursHd: 12 };
+/** 1日の標準時間（見込君「原本」シートの式と同じ）。type：1＝平日、2＝土日祝 */
+function stdHours(cust, type, st, tables, M) {
+  const rows = M.tables; if (!rows.length || !tables) return null;
+  const tk = Math.min(Math.max(Math.round(tables), rows[0].tables), rows[rows.length - 1].tables);
+  const row = rows.find(r => r.tables === tk) || rows[0];
+  const lunch = type === 1 ? st.lunchWd : st.lunchHd;
+  const adj = type === 1 ? ((st.lunchWd ? st.hoursWd - 12 : st.hoursWd - 6) * 2) : (st.hoursHd - 12) * 2;
+  let h = M.k.perCust * cust + (lunch ? row.L : row.noL) + adj - (lunch ? M.k.roboL : M.k.roboNoL) * st.t8;
+  // 自動案内（原本の式どおり、平日のランチ営業日は控除しない）
+  if (st.auto && !(type === 1 && st.lunchWd)) h += cust * 0.9 * M.k.auto;
+  return h;
+}
+/** 店舗の標準比：確定日までは実績（客数＝売上集計表、時間＝タイムカード）、以降は客数見込みと勤務予定 */
+function analyzeStd(s, lab, L, std, settings, salesLast) {
+  if (!lab || !std) return null;
+  const info = std.info[s.code] || {}, set = settings && settings[s.code];
+  const st = { ...STD_DEFAULT, ...(set || {}) }, tables = (set && set.tables) || info.tables;
+  if (!tables) return { missing: true };
+  const hol = new Set(std.holidays);
+  const typeOf = date => hol.has(+date) || date.getDay() === 0 || date.getDay() === 6 ? 2 : 1;
+  const actCust = {}; s.daily.forEach(d => { actCust[d.date.getDate()] = d.cust; });
+  const fcCust = {}; if (s.fc) s.fc.days.forEach(d => { fcCust[d.date.getDate()] = d.custFc; });
+  const days = lab.days.map((d, i) => {
+    const n = i + 1, type = typeOf(d.date);
+    const useAct = n <= salesLast && actCust[n] != null;
+    const cust = useAct ? actCust[n] : fcCust[n] != null ? fcCust[n] : null;
+    const sh = cust != null ? stdHours(cust, type, st, tables, std) : null;
+    return { date: d.date, type, cust, custEst: !useAct, hours: d.mins / 60, done: d.done, est: d.est, std: sh };
+  });
+  const ok = days.filter(d => d.std != null);
+  const past = ok.filter(d => d.done), all = ok;
+  const H = ds => sum(ds, d => d.hours), SH = ds => sum(ds, d => d.std), C = ds => sum(ds, d => d.cust);
+  const mo = days[0].date.getMonth() + 1, br = (std.budget[s.code] || {})[mo] ?? null;
+  const landStd = SH(all), landH = H(all);
+  const r = {
+    settings: st, custom: !!set, tables, budgetRate: br, days,
+    cutStd: SH(past), cutHours: H(past), cutCust: C(past), cutRate: SH(past) ? H(past) / SH(past) : null,
+    landStd, landHours: landH, landCust: C(all), landRate: landStd ? landH / landStd : null,
+    remDays: days.filter(d => !d.done).length, complete: ok.length === days.length,
+  };
+  // 予算標準比との差：目標時間＝標準時間×予算標準比
+  if (br != null) { r.target = landStd * br; r.over = landH - r.target; r.overCost = r.over > 0 && lab.avgWage ? r.over * lab.avgWage : null; }
+  // 週別（月曜始まり）
+  const wk = {}; ok.forEach(d => { const w = Math.floor((d.date.getDate() - 1 + ((new Date(d.date.getFullYear(), d.date.getMonth(), 1).getDay() + 6) % 7)) / 7); (wk[w] = wk[w] || []).push(d); });
+  r.weeks = Object.keys(wk).sort((a, b) => a - b).map(w => { const ds = wk[w]; return { from: ds[0].date, to: ds[ds.length - 1].date, n: ds.length, cust: C(ds), std: SH(ds), hours: H(ds), rate: SH(ds) ? H(ds) / SH(ds) : null, done: ds.every(d => d.done), mixed: ds.some(d => d.done) && ds.some(d => !d.done) }; });
+  return r;
+}
+const p0 = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
+function stdLines(x, ctx) {
+  if (!x) return [];
+  if (x.missing) return [{ t: '・標準比：卓数がわからないため計算できません（標準比マスタに店舗がないか、店舗設定で卓数を入れてください）。', d: false }];
+  const out = [];
+  let t = `・標準比：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
+  if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は客数見込み×勤務予定）`;
+  if (x.budgetRate != null) t += `。予算標準比${p0(x.budgetRate)}`;
+  out.push({ t: t + '。', d: false });
+  if (x.budgetRate != null && x.remDays) {
+    if (x.over > 0) out.push({ t: `　予算標準比に収めるには、残り${x.remDays}日で${hrs0(x.over * 60)}（1日${(x.over / x.remDays).toFixed(1)}h）の削減が必要${x.overCost ? `（雑給換算で約${man(x.overCost)}）` : ''}。`, d: false });
+    else out.push({ t: `　勤務予定どおりなら予算標準比内（余裕${hrs0(-x.over * 60)}）。`, d: false });
+  }
+  const bad = x.weeks.filter(w => w.n >= 3 && w.rate != null && w.rate >= 1.05).sort((a, b) => b.rate - a.rate)[0];
+  if (bad) out.push({ t: `　週別で最も高いのは${md(bad.from)}〜${md(bad.to)}の${p0(bad.rate)}${bad.done ? '' : '（見込みを含む）'}。`, d: true });
+  if (!x.custom) out.push({ t: '　※店舗設定（ランチ営業・T8台数・営業時間・自動案内）が初期値のままです。「人」タブの店舗詳細で確認してください。', d: true });
+  return out;
+}
+
 /* ===== 当月の着地見込み ===== */
 const dtOfDate = date => { const wd = WEEKDAYS[(date.getDay() + 6) % 7]; return wd === '土' ? '土曜' : wd === '日' ? '日祝日' : wd === '金' ? '休前日' : '平日'; };
 /**
@@ -561,22 +658,31 @@ function forecastStore(s, rows, prevRows, lastDate, monthEnd) {
   const rateOf = ds => { const b = sum(ds, d => d.budget); return b ? sum(ds, d => d.sales) / b : null; };
   const pace = rateOf(done);
   if (pace == null) return null;
-  const typeRate = {}, avgBudget = {};
+  const typeRate = {}, avgBudget = {}, custRate = {}, avgCustB = {};
+  const cDone = done.filter(d => d.custBudget > 0), cRateOf = ds => { const b = sum(ds, d => d.custBudget); return b ? sum(ds, d => d.cust) / b : null; };
+  const cPace = cRateOf(cDone);
   DAYTYPES.forEach(dt => {
     const ds = done.filter(d => d.dt === dt);
     typeRate[dt] = ds.length >= 2 ? rateOf(ds) : pace;
+    const cs = cDone.filter(d => d.dt === dt);
+    custRate[dt] = cs.length >= 2 ? cRateOf(cs) : cPace;
+    const cb = s.daily.filter(d => d.dt === dt && d.custBudget > 0);
+    avgCustB[dt] = cb.length ? sum(cb, d => d.custBudget) / cb.length : 0;
     const bs = s.daily.filter(d => d.dt === dt);
     avgBudget[dt] = bs.length ? sum(bs, d => d.budget) / bs.length : (s.daily.length ? sum(s.daily, d => d.budget) / s.daily.length : 0);
   });
   const fut = {};
-  rows.filter(r => r.date > lastDate).forEach(r => { const k = +r.date; (fut[k] = fut[k] || { budget: 0, dt: r.dt }); fut[k].budget += r.budget; });
+  rows.filter(r => r.date > lastDate).forEach(r => { const k = +r.date; (fut[k] = fut[k] || { budget: 0, custBudget: 0, dt: r.dt }); fut[k].budget += r.budget; fut[k].custBudget += r.custBudget || 0; });
   const days = [];
   for (let d = lastDate.getDate() + 1; d <= monthEnd.getDate(); d++) {
     const date = new Date(lastDate.getFullYear(), lastDate.getMonth(), d);
     const f = fut[+date];
     const dt = f ? f.dt : dtOfDate(date);
     const budget = f ? f.budget : avgBudget[dt];
-    days.push({ date, dt, budget, est: !f, fc: budget * typeRate[dt] });
+    const cb = f && f.custBudget ? f.custBudget : avgCustB[dt];
+    // 客数の見込み：客数予算×ここまでの曜日区分別の客数予算比。客数予算がなければ売上見込み÷ここまでの客単価
+    const custFc = cb && custRate[dt] != null ? cb * custRate[dt] : s.up ? budget * typeRate[dt] / s.up : 0;
+    days.push({ date, dt, budget, est: !f, fc: budget * typeRate[dt], custFc });
   }
   const remBudget = sum(days, d => d.budget), remFc = sum(days, d => d.fc);
   const monthBudget = s.budget + remBudget, landing = s.sales + remFc, need = monthBudget - s.sales;
@@ -588,7 +694,7 @@ function forecastStore(s, rows, prevRows, lastDate, monthEnd) {
     remByType: DAYTYPES.map(dt => ({ key: dt, days: days.filter(d => d.dt === dt).length })).filter(x => x.days),
     remBudget, remFc, monthBudget, landing, landDiff: landing - monthBudget, landRate: monthBudget ? landing / monthBudget : null,
     need, needPerDay: need / n, needRate: remBudget ? need / remBudget : null, pace, typeRate,
-    doneSales: sum(done, d => d.sales), doneBudget: sum(done, d => d.budget),
+    doneSales: sum(done, d => d.sales), doneBudget: sum(done, d => d.budget), remCust: sum(days, d => d.custFc),
     prevBased, prevBasedRate: prevBased != null && monthBudget ? prevBased / monthBudget : null,
   };
 }
@@ -598,7 +704,7 @@ function forecastSum(list, area) {
   const f0 = fs[0];
   const remBudget = sum(fs, f => f.remBudget), remFc = sum(fs, f => f.remFc);
   const monthBudget = area.budget + remBudget, landing = area.sales + remFc, need = monthBudget - area.sales;
-  const days = f0.days.map((d, i) => ({ date: d.date, dt: d.dt, est: fs.some(f => f.days[i] && f.days[i].est), budget: sum(fs, f => f.days[i] ? f.days[i].budget : 0), fc: sum(fs, f => f.days[i] ? f.days[i].fc : 0) }));
+  const days = f0.days.map((d, i) => ({ date: d.date, dt: d.dt, est: fs.some(f => f.days[i] && f.days[i].est), budget: sum(fs, f => f.days[i] ? f.days[i].budget : 0), fc: sum(fs, f => f.days[i] ? f.days[i].fc : 0), custFc: sum(fs, f => f.days[i] ? f.days[i].custFc : 0) }));
   const pb = fs.every(f => f.prevBased != null) ? sum(fs, f => f.prevBased) : null;
   return {
     remDays: f0.remDays, days, estDays: Math.max(...fs.map(f => f.estDays)), remByType: f0.remByType,
@@ -725,11 +831,29 @@ function analyze(curRows, prevRows, extra) {
   if (labor) {
     // 売上の実績期間と勤怠の確定日が同じときだけ、実績の雑給率を出す
     const sameCut = labor.cut === lastDate.getDate() && labor.mo === lastDate.getMonth();
-    stores.forEach(s => { s.labor = labor.stores.find(x => x.code === s.code) || null; s.laborLines = s.labor ? laborLines(s.labor, labor, s.fc, sameCut ? s.sales : null, ctx) : [{ t: '勤怠データにこの店舗がありません。', d: false }]; });
+    const std = extra.std || null, cutTxt = `${labor.mo + 1}/${labor.cut}時点`;
+    stores.forEach(s => {
+      s.labor = labor.stores.find(x => x.code === s.code) || null;
+      s.std = std && s.labor ? analyzeStd(s, s.labor, labor, std, extra.stdSettings, lastDate.getMonth() === labor.mo ? lastDate.getDate() : 0) : null;
+      s.laborLines = s.labor ? laborLines(s.labor, labor, s.fc, sameCut ? s.sales : null, ctx).concat(stdLines(s.std, { cutTxt })) : [{ t: '勤怠データにこの店舗がありません。', d: false }];
+    });
     const a = labor.area, fs = stores.filter(s => s.labor);
     area.labor = a;
     const full = fs.length === stores.length && !a.wageless;
     area.laborLines = laborLines(a, labor, full ? area.fc : null, sameCut && full ? area.sales : null, ctx);
+    // 標準比（対象店の合計）
+    const ws = stores.filter(s => s.std && !s.std.missing);
+    if (ws.length) {
+      const T2 = k => sum(ws, s => s.std[k] || 0);
+      const A = { cutRate: T2('cutStd') ? T2('cutHours') / T2('cutStd') : null, landRate: T2('landStd') ? T2('landHours') / T2('landStd') : null, n: ws.length };
+      const wb = ws.filter(s => s.std.budgetRate != null);
+      A.budgetRate = wb.length ? sum(wb, s => s.std.target) / sum(wb, s => s.std.landStd) : null;
+      A.over = wb.length ? sum(wb, s => s.std.over) : null;
+      area.std = A;
+      const rk = [...ws].sort((x, y) => (y.std.landRate - (y.std.budgetRate || 0)) - (x.std.landRate - (x.std.budgetRate || 0)));
+      area.laborLines.push({ t: `・標準比：実績${p0(A.cutRate)}（${cutTxt}）${labor.cut < labor.N ? `、着地見込み${p0(A.landRate)}` : ''}${A.budgetRate != null ? `（予算標準比${p0(A.budgetRate)}）` : ''}。${ws.length > 1 ? `予算標準比を最も上回る見込みの店：${rk.filter(s => s.std.budgetRate != null && s.std.over > 0).slice(0, 3).map(s => `${s.name}${p0(s.std.landRate)}（予算${p0(s.std.budgetRate)}、${hrs0(s.std.over * 60)}超過）`).join('、') || 'なし'}。` : ''}`, d: false });
+      if (ws.some(s => !s.std.custom)) area.laborLines.push({ t: `　※店舗設定が初期値のままの店：${ws.filter(s => !s.std.custom).map(s => s.name).join('、')}。`, d: true });
+    } else if (std) area.laborLines.push({ t: '・標準比：標準比マスタに対象店の卓数がありません。', d: false });
     if (labor.hasWage && fs.length > 1) {
       const rate = s => s.labor.wageless ? null : s.fc ? s.labor.landCost / s.fc.landing : sameCut ? s.labor.cost / s.sales : null;
       const rk = fs.filter(s => rate(s) != null).sort((x, y) => rate(y) - rate(x));
@@ -1135,4 +1259,4 @@ function areaCostComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
