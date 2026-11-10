@@ -125,21 +125,23 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .rp-page, .rp-page * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 #repWrap { position: fixed; inset: 0; z-index: 30; background: color-mix(in oklab, var(--bg) 70%, #000 30%); overflow: auto; padding: 16px; }
 #repBar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; max-width: 210mm; margin: 0 auto 16px; }
-.rp-page { width: 210mm; height: 297mm; margin: 0 auto 16px; background: #fff; color: #1d1f24; box-shadow: 0 2px 12px rgba(0,0,0,.25); padding: 12mm 12mm 10mm; display: flex; flex-direction: column; gap: 4mm; overflow: hidden; font-size: 10pt; line-height: 1.5;
+.rp-page { width: 210mm; height: 297mm; margin: 0 auto 16px; background: #fff; color: #1d1f24; box-shadow: 0 2px 12px rgba(0,0,0,.25); padding: 11mm 11mm 9mm; display: flex; flex-direction: column; gap: 4mm; overflow: hidden; font-size: 12.5pt; line-height: 1.5;
   --bg: #f6f6f3; --panel: #fff; --fg: #1d1f24; --muted: #5d6068; --line: #dddcd6; --accent: #23407a; --accent-soft: #e6ebf5; --neg: #d03b3b; --pos: #2a78d6; --mid: #f0efec; --neg-ink: #b42323; --pos-ink: #1d5fae;
   --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c0: #a3a29c; --prev: #b9b8b1; color-scheme: light; }
 .rp-head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #23407a; padding-bottom: 2mm; }
-.rp-head h1 { font-size: 15pt; margin: 0; } .rp-head .muted { font-size: 8.5pt; }
+.rp-head h1 { font-size: 20pt; margin: 0; } .rp-head .muted { font-size: 10.5pt; }
 .rp-body { flex: 1; min-height: 0; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 4mm; }
-.rp-foot { display: flex; justify-content: space-between; font-size: 8pt; color: #5d6068; border-top: 1px solid #dddcd6; padding-top: 1.5mm; }
-.rp-page h2 { font-size: 12pt; margin: 0; } .rp-page h3 { font-size: 10.5pt; margin: 0 0 1.5mm; }
+.rp-foot { display: flex; justify-content: space-between; font-size: 9.5pt; color: #5d6068; border-top: 1px solid #dddcd6; padding-top: 1.5mm; }
+.rp-page h2 { font-size: 15pt; margin: 0; } .rp-page h3 { font-size: 13pt; margin: 0 0 1.5mm; }
 .rp-page .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2.5mm 3mm; }
-.rp-page .kpi { padding-left: 2.5mm; } .rp-page .kpi .v { font-size: 13pt; white-space: nowrap; } .rp-page .kpi .small { font-size: 7.5pt; line-height: 1.4; }
-.rp-page .label { font-size: 7.5pt; }
-.rp-page table { font-size: 8.5pt; } .rp-page th, .rp-page td { padding: 1.2mm 2mm; }
+.rp-page .kpi { padding-left: 2.5mm; } .rp-page .kpi .v { font-size: 17pt; white-space: nowrap; } .rp-page .kpi .small { font-size: 9.5pt; line-height: 1.4; }
+.rp-page .label { font-size: 9.5pt; }
+.rp-page .chart text { font-size: 13px; }
+.rp-page .lg { font-size: 10.5pt; } .rp-page .stk { font-size: 10.5pt; grid-template-columns: 7.5em minmax(0, 1fr) 6.5em; } .rp-page .stk .v { white-space: nowrap; } .rp-page .gb { font-size: 10.5pt; } .rp-page .gb .bars em { font-size: 9.5pt; }
+.rp-page table { font-size: 11pt; } .rp-page th { font-size: 10pt; } .rp-page th, .rp-page td { padding: 1.4mm 2mm; }
 .rp-page svg { max-width: 100%; height: auto; }
 .rp-page .tbl { overflow: visible; }
-.rp-page .heat { min-width: 0; font-size: 8pt; } .rp-page .heat .c { padding: 1.5mm 1mm; }
+.rp-page .heat { min-width: 0; font-size: 10.5pt; } .rp-page .heat .h { font-size: 10pt; } .rp-page .heat .c { padding: 1.5mm 1mm; } .rp-page .heat .c b { font-size: 13pt; }
 .rp-cmt { white-space: pre-wrap; border: 1px solid #dddcd6; border-radius: 2mm; padding: 2.5mm 3mm; background: #fafaf8; font-size: 9.5pt; line-height: 1.65; }
 .rp-cmt:focus { outline: 2px solid #23407a; }
 /* コメントの表示（画面・訪問資料で共通） */
@@ -153,7 +155,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .cm-item.solo { grid-template-columns: minmax(0, 1fr); }
 .cm-hsub { padding: 4px 14px 6px; font-size: .84rem; color: var(--muted); background: var(--accent-soft); }
 .cm-head > span, .cm-line, .cm-sub, .cm-hsub { min-width: 0; overflow-wrap: anywhere; }
-.rp-page .cm-hsub { padding: 0 3mm 1.5mm; font-size: 8pt; }
+.rp-page .cm-hsub { padding: 0 3mm 1.5mm; font-size: 10.5pt; }
 .cm-lbl { font-weight: 700; font-size: .85rem; color: var(--fg); }
 .cm-line + .cm-line { margin-top: 2px; }
 .cm-sub { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line); font-size: .84rem; color: var(--muted); }
@@ -163,11 +165,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .cm b.neg { color: var(--neg-ink); } .cm b.pos { color: var(--pos-ink); }
 .cm [contenteditable]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 560px) { .cm-item { grid-template-columns: minmax(0, 1fr); } }
-.rp-page .cm { border-radius: 2mm; font-size: 9pt; line-height: 1.55; }
-.rp-page .cm-head { padding: 2mm 3mm; font-size: 10pt; } .rp-page .cm-sec { padding: 1.5mm 3mm .8mm; font-size: 8.5pt; }
-.rp-page .cm-item { grid-template-columns: 25mm minmax(0, 1fr); gap: 1mm 3mm; padding: 1.2mm 3mm; } .rp-page .cm-item.solo { grid-template-columns: minmax(0, 1fr); } .rp-page .cm-lbl { font-size: 8.5pt; } .rp-page .cm-sub { font-size: 8pt; }
+.rp-page .cm { border-radius: 2mm; font-size: 12pt; line-height: 1.6; }
+.rp-page .cm-head { padding: 2mm 3mm; font-size: 13pt; } .rp-page .cm-sec { padding: 1.5mm 3mm .8mm; font-size: 11pt; } .rp-page .cm-tag { font-size: 10.5pt; } .rp-page .cm-st { font-size: 10pt; }
+.rp-page .cm-item { grid-template-columns: 30mm minmax(0, 1fr); gap: 1mm 3mm; padding: 1.4mm 3mm; } .rp-page .cm-item.solo { grid-template-columns: minmax(0, 1fr); } .rp-page .cm-lbl { font-size: 11pt; } .rp-page .cm-sub { font-size: 10.5pt; }
 .rp-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4mm; }
-.rp-none { color: #5d6068; font-size: 9pt; border: 1px dashed #dddcd6; border-radius: 2mm; padding: 3mm; }
+.rp-none { color: #5d6068; font-size: 11pt; border: 1px dashed #dddcd6; border-radius: 2mm; padding: 3mm; }
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
@@ -375,7 +377,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 <div class="tip" id="tip" hidden></div>
 <div id="repWrap" hidden>
   <div id="repBar">
-    <div><b id="repTitle">訪問資料</b><div class="small muted">コメントはクリックして直接書き換えられます。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・縦、余白なし）。</div></div>
+    <div><b id="repTitle">訪問資料</b><div class="small" id="repShrink" style="color:var(--neg-ink)"></div><div class="small muted">コメントはクリックして直接書き換えられます（訪問資料は簡潔版のコメント）。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・縦、余白なし）。</div></div>
     <div class="row" style="gap:8px"><button type="button" class="btn" id="repPrint">印刷・PDF保存</button><button type="button" class="btn ghost" id="repClose">閉じる</button></div>
   </div>
   <div id="rep"></div>
@@ -1516,6 +1518,8 @@ const pct = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
 const yen = v => Math.round(v).toLocaleString('ja-JP') + '円';
 const syen = v => (v >= 0 ? '+' : '▲') + Math.round(Math.abs(v)).toLocaleString('ja-JP') + '円';
 const md = d => `${d.getMonth() + 1}/${d.getDate()}`;
+/** 1万円未満は円で（▲0万円のように見えないように） */
+const smanS = v => Math.abs(v) < 10000 ? syen(v) : sman(v);
 
 /** コメント行の配列を返す。d:true は詳細版のみ */
 function storeComment(s, ctx) {
@@ -1580,7 +1584,7 @@ function storeComment(s, ctx) {
     let w = null;
     s.grid.forEach((row, ti) => row.forEach((c, bi) => { if (c.yoyDay == null || c.dayDiff == null) return; const imp = c.dayDiff * c.d; if (!w || imp < w.imp) w = { imp, ti, bi, c }; }));
     if (w && w.imp < 0 && Math.abs(w.imp) >= Math.abs(Math.min(0, s.sales - s.pSales)) * 0.2)
-      L.push(`　前年から最も落ちているのは「${DAYTYPES[w.ti]}×${BANDS[w.bi].name}」で、1日あたり前年比${pct(w.c.yoyDay)}（1日${sman(w.c.dayDiff)}）。`);
+      L.push(`　前年から最も落ちているのは「${DAYTYPES[w.ti]}×${BANDS[w.bi].name}」で、1日あたり前年比${pct(w.c.yoyDay)}（1日${smanS(w.c.dayDiff)}）。`);
   }
   const bands = hasPY ? [] : s.byBand.filter(b => b.budget > s.budget * 0.02);
   const bNeg = bands.filter(b => b.diff < 0).sort((a, b) => a.diff - b.diff);
@@ -2360,7 +2364,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     $('cumLgFc').hidden = !f;
     $('cumNote').textContent = f ? `${R.lastDate.getMonth() + 1}/${R.lastDate.getDate()}以降の点線は、残り日の予算×ここまでの曜日区分別の予算比で見込んだ値です。${f.estDays ? `予算のない${f.estDays}日分は同じ曜日区分の平均日予算で補っています。` : ''}` : '月間の累計実績と累計予算です。';
     if (!pts.length) { $('cum').innerHTML = ''; return; }
-    const W = 640, H = 230, L = 52, Rr = 112, T = 12, B = 32;
+    const W = 640, H = 230, L = 64, Rr = 112, T = 12, B = 32;
     const mx = Math.max(...pts.map(p => Math.max(p.b, p.a || 0, p.f || 0))) * 1.05 || 1;
     const xs = d => L + (d - 1) / Math.max(1, N - 1) * (W - L - Rr), ys = v => T + (1 - v / mx) * (H - T - B);
     const line = (key, extra) => { const ps = pts.filter(p => p[key] != null); return ps.length > 1 ? `<path d="${ps.map((p, i) => `${i ? 'L' : 'M'}${xs(p.d).toFixed(1)},${ys(p[key]).toFixed(1)}`).join(' ')}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" ${extra}/>` : ''; };
@@ -2459,8 +2463,8 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
           if (!days || c.yoyDay == null || (c.sales < 1000 && c.pSales < 1000)) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
           const r = c.yoyDay, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
           const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
-          const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}（${c.d}日）|前年 ${man(c.pSales)}（${c.pd}日）|1日あたり前年比 ${pct(r)}・1日${sman(c.dayDiff)}`;
-          h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${sman(c.dayDiff).replace('万円', '万')}/日</span></div>`;
+          const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}（${c.d}日）|前年 ${man(c.pSales)}（${c.pd}日）|1日あたり前年比 ${pct(r)}・1日${smanS(c.dayDiff)}`;
+          h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${smanS(c.dayDiff).replace('万円', '万')}/日</span></div>`;
           return;
         }
         if (!days || c.budget < 1000) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
@@ -2530,12 +2534,13 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const shown = id => $(id) && !$(id).hidden;
     cur = code;
     tab = 'sales'; renderStore();
-    const S1 = { heatTitle: $('heatTitle').textContent, kpis: $('sKpis').innerHTML, cmt: commentText(s.lines, detail), cum: box('cum'), daily: box('daily'), heat: box('heat'), type: box('typeTbl'), band: box('bandTbl'), wd: box('wdTbl'),
+    // 訪問資料は文字を大きくするため、コメントは簡潔版
+    const S1 = { heatTitle: $('heatTitle').textContent, kpis: $('sKpis').innerHTML, cmt: commentText(s.lines, false), cum: box('cum'), daily: box('daily'), heat: box('heat'), type: box('typeTbl'), band: box('bandTbl'), wd: box('wdTbl'),
       discCat: shown('discCatBox') ? box('discCatTbl') : '', disc: shown('discBox') ? box('discTbl') : '' };
     tab = 'cost'; renderStore();
-    const S2 = { kpis: $('sKpis').innerHTML, cmt: commentText(s.costLines, detail), loss: shown('lossBox') ? '<div class="kpis">' + $('lossKpis').innerHTML + '</div><div class="tbl"><table>' + $('lossWdTbl').innerHTML + '</table></div>' : '',
-      inv: s.inv ? box('invBody') : '', yoy: s.menu ? box('yoyBody') : '', course: s.menu && shown('courseBox') ? `<div class="lg">${$('courseLegend2').innerHTML}</div><div class="stk">${$('courseStore').innerHTML}</div><div class="tbl"><table>${$('courseTbl').innerHTML}</table></div>` : '',
-      cost: shown('costBox') ? `<div class="kpis">${$('costKpis').innerHTML}</div><div class="tbl"><table>${$('costTbl').innerHTML}</table></div>` : '' };
+    const S2 = { kpis: $('sKpis').innerHTML, cmt: commentText(s.costLines, false), loss: shown('lossBox') ? '<div class="kpis">' + $('lossKpis').innerHTML + '</div><div class="tbl"><table>' + $('lossWdTbl').innerHTML + '</table></div>' : '',
+      inv: s.inv ? (() => { const t = document.createElement('div'); t.innerHTML = box('invBody'); t.querySelectorAll('.inv-cats').forEach(e => e.remove()); return t.innerHTML; })() : '', yoy: s.menu ? box('yoyBody') : '', course: s.menu && shown('courseBox') ? `<div class="lg">${$('courseLegend2').innerHTML}</div><div class="stk">${$('courseStore').innerHTML}</div><div class="tbl"><table>${$('courseTbl').innerHTML}</table></div>` : '',
+      cost: shown('costBox') ? `<div class="kpis">${$('costKpis').innerHTML}</div>` : '' };
     tab = keepTab; cur = keepCur;
     return { s, S1, S2 };
   }
@@ -2596,14 +2601,16 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const page = (n, title, body) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料</div><h1>${esc(s.name)}</h1></div><div style="text-align:right"><h2>${title}</h2><div class="muted">${esc(per)}</div></div></div>
       <div class="rp-body">${body}</div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 4</span></div></section>`;
     return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S1.cmt, true)}</div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
-      + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>${esc(S1.heatTitle)}</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div><div><h3>曜日別</h3>${tblw(S1.wd)}</div>`)
+      + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>${esc(S1.heatTitle)}</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div>`)
       + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S2.cmt, true)}</div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
       + page(4, '喫食量・コース・値引', `<div><h3>原価・喫食量・皿数（食べ放題）</h3>${S2.cost || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>${S2.yoy ? `<div><h3>皿数・喫食量の前年比較</h3>${S2.yoy}</div>` : ''}<div><h3>コース構成</h3>${S2.course || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>
         <div><h3>値引</h3>${S1.discCat ? tblw(S1.discCat) : S1.disc ? tblw(S1.disc) : none('値引詳細を読み込むと表示します。')}</div>`);
   }
   /** ページからあふれる分は縮小して、1店舗4ページに収める */
   function fitPages() {
-    document.querySelectorAll('#rep .rp-body').forEach(b => { b.style.zoom = ''; const h = b.clientHeight, sh = b.scrollHeight; if (sh > h + 2) b.style.zoom = Math.max(0.55, (h / sh) * 0.98).toFixed(3); });
+    const small = [];
+    document.querySelectorAll('#rep .rp-body').forEach((b, i) => { b.style.zoom = ''; const h = b.clientHeight, sh = b.scrollHeight; if (sh > h + 2) { const z = Math.max(0.55, (h / sh) * 0.98); b.style.zoom = z.toFixed(3); if (z < 0.85) small.push(`${Math.floor(i / 4) + 1}店目の${i % 4 + 1}ページ（${Math.round(z * 100)}%）`); } });
+    const n = $('repShrink'); if (n) n.textContent = small.length ? `※内容が多いため縮小したページ：${small.join('、')}。コメントを短く書き換えると大きくなります。` : '';
   }
   function openReport(codes) {
     if (!codes.length) return;
@@ -2908,9 +2915,9 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     // 大分類別
     const A = R.area.inv;
     if (I.cats.length && I.preSales) {
-      html += `<h3 style="font-size:.9rem;margin-top:12px">大分類別の仕入・原価（食材）</h3><div class="tbl"><table><thead><tr><th>大分類</th><th class="n">仕入</th><th class="n">原価</th><th class="n">原価比</th>${A && R.stores.length > 1 ? '<th class="n">平均</th><th class="n">差</th>' : ''}</tr></thead><tbody>`
+      html += `<div class="inv-cats"><h3 style="font-size:.9rem;margin-top:12px">大分類別の仕入・原価（食材）</h3><div class="tbl"><table><thead><tr><th>大分類</th><th class="n">仕入</th><th class="n">原価</th><th class="n">原価比</th>${A && R.stores.length > 1 ? '<th class="n">平均</th><th class="n">差</th>' : ''}</tr></thead><tbody>`
         + [...I.cats].sort((a, b) => b.cost - a.cost).map(c => { const r = c.cost / I.preSales, av = A && A.catRate[c.cat]; return `<tr><td>${esc(c.cat)}</td><td class="n">${yen(c.buy)}</td><td class="n">${yen(c.cost)}</td><td class="n">${pct2(r)}</td>${A && R.stores.length > 1 ? `<td class="n muted">${av != null ? pct2(av) : '－'}</td><td class="n">${av != null ? pt2(r - av) : '－'}</td>` : ''}</tr>`; }).join('')
-        + `</tbody></table></div><p class="small muted" style="margin:4px 0 0">原価比＝原価÷値引前売上高。棚卸高 ${man(I.close)}（前月 ${man(I.open)}）</p>`;
+        + `</tbody></table></div><p class="small muted" style="margin:4px 0 0">原価比＝原価÷値引前売上高。棚卸高 ${man(I.close)}（前月 ${man(I.open)}）</p></div>`;
     }
     box.innerHTML = html;
   }

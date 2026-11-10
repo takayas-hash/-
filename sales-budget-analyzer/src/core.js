@@ -1106,6 +1106,8 @@ const pct = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
 const yen = v => Math.round(v).toLocaleString('ja-JP') + '円';
 const syen = v => (v >= 0 ? '+' : '▲') + Math.round(Math.abs(v)).toLocaleString('ja-JP') + '円';
 const md = d => `${d.getMonth() + 1}/${d.getDate()}`;
+/** 1万円未満は円で（▲0万円のように見えないように） */
+const smanS = v => Math.abs(v) < 10000 ? syen(v) : sman(v);
 
 /** コメント行の配列を返す。d:true は詳細版のみ */
 function storeComment(s, ctx) {
@@ -1170,7 +1172,7 @@ function storeComment(s, ctx) {
     let w = null;
     s.grid.forEach((row, ti) => row.forEach((c, bi) => { if (c.yoyDay == null || c.dayDiff == null) return; const imp = c.dayDiff * c.d; if (!w || imp < w.imp) w = { imp, ti, bi, c }; }));
     if (w && w.imp < 0 && Math.abs(w.imp) >= Math.abs(Math.min(0, s.sales - s.pSales)) * 0.2)
-      L.push(`　前年から最も落ちているのは「${DAYTYPES[w.ti]}×${BANDS[w.bi].name}」で、1日あたり前年比${pct(w.c.yoyDay)}（1日${sman(w.c.dayDiff)}）。`);
+      L.push(`　前年から最も落ちているのは「${DAYTYPES[w.ti]}×${BANDS[w.bi].name}」で、1日あたり前年比${pct(w.c.yoyDay)}（1日${smanS(w.c.dayDiff)}）。`);
   }
   const bands = hasPY ? [] : s.byBand.filter(b => b.budget > s.budget * 0.02);
   const bNeg = bands.filter(b => b.diff < 0).sort((a, b) => a.diff - b.diff);
