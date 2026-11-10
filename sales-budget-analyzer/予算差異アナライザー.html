@@ -3357,36 +3357,49 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       if (!cfg.areas.length) { setStatus(cfg.error || '見られるエリアのフォルダがありません。フォルダの共有設定を確認してください。', true); return; }
       const sel = $('driveArea');
       sel.innerHTML = (cfg.areas.length > 1 ? `<option value="*">すべてのエリア（${cfg.areas.length}）</option>` : '') + cfg.areas.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
-      const keep = pref.get('driveArea', '');
-      if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
-      $('driveInfo').textContent = `${cfg.user ? cfg.user + ' として表示。' : ''}見られるエリア：${cfg.areas.map(a => a.name).join('、')}。${cfg.common ? '' : '※共通フォルダが見つかりません（時給データ・標準比マスタなしで分析します）。'}`;
-      setStatus('');
-      loadDrive();
+      // 最初に選ぶエリア：前回選んだエリア → 自分が編集者のエリア（1つだけのとき）→ エリアが1つならそれ。決まらなければ自動では読まない
+      const keep = pref.get('driveArea', ''), mine = cfg.areas.filter(a => a.mine);
+      let first = [...sel.options].some(o => o.value === keep) ? keep : mine.length === 1 ? mine[0].id : cfg.areas.length === 1 ? cfg.areas[0].id : '';
+      if (first) sel.value = first;
+      else { sel.insertAdjacentHTML('afterbegin', '<option value="" disabled>エリアを選んでください</option>'); sel.value = ''; }
+      $('driveInfo').textContent = `${cfg.user ? cfg.user + ' として表示。' : ''}見られるエリア：${cfg.areas.map(a => a.name + (a.mine ? '（編集者）' : '')).join('、')}。${cfg.common ? '' : '※共通フォルダが見つかりません（時給データ・標準比マスタなしで分析します）。'}`;
+      setStatus(first ? '' : 'エリアを選んでください。選ぶと読み込みます。');
+      if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
+  let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
   async function loadDrive() {
-    const v = $('driveArea').value; pref.set('driveArea', v);
+    const v = $('driveArea').value;
+    if (!v) { setStatus('エリアを選んでください。', true); return; }
+    pref.set('driveArea', v);
+    const seq = ++driveSeq, stale = () => seq !== driveSeq;
     const ids = v === '*' ? [...$('driveArea').options].map(o => o.value).filter(x => x !== '*') : [v];
     const label = $('driveArea').selectedOptions[0].textContent;
     $('driveLoad').disabled = true;
     try {
       setStatus(`「${label}」のファイルを探しています…`);
       const list = await call('listFiles', ids);
+      if (stale()) return;
       if (!list.length) throw new Error('フォルダにファイルがありません');
       // 採用・定着の履歴（各エリアの「履歴データ」フォルダ）
-      try { const h = await call('getHistory', ids); HIST = mergeHistory(null, { tc: h.tc.map(x => JSON.parse(x)), wage: h.wage.map(x => JSON.parse(x)) }); } catch (e) { console.warn(e); HIST = null; }
+      let hist = null; try { const h = await call('getHistory', ids); hist = mergeHistory(null, { tc: h.tc.map(x => JSON.parse(x)), wage: h.wage.map(x => JSON.parse(x)) }); } catch (e) { console.warn(e); }
       const files = []; let n = 0;
       const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name, { lastModified: m.updated || Date.now() }); f.__area = m.common ? null : m.folderId; return f; };
       // 4件ずつ並行して取得
       for (let i = 0; i < list.length; i += 4) {
-        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; setStatus(`共有ドライブから読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r, m); })));
+        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; if (!stale()) setStatus(`「${label}」を読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r, m); })));
+        if (stale()) return;
         files.push(...part);
       }
+      if (stale()) return;
+      HIST = hist;
       await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています。` });
-    } catch (e) { console.error(e); setStatus('読み込めませんでした：' + (e.message || e), true); }
-    $('driveLoad').disabled = false;
+    } catch (e) { console.error(e); if (!stale()) setStatus('読み込めませんでした：' + (e.message || e), true); }
+    if (!stale()) $('driveLoad').disabled = false;
   }
   $('driveLoad').addEventListener('click', loadDrive);
+  // エリアを切り替えたらすぐ読み込む（読み込み中でも切り替え可）
+  $('driveArea').addEventListener('change', loadDrive);
   if (typeof XLSX === 'undefined') setStatus('Excel読み込み用ライブラリを取得できませんでした。ネットワーク接続を確認して再読み込みしてください。', true);
 })();
 </script>
