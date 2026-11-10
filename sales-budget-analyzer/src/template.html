@@ -203,6 +203,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <div class="row">
       <div><div class="label" id="period"></div><h2 id="areaTitle">直営店全体</h2></div>
       <div class="row" style="gap:8px">
+        <select id="monthSel" class="btn" aria-label="分析する月" hidden></select>
         <select id="areaSel" class="btn ghost" aria-label="営業部" hidden></select>
         <div class="seg" role="group" aria-label="対象店舗">
           <button type="button" id="scDirect" aria-pressed="true">直営のみ</button>
@@ -485,7 +486,32 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (GAS) { [...add.tc.map(x => ['tc', x]), ...add.wage.map(x => ['wage', x])].forEach(([k, x]) => { if (x.area) call('saveHistory', x.area, k, x.ym, JSON.stringify(x)).catch(e => console.warn('履歴を保存できませんでした（フォルダの編集権限がない場合）', e)); }); }
     else store.putK('history', HIST).catch(() => {});
   }
-  let S = null; // 保存中のデータ {cur, prev, pays, hourly, savedAt}
+  let STORE = null; // 保存データ {months:{月:{cur, prev, menu…}}, wage, stdBook, stdLane, active}
+  const kYM = k => `${Math.floor(k / 12)}年${k % 12 + 1}月`;
+  /** 表示する月のデータ（時給・標準比マスタは全部の月で共通） */
+  const viewOf = (ST, k) => ({ ...ST.months[k], wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane, savedAt: ST.savedAt, v: ST.v, k });
+  /** 以前の形式（1か月分だけ）の保存データを月ごとの形に直す */
+  function toStore(v) {
+    if (!v) return null;
+    if (v.months) return v;
+    if (!v.cur) return null;
+    const k = mKey(v.cur.rows), m = {};
+    ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (v[x]) m[x] = v[x]; });
+    return { months: { [k]: m }, wage: v.wage, stdBook: v.stdBook, stdLane: v.stdLane, savedAt: v.savedAt, v: v.v, active: k };
+  }
+  async function reparseStore(ST) {
+    const out = { ...ST, months: {} };
+    for (const k of Object.keys(ST.months)) {
+      const m = ST.months[k];
+      const N = await reparse({ ...m, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane });
+      if (!N) return null;
+      const keep = {}; ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (N[x]) keep[x] = N[x]; });
+      out.months[k] = keep; out.wage = N.wage; out.stdBook = N.stdBook; out.stdLane = N.stdLane;
+    }
+    out.v = DATA_VERSION;
+    return out;
+  }
+  let S = null; // 表示中の月のデータ {cur, prev, pays, hourly, savedAt}
   // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
   const DATA_VERSION = 3;
   async function reparse(v) {
@@ -516,8 +542,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function renderSaved() {
     const box = $('saved');
     if (!S || !S.cur) { box.hidden = true; return; }
+    if (S.k == null) S.k = mKey(S.cur.rows);
     const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
-    $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
+    const others = STORE ? Object.keys(STORE.months).map(Number).filter(k => k !== S.k).sort((a, b) => b - a) : [];
+    $('savedList').innerHTML = `<li><span class="label">表示中の月</span> <b>${kYM(S.k)}</b>${others.length ? `<span class="muted">　ほかに保存している月：${others.map(k => kYM(k) + (STORE.months[k].cur ? '' : '（売上集計表なし）')).join('・')}</span>` : ''}</li>` + item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
       + (S.stdBook ? `<li><span class="label">標準比マスタ（通常店）</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（通常店）</span> なし</li>')
       + (S.stdLane ? `<li><span class="label">標準比マスタ（特急レーン店）</span> ${esc(S.stdLane.name)} <span class="muted">レーン店${Object.values(S.stdLane.data.info).filter(x => x.perCust != null && /特急|レーン/.test(x.flag || '')).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（特急レーン店）</span> なし</li>')
       + (HIST && Object.keys(HIST.tc).length ? `<li><span class="label">採用・定着の履歴</span> タイムカード ${[...new Set(Object.values(HIST.tc).map(x => x.ym))].sort().map(ymTxt).join('・')}<span class="muted">／時給データ ${[...new Set(Object.values(HIST.wage).map(x => x.ym))].sort().map(ymTxt).join('・') || 'なし'}</span></li>` : '')
@@ -528,7 +556,15 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     $('clearAsk').hidden = true; $('clearBtn').hidden = !!GAS;
     box.hidden = false;
   }
+  function syncMonthSel() {
+    const sel = $('monthSel');
+    const ks = STORE ? Object.keys(STORE.months).map(Number).filter(k => STORE.months[k].cur).sort((a, b) => b - a) : [];
+    sel.hidden = ks.length < 2;
+    sel.innerHTML = ks.map(k => { const rows = STORE.months[k].cur.rows, d = maxD(rows.filter(r => r.sales > 0)) || maxD(rows); const full = d && d.getDate() === new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      return `<option value="${k}"${k === S.k ? ' selected' : ''}>分析する月：${kYM(k)}（${full ? '確定' : `途中経過・${d ? d.getMonth() + 1 + '/' + d.getDate() : ''}まで`}）</option>`; }).join('');
+  }
   function runSaved() {
+    syncMonthSel();
     run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
@@ -577,70 +613,47 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       got = dropDup(got, notes0);
       const gotRaw = got;
       got = mergeSame(got);
-      const N = S && !opt.fresh ? { ...S } : {};
       const notes = notes0;
-      const book = got.find(g => g.cur);
-      const raws = got.filter(g => g.raw).sort((a, b) => mKey(b.raw) - mKey(a.raw));
-      if (book) {
-        N.cur = { name: book.name, rows: book.cur, file: book.file };
-        N.prev = book.prev.length ? { name: book.name + '（前年シート）', rows: book.prev, file: book.file, sheet: 'prev' } : null;
-      } else if (raws.length >= 2) {
-        // いちばん新しい月を当年、その12か月前を前年とする
-        const p = raws.find(r => mKey(r.raw) === mKey(raws[0].raw) - 12);
-        N.cur = { name: raws[0].name, rows: raws[0].raw, file: raws[0].file };
-        if (p) N.prev = { name: p.name, rows: p.raw, file: p.file };
-        if (raws.length > (p ? 2 : 1)) notes.push(`売上集計表のうち当年・前年同月以外の${raws.length - (p ? 2 : 1)}件は使っていません`);
-      } else if (raws.length === 1) {
-        const r = raws[0];
-        // 保存中の当年より古い月なら前年分、それ以外は当年分として差し替え
-        if (N.cur && mKey(r.raw) < mKey(N.cur.rows)) N.prev = { name: r.name, rows: r.raw, file: r.file };
-        else N.cur = { name: r.name, rows: r.raw, file: r.file };
-      }
-      if (!N.cur) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
-      // 原価管理表：ファイルごとに保持し、同じ店舗は新しいファイルで差し替え
-      for (const g of got.filter(g => g.inv)) {
-        const codes = g.inv.map(r => r.code);
-        N.invFiles = (N.invFiles || []).map(x => ({ ...x, rows: x.rows.filter(r => !codes.includes(r.code)) })).filter(x => x.rows.length);
-        N.invFiles.push({ name: g.name, rows: g.inv, file: g.file });
-      }
-      // 食材別の理論差データは使わない
-      delete N.usage;
-      if (got.some(g => g.usage)) notes.push('食材別の理論差データは分析に使わないため読み込みませんでした');
-      const pays = got.filter(g => g.pays), hourly = got.filter(g => g.hourly);
-      // メニュー別も日付（期間の終了日）で当年分・前年分を判別
-      for (const g of got.filter(g => g.menu)) {
-        if (mKey(g.menu) != null && mKey(g.menu) < mKey(N.cur.rows)) N.pMenu = { name: g.name, rows: g.menu, file: g.file };
-        else N.menu = { name: g.name, rows: g.menu, file: g.file };
-      }
-      // 値引詳細は日付で当年分・前年分を判別（当年より古い月なら前年分）
-      for (const g of pays) {
-        const k = mKey(g.pays);
-        if (k != null && k < mKey(N.cur.rows)) N.pPays = { name: g.name, rows: g.pays, file: g.file };
-        else N.pays = { name: g.name, rows: g.pays, file: g.file };
-      }
-      // 勤怠：タイムカード・勤務スケジュールは当月分、時給データ・標準比マスタは最新のファイルで差し替え（月が変わっても残す）
-      // 当月以外のタイムカード・勤務スケジュールは採用・定着の履歴にだけ使い、当月分は置き換えない
-      const ck0 = mKey(N.cur.rows), pickM = xs => xs.find(g => mKey(g.tc || g.ws) === ck0);
-      const tcG = pickM(got.filter(g => g.tc)), wsG = pickM(got.filter(g => g.ws));
-      if (tcG) N.tc = { name: tcG.name, rows: tcG.tc, file: tcG.file };
-      if (wsG) N.ws = { name: wsG.name, rows: wsG.ws, file: wsG.file };
+      // ===== 月ごとに振り分ける（前月の確定分析と当月の途中経過を両方持てる） =====
+      const ST = STORE && !opt.fresh ? { ...STORE, months: { ...STORE.months } } : { months: {} };
+      const kOf = g => g.cur ? mKey(g.cur) : g.raw ? mKey(g.raw) : g.menu ? mKey(g.menu) : g.pays ? mKey(g.pays) : g.tc ? mKey(g.tc) : g.ws ? mKey(g.ws) : g.hourly ? mKey(g.hourly) : g.inv ? mKey(g.inv) : null;
+      // 当年の月＝売上集計表の月。その12か月前の売上集計表は、その月の「前年」として扱う
+      const rawKs = got.filter(g => g.raw).map(kOf);
+      const savedCur = Object.keys(ST.months).map(Number).filter(k => ST.months[k].cur);
+      const isPrevRaw = k => rawKs.includes(k + 12) || savedCur.includes(k + 12);
+      const curKs = new Set([...savedCur, ...got.filter(g => g.cur).map(kOf), ...rawKs.filter(k => !isPrevRaw(k))]);
+      const touched = [];
+      const M = k => { touched.push(k); return (ST.months[k] = ST.months[k] ? { ...ST.months[k] } : {}); };
+      const loadedCur = [];
       for (const g of got) {
-        if (g.wage && !(opt.fresh && N.wage)) N.wage = { name: g.name, rows: g.wage, file: g.file };
-        if (g.std && g.std.kind === 'lane') { if (!(opt.fresh && N.stdLane)) N.stdLane = { name: g.name, data: g.std, file: g.file }; }
-        else if (g.std && !(opt.fresh && N.stdBook)) N.stdBook = { name: g.name, data: g.std, file: g.file };
+        const k = kOf(g);
+        if (g.cur) { const m = M(k); m.cur = { name: g.name, rows: g.cur, file: g.file }; m.prev = g.prev.length ? { name: g.name + '（前年シート）', rows: g.prev, file: g.file, sheet: 'prev' } : (m.prev || null); loadedCur.push(k); }
+        else if (g.raw) { if (isPrevRaw(k)) M(k + 12).prev = { name: g.name, rows: g.raw, file: g.file }; else { M(k).cur = { name: g.name, rows: g.raw, file: g.file }; loadedCur.push(k); } }
+        else if (g.menu) { if (curKs.has(k + 12)) M(k + 12).pMenu = { name: g.name, rows: g.menu, file: g.file }; else M(k).menu = { name: g.name, rows: g.menu, file: g.file }; }
+        else if (g.pays) { if (curKs.has(k + 12)) M(k + 12).pPays = { name: g.name, rows: g.pays, file: g.file }; else M(k).pays = { name: g.name, rows: g.pays, file: g.file }; }
+        else if (g.inv) { const m = M(k), codes = g.inv.map(r => r.code); m.invFiles = (m.invFiles || []).map(x => ({ ...x, rows: x.rows.filter(r => !codes.includes(r.code)) })).filter(x => x.rows.length); m.invFiles.push({ name: g.name, rows: g.inv, file: g.file }); }
+        // タイムカード・勤務スケジュールは、売上集計表のある月だけ保存（ほかの月は採用・定着の履歴にだけ使う）
+        else if (g.tc) { if (curKs.has(k)) M(k).tc = { name: g.name, rows: g.tc, file: g.file }; }
+        else if (g.ws) { if (curKs.has(k)) M(k).ws = { name: g.name, rows: g.ws, file: g.file }; }
+        else if (g.hourly) { if (curKs.has(k)) M(k).hourly = { name: g.name, rows: g.hourly, file: g.file }; }
+        // 時給データ・標準比マスタは全部の月で共通（新しいファイルで差し替え）
+        else if (g.wage) { if (!(opt.fresh && ST.wage)) ST.wage = { name: g.name, rows: g.wage, file: g.file }; }
+        else if (g.std) { if (g.std.kind === 'lane') { if (!(opt.fresh && ST.stdLane)) ST.stdLane = { name: g.name, data: g.std, file: g.file }; } else if (!(opt.fresh && ST.stdBook)) ST.stdBook = { name: g.name, data: g.std, file: g.file }; }
       }
-      if (hourly.length) N.hourly = { name: hourly[0].name, rows: hourly[0].hourly, file: hourly[0].file };
-      // 月が合わない保存データは外す
-      const ck = mKey(N.cur.rows);
-      if (N.prev && mKey(N.prev.rows) !== ck - 12) { notes.push(`前年データ（${fmtYM(N.prev.rows)}）が当年の前年同月ではないため外しました`); N.prev = null; }
-      if (N.pays && mKey(N.pays.rows) !== ck) { notes.push(`値引詳細（${fmtYM(N.pays.rows)}）が当年と別の月のため外しました`); N.pays = null; }
-      if (N.menu && mKey(N.menu.rows) !== ck) { notes.push(`メニュー別（${fmtYM(N.menu.rows)}）が当年と別の月のため外しました`); N.menu = null; }
-      if (N.pMenu && mKey(N.pMenu.rows) !== ck - 12) { notes.push(`前年のメニュー別（${fmtYM(N.pMenu.rows)}）が前年同月ではないため外しました`); N.pMenu = null; }
-      if (N.pPays && mKey(N.pPays.rows) !== ck - 12) { notes.push(`前年の値引詳細（${fmtYM(N.pPays.rows)}）が前年同月ではないため外しました`); N.pPays = null; }
-      if (N.hourly && mKey(N.hourly.rows) !== ck) N.hourly = null;
-      if (N.tc && mKey(N.tc.rows) !== ck) { notes.push(`タイムカード（${fmtYM(N.tc.rows)}）が当年と別の月のため外しました`); N.tc = null; }
-      if (N.ws && mKey(N.ws.rows) !== ck) { notes.push(`勤務スケジュール（${fmtYM(N.ws.rows)}）が当年と別の月のため外しました`); N.ws = null; }
-      if (N.invFiles) N.invFiles = N.invFiles.filter(x => { const ok = mKey(x.rows) === ck; if (!ok) notes.push(`原価管理表（${fmtYM(x.rows)}）が当年と別の月のため外しました`); return ok; });
+      if (got.some(g => g.usage)) notes.push('食材別の理論差データは分析に使わないため読み込みませんでした');
+      // 新しい4か月分だけ残す
+      Object.keys(ST.months).map(Number).sort((a, b) => b - a).slice(4).forEach(k => { delete ST.months[k]; });
+      const withCur = Object.keys(ST.months).map(Number).filter(k => ST.months[k].cur).sort((a, b) => b - a);
+      if (!withCur.length) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
+      // 表示する月：今回入れた売上集計表の月 → 今回入れたファイルの月 → 前回の月
+      const tCur = touched.filter(k => withCur.includes(k));
+      ST.active = loadedCur.length ? Math.max(...loadedCur) : tCur.length ? Math.max(...tCur) : withCur.includes(ST.active) ? ST.active : withCur[0];
+      const pend = Object.keys(ST.months).map(Number).filter(k => !ST.months[k].cur);
+      if (pend.length) notes.push(`${pend.map(k => kYM(k)).join('・')}は売上集計表がまだないため、入れたファイルは保存だけしています（その月の売上集計表を入れると分析に使います）`);
+      if (withCur.length > 1) notes.push(`分析する月を「${kYM(ST.active)}」にしました。ほかの月（${withCur.filter(k => k !== ST.active).map(kYM).join('・')}）は上の「分析する月」で切り替えられます`);
+      ST.savedAt = Date.now(); ST.v = DATA_VERSION;
+      STORE = ST;
+      const N = viewOf(ST, ST.active);
       // 採用・定着：タイムカード（読み込んだすべての月）と時給データを履歴に積み上げる
       const add = { tc: [], wage: [] };
       gotRaw.filter(g => g.tc).forEach(g => { const x = tcSummary(g.tc); if (x) { if (g.area) x.area = g.area; add.tc.push(x); } });
@@ -651,12 +664,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       }
       if (add.tc.length || add.wage.length) { HIST = mergeHistory(HIST, add); saveHist(add); }
       if (add.tc.length > 1) notes.push(`タイムカード${add.tc.length}か月分を採用・定着の履歴に積み上げました`);
-      N.savedAt = Date.now();
-      N.v = DATA_VERSION;
       S = N;
       runSaved();
       let saved = true;
-      if (opt.nosave) saved = null; else try { await store.put(S); } catch (e) { saved = false; }
+      if (opt.nosave) saved = null; else try { await store.put(STORE); } catch (e) { saved = false; }
       setStatus(`${files.length}ファイルを読み込みました（${R.stores.length}店舗）。` + (saved === null ? (opt.done || '') : saved ? 'このブラウザに保存したので、次回はファイルなしで表示されます。' : '※この環境ではブラウザに保存できませんでした。') + (notes.length ? '　' + notes.join('。') + '。' : ''));
     } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
   }
@@ -745,11 +756,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const a = R.area;
     $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor'); $('tabTenure').setAttribute('aria-selected', tab === 'tenure');
     document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; });
+    $('period').textContent = `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
     if (tab === 'cost') { renderCost(); return; }
     if (tab === 'labor') { renderLabor(); return; }
     if (tab === 'tenure') { renderTenure(); return; }
     $('storeTblTitle').textContent = '店舗別 予算差と要因';
-    $('period').textContent = `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
     const okN = R.stores.filter(s => s.diff >= 0).length;
     $('areaTitle').textContent = `${R.titleLabel}（${R.stores.length}店）`;
     $('kpis').innerHTML = kpi('売上', man(a.sales), `予算 ${man(a.budget)}`) + kpi('予算比', pct(a.rate), `差額 ${sman(a.diff)}`, cls(a.diff))
@@ -1321,6 +1332,12 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function rerun() { try { if (last) run(...last); } catch (e) { setStatus('切り替えできませんでした：' + e.message, true); } }
   function setScope(sc) { scope = sc; pref.set('scope', sc); rerun(); }
   for (const k in SC_BTN) $(SC_BTN[k]).addEventListener('click', () => setScope(k));
+  $('monthSel').addEventListener('change', e => {
+    if (!STORE) return;
+    STORE.active = +e.target.value; S = viewOf(STORE, STORE.active);
+    try { runSaved(); setStatus(`${kYM(STORE.active)}を表示しています。`); } catch (err) { console.error(err); setStatus('切り替えできませんでした：' + err.message, true); }
+    if (!GAS) store.put(STORE).catch(() => {});
+  });
   $('areaSel').addEventListener('change', e => { areaSel = e.target.value; pref.set('area', areaSel); rerun(); });
   $('mShort').addEventListener('click', () => setMode(false));
   $('mLong').addEventListener('click', () => setMode(true));
@@ -1348,7 +1365,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('clearNo').addEventListener('click', () => { $('clearAsk').hidden = true; $('clearBtn').hidden = false; });
   $('clearYes').addEventListener('click', async () => {
     try { await store.clear(); } catch (e) { /* なし */ }
-    S = null; HIST = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
+    S = null; STORE = null; HIST = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
     setStatus('保存データを削除しました。');
   });
 
@@ -1357,15 +1374,18 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
   if (GAS) startDrive();
-  else store.getK('history').then(h => { HIST = h || null; return store.get(); }).then(async v => {
-    if (!v || !v.cur) return;
+  else store.getK('history').then(h => { HIST = h || null; return store.get(); }).then(async v0 => {
+    let v = toStore(v0);
+    if (!v || !Object.values(v.months).some(m => m.cur)) return;
     let msg = '前回保存したデータを表示しています。新しいファイルを入れると更新されます。', err = false;
     if (v.v !== DATA_VERSION) {
-      const N = await reparse(v).catch(e => { console.error(e); return null; });
-      if (N) { v = N; try { await store.put(v); } catch (e) { /* 保存できなくても表示は続ける */ } msg = 'ツールの更新に合わせて、保存してあるファイルを読み直しました。'; }
+      const N = await reparseStore(v).catch(e => { console.error(e); return null; });
+      if (N) { v = N; msg = 'ツールの更新に合わせて、保存してあるファイルを読み直しました。'; }
       else { msg = '以前の版で保存したデータのため、原価・ロスなど一部の分析が表示されません。お手数ですが、売上集計表などのファイルをもう一度読み込んでください（次回からはツールを更新しても自動で読み直します）。'; err = true; }
     }
-    S = v;
+    if (!v.months[v.active] || !v.months[v.active].cur) v.active = Math.max(...Object.keys(v.months).map(Number).filter(k => v.months[k].cur));
+    STORE = v; try { await store.put(STORE); } catch (e) { /* 保存できなくても表示は続ける */ }
+    S = viewOf(STORE, STORE.active);
     try { runSaved(); setStatus(msg, err); }
     catch (e) { console.error(e); setStatus('保存データを表示できませんでした：' + e.message, true); }
   });

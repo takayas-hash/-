@@ -25,6 +25,9 @@
   - ローカルでの確認は google.script.run をまねたモックで行った（Playwright の exposeFunction）。本番のデプロイは利用者が SETUP.md の手順で行う
 - `src/build.py`：HTMLを作る。1ファイル版は `npm i xlsx@0.18.5` の `dist/xlsx.full.min.js` のパスを引数で渡す
 - 保存データの形式を変えたら template.html の `DATA_VERSION` を上げる（元ファイルから自動で読み直す）
+- 保存は月ごと：STORE = { months: { 月の通し番号(年×12＋月-1): { cur, prev, menu, pMenu, pays, pPays, invFiles, tc, ws, hourly } }, wage, stdBook, stdLane, active }。表示中の月は viewOf(STORE, k) で以前と同じ平らな形（S）にして使う。以前の1か月だけの形は toStore で変換
+  - 振り分け（handleFiles）：売上集計表の月を当年の月とし、12か月前の売上集計表・メニュー別・値引詳細はその月の前年分。タイムカード・勤務スケジュールは売上集計表のある月だけ保存（ほかの月は履歴のみ）。新しい4か月分まで
+  - 2026/11/10 の不具合：11月（当日書き出し）と10月のファイルを一緒に入れると、当年＝最新月（11月）になり10月のABC・前年・原価管理表が「月が合わない」で外れていた。月ごとの保存にして解消
 
 ## 読み込むデータ（見出し名で判別。列位置には依存しない）
 | データ | 判別に使う見出し | 主な用途 |
