@@ -517,7 +517,7 @@ function analyzeLabor(tc, ws, wage, opt) {
     const s = {
       code, name, cut, N, days, people: list,
       mins: sum(past, d => d.mins), staffMins: sum(past, d => d.staffMins), cost: sum(past, d => d.cost),
-      planMins: sum(fut, d => d.mins), planCost: sum(fut, d => d.cost), estDays: fut.filter(d => d.est).length,
+      planMins: sum(fut, d => d.mins), planStaffMins: sum(fut, d => d.staffMins), planCost: sum(fut, d => d.cost), estDays: fut.filter(d => d.est).length,
       avgWage: avgW, noWage: noWage.size, wageless: !avgW,
     };
     s.landMins = s.mins + s.planMins; s.landCost = s.cost + s.planCost;
@@ -526,7 +526,7 @@ function analyzeLabor(tc, ws, wage, opt) {
   }).filter(s => s.landMins > 0).sort((a, b) => a.code.localeCompare(b.code));
   const T = k => sum(stores, s => s[k]);
   const wd = stores.filter(s => !s.wageless), TW = k => sum(wd, s => s[k]);
-  const area = { mins: T('mins'), staffMins: T('staffMins'), cost: TW('cost'), planMins: T('planMins'), planCost: TW('planCost'), landMins: T('landMins'), landCost: TW('landCost'), wageless: stores.length - wd.length, wagelessNames: stores.filter(s => s.wageless).map(s => s.name),
+  const area = { mins: T('mins'), staffMins: T('staffMins'), planStaffMins: T('planStaffMins'), cost: TW('cost'), planMins: T('planMins'), planCost: TW('planCost'), landMins: T('landMins'), landCost: TW('landCost'), wageless: stores.length - wd.length, wagelessNames: stores.filter(s => s.wageless).map(s => s.name),
     estDays: Math.max(0, ...stores.map(s => s.estDays)), noWage: TW('noWage'), alerts: stores.flatMap(s => s.alerts.map(p => ({ ...p, store: s.name }))).sort((a, b) => b.totalOt - a.totalOt), cut, N };
   return { stores, area, cut, N, y, mo, hasSchedule: ws.length > 0, hasTimecard: tc.length > 0, hasWage: wage.length > 0 };
 }
@@ -537,13 +537,14 @@ function laborLines(s, L, f, sales, ctx) {
   const out = [], push = (t, d) => out.push({ t, d: !!d });
   const cutTxt = L.cut ? `${L.mo + 1}/${L.cut}時点` : '実績なし';
   const land = L.cut < L.N;
-  push(`【労働時間】実績${hrs0(s.mins)}（${cutTxt}。うち社員${hrs0(s.staffMins)}）${land ? `、着地見込み${hrs0(s.landMins)}（残り${L.N - L.cut}日の勤務予定${hrs0(s.planMins)}）` : ''}。`);
+  if (!L.cut) push(`【労働時間】勤務予定${hrs0(s.landMins)}（${L.mo + 1}月の勤務スケジュール。うち社員${hrs0((s.staffMins || 0) + (s.planStaffMins || 0))}）。`);
+  else push(`【労働時間】実績${hrs0(s.mins)}（${cutTxt}。うち社員${hrs0(s.staffMins)}）${land ? `、着地見込み${hrs0(s.landMins)}（残り${L.N - L.cut}日の勤務予定${hrs0(s.planMins)}）` : ''}。`);
   if (s.estDays) push(`　※残り${s.estDays}日は勤務予定が未作成（予定が同じ曜日区分の実績平均の半分未満）のため、実績平均で補っています。`);
   if (L.hasWage && s.wageless === true) push('・雑給：時給データにこの店舗のパートがいないため計算できません（時給データの店舗を確認してください）。');
   else if (L.hasWage) {
     const landSales = f ? f.landing : null;
-    let t = `・雑給（パート）：実績${man(s.cost)}${land ? `、着地見込み${man(s.landCost)}` : ''}`;
-    if (sales) t += `。雑給率${pct(s.cost / sales)}（実績）${landSales ? `／${pct(s.landCost / landSales)}（売上・雑給とも着地見込み）` : ''}`;
+    let t = !L.cut ? `・雑給（パート）：勤務予定どおりなら${man(s.landCost)}${landSales ? `。雑給率${pct(s.landCost / landSales)}（売上見込み比）` : ''}` : `・雑給（パート）：実績${man(s.cost)}${land ? `、着地見込み${man(s.landCost)}` : ''}`;
+    if (sales && L.cut) t += `。雑給率${pct(s.cost / sales)}（実績）${landSales ? `／${pct(s.landCost / landSales)}（売上・雑給とも着地見込み）` : ''}`;
     push(t + `。割増は残業25%・深夜25%（重なる時間は50%）で計算${s.wageless ? `（時給データのない${s.wagelessNames.join('・')}を除く）` : ''}。`);
     if (s.noWage) push(`　時給データにない${s.noWage}名（新規入社など）は店舗のパート平均時給${s.avgWage ? yen(s.avgWage) : ''}で計算しています。`, true);
   }
@@ -659,12 +660,14 @@ function stdLines(x, ctx) {
   if (!x) return [];
   if (x.missing) return [{ t: x.need === 'lane' ? '・標準比：特急レーン店のため、レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '・標準比：通常店用の標準比マスタを読み込むと計算します。' : '・標準比：卓数がわからないため計算できません（標準比マスタに店舗がないか、店舗設定で卓数を入れてください）。', d: false }];
   const out = [];
-  let t = `・標準比${x.lane ? '（特急レーン店）' : ''}：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
-  if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は客数見込み×勤務予定）`;
+  let t;
+  if (!x.cutHours) t = `・標準比${x.lane ? '（特急レーン店）' : ''}：勤務予定どおりなら${p0(x.landRate)}（客数見込み${Math.round(x.landCust).toLocaleString('ja-JP')}人×勤務予定${hrs0(x.landHours * 60)}、人時来客${x.landHours ? (x.landCust / x.landHours).toFixed(2) : '－'}）`;
+  else { t = `・標準比${x.lane ? '（特急レーン店）' : ''}：実績${p0(x.cutRate)}（${ctx.cutTxt}、人時来客${x.cutHours ? (x.cutCust / x.cutHours).toFixed(2) : '－'}）`;
+    if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は客数見込み×勤務予定）`; }
   if (x.budgetRate != null) t += `。予算標準比${p0(x.budgetRate)}`;
   out.push({ t: t + '。', d: false });
   if (x.budgetRate != null && x.remDays) {
-    if (x.over > 0) out.push({ t: `　予算標準比に収めるには、残り${x.remDays}日で${hrs0(x.over * 60)}（1日${(x.over / x.remDays).toFixed(1)}h）の削減が必要${x.overCost ? `（雑給換算で約${man(x.overCost)}）` : ''}。`, d: false });
+    if (x.over > 0) out.push({ t: `　予算標準比に収めるには、${x.cutHours ? '残り' : ''}${x.remDays}日で${hrs0(x.over * 60)}（1日${(x.over / x.remDays).toFixed(1)}h）の削減が必要${x.overCost ? `（雑給換算で約${man(x.overCost)}）` : ''}。`, d: false });
     else out.push({ t: `　勤務予定どおりなら予算標準比内（余裕${hrs0(-x.over * 60)}）。`, d: false });
   }
   const bad = x.weeks.filter(w => w.n >= 3 && w.rate != null && w.rate >= 1.05).sort((a, b) => b.rate - a.rate)[0];
@@ -1106,12 +1109,14 @@ function analyze(curRows, prevRows, extra) {
     stores.forEach(s => {
       s.labor = labor.stores.find(x => x.code === s.code) || null;
       s.std = std && s.labor ? analyzeStd(s, s.labor, labor, std, extra.stdSettings, lastDate.getMonth() === labor.mo ? lastDate.getDate() : 0) : null;
-      s.laborLines = s.labor ? laborLines(s.labor, labor, s.fc, sameCut ? s.sales : null, ctx).concat(stdLines(s.std, { cutTxt })) : [{ t: '勤怠データにこの店舗がありません。', d: false }];
+      // 予測月（実績のない月）：客数・売上は見込み。雑給率は売上見込みで
+      if (extra.planMode && s.std && s.std.days) s.std.days.forEach(d => { d.custEst = true; });
+      s.laborLines = s.labor ? laborLines(s.labor, labor, extra.planMode ? { landing: s.sales } : s.fc, sameCut ? s.sales : null, ctx).concat(stdLines(s.std, { cutTxt })) : [{ t: '勤怠データにこの店舗がありません。', d: false }];
     });
     const a = labor.area, fs = stores.filter(s => s.labor);
     area.labor = a;
     const full = fs.length === stores.length && !a.wageless;
-    area.laborLines = laborLines(a, labor, full ? area.fc : null, sameCut && full ? area.sales : null, ctx);
+    area.laborLines = laborLines(a, labor, full ? (extra.planMode ? { landing: area.sales } : area.fc) : null, sameCut && full ? area.sales : null, ctx);
     // 標準比（対象店の合計）
     const ws = stores.filter(s => s.std && !s.std.missing);
     if (ws.length) {
@@ -1122,7 +1127,7 @@ function analyze(curRows, prevRows, extra) {
       A.over = wb.length ? sum(wb, s => s.std.over) : null;
       area.std = A;
       const rk = [...ws].sort((x, y) => (y.std.landRate - (y.std.budgetRate || 0)) - (x.std.landRate - (x.std.budgetRate || 0)));
-      area.laborLines.push({ t: `・標準比：実績${p0(A.cutRate)}（${cutTxt}）${labor.cut < labor.N ? `、着地見込み${p0(A.landRate)}` : ''}${A.budgetRate != null ? `（予算標準比${p0(A.budgetRate)}）` : ''}。${ws.length > 1 ? `予算標準比を最も上回る見込みの店：${rk.filter(s => s.std.budgetRate != null && s.std.over > 0).slice(0, 3).map(s => `${s.name}${p0(s.std.landRate)}（予算${p0(s.std.budgetRate)}、${hrs0(s.std.over * 60)}超過）`).join('、') || 'なし'}。` : ''}`, d: false });
+      area.laborLines.push({ t: `・標準比：${labor.cut ? `実績${p0(A.cutRate)}（${cutTxt}）${labor.cut < labor.N ? `、着地見込み${p0(A.landRate)}` : ''}` : `勤務予定どおりなら${p0(A.landRate)}`}${A.budgetRate != null ? `（予算標準比${p0(A.budgetRate)}）` : ''}。${ws.length > 1 ? `予算標準比を最も上回る見込みの店：${rk.filter(s => s.std.budgetRate != null && s.std.over > 0).slice(0, 3).map(s => `${s.name}${p0(s.std.landRate)}（予算${p0(s.std.budgetRate)}、${hrs0(s.std.over * 60)}超過）`).join('、') || 'なし'}。` : ''}`, d: false });
       if (ws.some(s => !s.std.custom)) area.laborLines.push({ t: `　※店舗設定が初期値のままの店：${ws.filter(s => !s.std.custom).map(s => s.name).join('、')}。`, d: true });
     } else if (std) area.laborLines.push({ t: '・標準比：標準比マスタに対象店の卓数がありません。', d: false });
     if (labor.hasWage && fs.length > 1) {
