@@ -129,3 +129,35 @@ function saveHistory(areaId, kind, ym, json) {
   else folder.createFile(name, json, MimeType.PLAIN_TEXT);
   return true;
 }
+
+/* ===== 初期設定・確認（エディタで1回だけ実行する） ===== */
+// 作るエリアのフォルダ名（必要に応じて書き換えてから setupFolders を実行）
+const AREA_FOLDERS = ['髙谷エリア'];
+
+/** ROOT_FOLDER_ID のフォルダの下に「共通」「過去」とエリアのフォルダを作る（すでにあるものは作らない） */
+function setupFolders() {
+  const root = rootFolder_();
+  [COMMON_NAME, '過去'].concat(AREA_FOLDERS).forEach(name => {
+    if (root.getFoldersByName(name).hasNext()) { Logger.log('あり：' + name); return; }
+    root.createFolder(name); Logger.log('作成：' + name);
+  });
+  Logger.log('完了。各エリアのフォルダをAMに「編集者」、ブロック長に「閲覧者」以上で共有してください。「共通」は時給データがあるためAM以上だけに共有してください。');
+}
+
+/** 設定の確認：フォルダが見えるか、各フォルダのファイル数、店舗設定の数をログに出す */
+function checkSetup() {
+  let root;
+  try { root = rootFolder_(); } catch (e) { Logger.log('NG：' + e.message); return; }
+  Logger.log('OK：ルートフォルダ「' + root.getName() + '」');
+  const cfg = getConfig();
+  Logger.log('実行ユーザー：' + (cfg.user || '（取得できません）'));
+  Logger.log('共通フォルダ：' + (cfg.common ? 'あり' : 'なし（「共通」という名前のフォルダを作ってください）'));
+  if (!cfg.areas.length) Logger.log('NG：エリアのフォルダがありません');
+  cfg.areas.forEach(a => {
+    const files = listFiles([a.id]).filter(f => !f.common);
+    Logger.log('エリア「' + a.name + '」：ファイル ' + files.length + '件' + (files.length ? '（' + files.slice(0, 5).map(f => f.name).join('、') + (files.length > 5 ? ' ほか' : '') + '）' : ''));
+  });
+  const common = cfg.common ? listFiles([]).filter(f => f.common) : [];
+  Logger.log('共通のファイル：' + common.length + '件' + (common.length ? '（' + common.map(f => f.name).join('、') + '）' : ''));
+  Logger.log('標準比の店舗設定：' + Object.keys(cfg.stdSettings).length + '店');
+}
