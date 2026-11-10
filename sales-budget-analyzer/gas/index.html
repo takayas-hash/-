@@ -2575,7 +2575,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const tblw = h => h ? `<div class="tbl"><table>${h}</table></div>` : '';
     const page = (n, title, body) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料</div><h1>${esc(s.name)}</h1></div><div style="text-align:right"><h2>${title}</h2><div class="muted">${esc(per)}</div></div></div>
       <div class="rp-body">${body}</div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 4</span></div></section>`;
-    return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S1.cmt, true)}</div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
+    return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S1.cmt, true)}</div>`)
       + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>${esc(S1.heatTitle)}</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div>`)
       + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S2.cmt, true)}</div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
       + page(4, '喫食量・コース・値引', `<div><h3>原価・喫食量・皿数（食べ放題）</h3>${S2.cost || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>${S2.yoy ? `<div><h3>皿数・喫食量の前年比較</h3>${S2.yoy}</div>` : ''}<div><h3>コース構成</h3>${S2.course || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>
