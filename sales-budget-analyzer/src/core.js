@@ -372,7 +372,7 @@ function analyzeStore(cur, prev, monthDays) {
     cost, pCost, costRate: cost && sales ? cost / (sales + disc) : null, pCostRate: pCost && pSales ? pCost / (pSales + pDisc) : null,
     groups: sum(act, d => d.groups), pGroups: sum(prev, d => d.groups),
     disc, pDisc, pDiscRate: (pSales + pDisc) ? pDisc / (pSales + pDisc) : null,
-    code: cur[0].code, name: cur[0].name, area: cur[0].area || '',
+    code: cur[0].code, name: cur[0].name, area: cur[0].area || '', fcKind: cur[0].fc || '',
     days: act.length, monthDays, sales, budget, diff: sales - budget, rate: budget ? sales / budget : null,
     cust, custBudget, custRate: custBudget ? cust / custBudget : null, up, bUp, pUp,
     custEff, upEff, pSales, pCust, yoy: pSales ? sales / pSales : null, custYoy: pCust ? cust / pCust : null,

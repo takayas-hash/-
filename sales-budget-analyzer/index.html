@@ -118,6 +118,38 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .foot { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
 .foot p { margin: 0; max-width: 80ch; }
 @media (prefers-reduced-motion: no-preference) { tr.pick td { transition: background .12s; } }
+/* ===== 訪問資料（A4縦・1店舗4ページ） ===== */
+#repWrap { position: fixed; inset: 0; z-index: 30; background: color-mix(in oklab, var(--bg) 70%, #000 30%); overflow: auto; padding: 16px; }
+#repBar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; max-width: 210mm; margin: 0 auto 16px; }
+.rp-page { width: 210mm; height: 297mm; margin: 0 auto 16px; background: #fff; color: #1d1f24; box-shadow: 0 2px 12px rgba(0,0,0,.25); padding: 12mm 12mm 10mm; display: flex; flex-direction: column; gap: 4mm; overflow: hidden; font-size: 10pt; line-height: 1.5;
+  --bg: #f6f6f3; --panel: #fff; --fg: #1d1f24; --muted: #5d6068; --line: #dddcd6; --accent: #23407a; --accent-soft: #e6ebf5; --neg: #d03b3b; --pos: #2a78d6; --mid: #f0efec; --neg-ink: #b42323; --pos-ink: #1d5fae;
+  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c0: #a3a29c; --prev: #b9b8b1; color-scheme: light; }
+.rp-head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #23407a; padding-bottom: 2mm; }
+.rp-head h1 { font-size: 15pt; margin: 0; } .rp-head .muted { font-size: 8.5pt; }
+.rp-body { flex: 1; min-height: 0; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 4mm; }
+.rp-foot { display: flex; justify-content: space-between; font-size: 8pt; color: #5d6068; border-top: 1px solid #dddcd6; padding-top: 1.5mm; }
+.rp-page h2 { font-size: 12pt; margin: 0; } .rp-page h3 { font-size: 10.5pt; margin: 0 0 1.5mm; }
+.rp-page .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2.5mm 3mm; }
+.rp-page .kpi { padding-left: 2.5mm; } .rp-page .kpi .v { font-size: 13pt; white-space: nowrap; } .rp-page .kpi .small { font-size: 7.5pt; line-height: 1.4; }
+.rp-page .label { font-size: 7.5pt; }
+.rp-page table { font-size: 8.5pt; } .rp-page th, .rp-page td { padding: 1.2mm 2mm; }
+.rp-page svg { max-width: 100%; height: auto; }
+.rp-page .tbl { overflow: visible; }
+.rp-page .heat { min-width: 0; font-size: 8pt; } .rp-page .heat .c { padding: 1.5mm 1mm; }
+.rp-cmt { white-space: pre-wrap; border: 1px solid #dddcd6; border-radius: 2mm; padding: 2.5mm 3mm; background: #fafaf8; font-size: 9.5pt; line-height: 1.65; }
+.rp-cmt:focus { outline: 2px solid #23407a; }
+.rp-memo { border: 1px solid #dddcd6; border-radius: 2mm; padding: 2.5mm 3mm; min-height: 75mm; white-space: pre-wrap; background: repeating-linear-gradient(transparent 0 7.4mm, #e6e5df 7.4mm 7.6mm); line-height: 7.6mm; }
+.rp-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4mm; }
+.rp-none { color: #5d6068; font-size: 9pt; border: 1px dashed #dddcd6; border-radius: 2mm; padding: 3mm; }
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  body.printing > *:not(#repWrap) { display: none !important; }
+  body.printing #repWrap { position: static; padding: 0; background: none; overflow: visible; }
+  body.printing #repBar { display: none; }
+  .rp-page { margin: 0; box-shadow: none; break-after: page; page-break-after: always; }
+  .rp-cmt, .rp-memo { background: #fff; }
+}
 </style>
 
 <div class="wrap">
@@ -174,6 +206,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
           <button type="button" id="mLong" aria-pressed="false">詳細版</button>
         </div>
         <button type="button" class="btn ghost" id="copyAll">全店コメントを一括コピー</button>
+        <button type="button" class="btn ghost" id="repFc">FC全店の訪問資料（PDF）</button>
       </div>
     </div>
     <div class="kpis" id="kpis"></div>
@@ -195,7 +228,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   <section class="card" id="storeCard">
     <div class="row">
       <div><div class="label">店舗詳細</div><h2 id="storeName"></h2></div>
-      <select id="storeSel" aria-label="店舗を選択" class="btn ghost"></select>
+      <div class="row" style="gap:8px"><select id="storeSel" aria-label="店舗を選択" class="btn ghost"></select><button type="button" class="btn" id="repOne">訪問資料（PDF）</button></div>
     </div>
     <div class="kpis" id="sKpis"></div>
     <div>
@@ -305,6 +338,13 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   </div>
 </div>
 <div class="tip" id="tip" hidden></div>
+<div id="repWrap" hidden>
+  <div id="repBar">
+    <div><b id="repTitle">訪問資料</b><div class="small muted">コメントと記入欄はクリックして直接書き換えられます。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・縦、余白なし、背景のグラフィックをオン）。</div></div>
+    <div class="row" style="gap:8px"><button type="button" class="btn" id="repPrint">印刷・PDF保存</button><button type="button" class="btn ghost" id="repClose">閉じる</button></div>
+  </div>
+  <div id="rep"></div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
@@ -682,7 +722,7 @@ function analyzeStore(cur, prev, monthDays) {
     cost, pCost, costRate: cost && sales ? cost / (sales + disc) : null, pCostRate: pCost && pSales ? pCost / (pSales + pDisc) : null,
     groups: sum(act, d => d.groups), pGroups: sum(prev, d => d.groups),
     disc, pDisc, pDiscRate: (pSales + pDisc) ? pDisc / (pSales + pDisc) : null,
-    code: cur[0].code, name: cur[0].name, area: cur[0].area || '',
+    code: cur[0].code, name: cur[0].name, area: cur[0].area || '', fcKind: cur[0].fc || '',
     days: act.length, monthDays, sales, budget, diff: sales - budget, rate: budget ? sales / budget : null,
     cust, custBudget, custRate: custBudget ? cust / custBudget : null, up, bUp, pUp,
     custEff, upEff, pSales, pCust, yoy: pSales ? sales / pSales : null, custYoy: pCust ? cust / pCust : null,
@@ -2245,15 +2285,15 @@ if (typeof module !== 'undefined') module.exports = { tcSummary, wageSnapshot, m
     $('heat').innerHTML = h;
 
     // 日別バー
-    const D = s.daily, W = Math.max(320, D.length * 22 + 50), Hh = 200, top = 14, base = 140, half = 110;
+    const D = s.daily, W = Math.max(330, D.length * 22 + 62), Hh = 200, top = 14, base = 140, half = 110;
     const mx = Math.max(1, ...D.map(d => Math.abs(d.diff)));
     const sc = v => v / mx * (half / 2 + 10);
     const mid = top + (base - top) / 2;
     let svg = `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" role="img" aria-label="日別の予算差">`;
-    svg += `<line x1="40" x2="${W - 4}" y1="${mid}" y2="${mid}" stroke="var(--line)" stroke-width="1"/><text x="36" y="${mid + 3}" text-anchor="end">±0</text>`;
-    svg += `<text x="36" y="${top + 6}" text-anchor="end">${sman(mx).replace('万円', '万')}</text><text x="36" y="${base}" text-anchor="end">${sman(-mx).replace('万円', '万')}</text>`;
+    svg += `<line x1="52" x2="${W - 4}" y1="${mid}" y2="${mid}" stroke="var(--line)" stroke-width="1"/><text x="48" y="${mid + 3}" text-anchor="end">±0</text>`;
+    svg += `<text x="48" y="${top + 6}" text-anchor="end">${sman(mx).replace('万円', '万')}</text><text x="48" y="${base}" text-anchor="end">${sman(-mx).replace('万円', '万')}</text>`;
     D.forEach((d, i) => {
-      const x = 46 + i * 22, hgt = Math.max(1, Math.abs(sc(d.diff)));
+      const x = 58 + i * 22, hgt = Math.max(1, Math.abs(sc(d.diff)));
       const y = d.diff >= 0 ? mid - hgt : mid;
       const r = 3, w = 14;
       // データ端だけ丸める
@@ -2292,6 +2332,58 @@ if (typeof module !== 'undefined') module.exports = { tcSummary, wageSnapshot, m
       + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr>`
       + '</tbody>';
   }
+
+  /* ---------- 訪問資料（1店舗A4縦4ページ。画面の表・グラフをそのまま使う） ---------- */
+  function capture(code) {
+    const keepTab = tab, keepCur = cur, s = R.stores.find(x => x.code === code);
+    const box = id => ($(id) && !$(id).hidden ? $(id).innerHTML : '');
+    const shown = id => $(id) && !$(id).hidden;
+    cur = code;
+    tab = 'sales'; renderStore();
+    const S1 = { kpis: $('sKpis').innerHTML, cmt: commentText(s.lines, detail), cum: box('cum'), daily: box('daily'), heat: box('heat'), type: box('typeTbl'), band: box('bandTbl'), wd: box('wdTbl'),
+      discCat: shown('discCatBox') ? box('discCatTbl') : '', disc: shown('discBox') ? box('discTbl') : '' };
+    tab = 'cost'; renderStore();
+    const S2 = { kpis: $('sKpis').innerHTML, cmt: commentText(s.costLines, detail), loss: shown('lossBox') ? '<div class="kpis">' + $('lossKpis').innerHTML + '</div><div class="tbl"><table>' + $('lossWdTbl').innerHTML + '</table></div>' : '',
+      inv: s.inv ? box('invBody') : '', yoy: s.menu ? box('yoyBody') : '', course: s.menu && shown('courseBox') ? `<div class="lg">${$('courseLegend2').innerHTML}</div><div class="stk">${$('courseStore').innerHTML}</div><div class="tbl"><table>${$('courseTbl').innerHTML}</table></div>` : '',
+      cost: shown('costBox') ? `<div class="kpis">${$('costKpis').innerHTML}</div><div class="tbl"><table>${$('costTbl').innerHTML}</table></div>` : '' };
+    tab = keepTab; cur = keepCur;
+    return { s, S1, S2 };
+  }
+  function reportPages({ s, S1, S2 }) {
+    const per = $('period').textContent || `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日`;
+    const today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
+    const none = t => `<div class="rp-none">${t}</div>`;
+    const tblw = h => h ? `<div class="tbl"><table>${h}</table></div>` : '';
+    const page = (n, title, body) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料</div><h1>${esc(s.name)}</h1></div><div style="text-align:right"><h2>${title}</h2><div class="muted">${esc(per)}</div></div></div>
+      <div class="rp-body">${body}</div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 4</span></div></section>`;
+    return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>コメント</h3><div class="rp-cmt" contenteditable="true">${esc(S1.cmt)}</div></div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
+      + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>曜日区分 × 時間帯の予算比</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div><div><h3>曜日別</h3>${tblw(S1.wd)}</div>`)
+      + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>コメント</h3><div class="rp-cmt" contenteditable="true">${esc(S2.cmt)}</div></div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
+      + page(4, '喫食量・コース・値引', `<div><h3>原価・喫食量・皿数（食べ放題）</h3>${S2.cost || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>${S2.yoy ? `<div><h3>皿数・喫食量の前年比較</h3>${S2.yoy}</div>` : ''}<div><h3>コース構成</h3>${S2.course || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>
+        <div><h3>値引</h3>${S1.discCat ? tblw(S1.discCat) : S1.disc ? tblw(S1.disc) : none('値引詳細を読み込むと表示します。')}</div><div><h3>本日の確認事項・次回までの取り組み</h3><div class="rp-memo" contenteditable="true"></div></div>`);
+  }
+  /** ページからあふれる分は縮小して、1店舗4ページに収める */
+  function fitPages() {
+    document.querySelectorAll('#rep .rp-body').forEach(b => { b.style.zoom = ''; const h = b.clientHeight, sh = b.scrollHeight; if (sh > h + 2) b.style.zoom = Math.max(0.55, (h / sh) * 0.98).toFixed(3); });
+  }
+  function openReport(codes) {
+    if (!codes.length) return;
+    const parts = codes.map(c => reportPages(capture(c)));
+    render(); // 画面を元に戻す
+    $('rep').innerHTML = parts.join('');
+    $('repTitle').textContent = codes.length > 1 ? `訪問資料（${codes.length}店舗・${codes.length * 4}ページ）` : `訪問資料：${R.stores.find(x => x.code === codes[0]).name}（4ページ）`;
+    $('repWrap').hidden = false; document.body.style.overflow = 'hidden';
+    requestAnimationFrame(fitPages);
+  }
+  $('repOne').addEventListener('click', () => openReport([cur]));
+  $('repFc').addEventListener('click', () => {
+    const fc = R.stores.filter(s => /^FC/i.test(s.fcKind || ''));
+    if (!fc.length) { setStatus('表示中の店舗にFC店がありません。上の「FCのみ」または「全店」に切り替えてから押してください。', true); return; }
+    openReport(fc.map(s => s.code));
+  });
+  $('repClose').addEventListener('click', () => { $('repWrap').hidden = true; $('rep').innerHTML = ''; document.body.style.overflow = ''; });
+  $('repPrint').addEventListener('click', () => { document.body.classList.add('printing'); fitPages(); setTimeout(() => { window.print(); }, 50); });
+  addEventListener('afterprint', () => document.body.classList.remove('printing'));
 
   /* ---------- 採用・定着 ---------- */
   const NO_TENURE = 'タイムカード表と時給データ（入社年月日の入った店長資料）を読み込むと、勤務期間別の労働時間・新規採用・退社・退社リスクを分析します。毎月読み込むと履歴が積み上がり、前の月との比較ができるようになります。';
