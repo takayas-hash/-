@@ -35,16 +35,20 @@ function getConfig() {
   try { root = rootFolder_(); } catch (e) { return { areas: [], error: e.message, stdSettings: getStdSettings_() }; }
   const areas = [];
   let common = null;
+  let user = '';
+  try { user = Session.getActiveUser().getEmail(); } catch (e) { /* 取得できなくても続ける */ }
+  const me = String(user).toLowerCase();
   const it = root.getFolders();
   while (it.hasNext()) {
     const f = it.next(), name = f.getName();
     if (name === COMMON_NAME) { common = f.getId(); continue; }
     if (SKIP_NAMES.indexOf(name) >= 0) continue;
-    areas.push({ id: f.getId(), name: name });
+    // 自分が直接「編集者」になっているエリア＝自分のエリア（最初に選ぶ）
+    let mine = false;
+    if (me) { try { mine = f.getEditors().some(u => String(u.getEmail()).toLowerCase() === me) || String(f.getOwner() && f.getOwner().getEmail()).toLowerCase() === me; } catch (e) { /* 共有ドライブなどで取れないときは false */ } }
+    areas.push({ id: f.getId(), name: name, mine: mine });
   }
   areas.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-  let user = '';
-  try { user = Session.getActiveUser().getEmail(); } catch (e) { /* 取得できなくても続ける */ }
   return { areas: areas, common: common, user: user, stdSettings: getStdSettings_() };
 }
 
