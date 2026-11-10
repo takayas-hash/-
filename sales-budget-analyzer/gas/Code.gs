@@ -161,3 +161,56 @@ function checkSetup() {
   Logger.log('共通のファイル：' + common.length + '件' + (common.length ? '（' + common.map(f => f.name).join('、') + '）' : ''));
   Logger.log('標準比の店舗設定：' + Object.keys(cfg.stdSettings).length + '店');
 }
+
+/* ===== 月初の自動整理：古いファイルを各エリアの「過去」フォルダへ移す ===== */
+const ARCHIVE_NAME = '過去';
+/**
+ * 各エリアのフォルダ直下で、最終更新が「前月1日より前」のファイルを「エリア/過去/YYYY-MM」へ移す。
+ * 例：12月1日に実行 → 10月以前に更新されたファイルを移す（11月・12月に入れたものは残る）。
+ * 「共通」「履歴データ」とフォルダの中のフォルダには触らない。
+ * dryRun=true なら移さずに、移す予定のファイルを返す（ログにも出す）。
+ */
+function archiveOldFiles(dryRun) {
+  const root = rootFolder_(), now = new Date();
+  const limit = new Date(now.getFullYear(), now.getMonth() - 1, 1); // 前月1日
+  const moved = [];
+  const it = root.getFolders();
+  while (it.hasNext()) {
+    const area = it.next(), name = area.getName();
+    if (name === COMMON_NAME || SKIP_NAMES.indexOf(name) >= 0) continue;
+    let archive = null;
+    const files = area.getFiles();
+    while (files.hasNext()) {
+      const f = files.next(), up = f.getLastUpdated();
+      if (up >= limit) continue;
+      const ym = Utilities.formatDate(up, 'Asia/Tokyo', 'yyyy-MM');
+      moved.push(name + '／' + f.getName() + '（' + Utilities.formatDate(up, 'Asia/Tokyo', 'yyyy/MM/dd') + '更新 → ' + ARCHIVE_NAME + '/' + ym + '）');
+      if (dryRun) continue;
+      if (!archive) { const a = area.getFoldersByName(ARCHIVE_NAME); archive = a.hasNext() ? a.next() : area.createFolder(ARCHIVE_NAME); }
+      const m = archive.getFoldersByName(ym), dest = m.hasNext() ? m.next() : archive.createFolder(ym);
+      f.moveTo(dest);
+    }
+  }
+  Logger.log((dryRun ? '【移す予定】' : '【移しました】') + moved.length + '件\n' + moved.join('\n'));
+  if (!dryRun && moved.length) {
+    try {
+      MailApp.sendEmail(Session.getEffectiveUser().getEmail(), '【予算差異アナライザー】月初の自動整理：' + moved.length + '件を「過去」へ移しました',
+        '前月1日（' + Utilities.formatDate(limit, 'Asia/Tokyo', 'yyyy/MM/dd') + '）より前に更新されたファイルを、各エリアの「過去」フォルダへ移しました。\n\n' + moved.join('\n') + '\n\n間違って移ったものは、エリアのフォルダへ戻してください。');
+    } catch (e) { Logger.log('メールを送れませんでした：' + e.message); }
+  }
+  return moved;
+}
+/** 移す予定のファイルを確認するだけ（移さない） */
+function previewArchive() { return archiveOldFiles(true); }
+/** 自動整理を毎月1日の朝5時に動かす（1回だけ実行）。すでにあれば作り直す */
+function installMonthlyArchive() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'monthlyArchive_').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('monthlyArchive_').timeBased().onMonthDay(1).atHour(5).inTimezone('Asia/Tokyo').create();
+  Logger.log('毎月1日の5時台に自動整理を動かす設定をしました。止めるときは uninstallMonthlyArchive を実行してください。');
+}
+function uninstallMonthlyArchive() {
+  const ts = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'monthlyArchive_');
+  ts.forEach(t => ScriptApp.deleteTrigger(t));
+  Logger.log('自動整理を止めました（' + ts.length + '件）。');
+}
+function monthlyArchive_() { archiveOldFiles(false); }

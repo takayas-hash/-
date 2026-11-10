@@ -109,6 +109,7 @@
    - 過去の月で月末まで実績がない（tcSummary の last < days）ときは、実績を月換算する（partialMonths）
    - 減り方の分解：日数の影響＝(今月の日数−比較の日数)×比較の1回あたり、1回あたりの影響＝(今月の1回あたり−比較の1回あたり)×今月の日数。減少分の70%以上が日数なら「日数が減少」、30%以下なら「1回が短く」、その間は「両方」
    - 未確認：退社リスクの基準（70%／50%は仮）、勤務期間の区切り
+6.5 ~~月初の自動整理~~（Code.gs の archiveOldFiles／installMonthlyArchive。毎月1日5時、最終更新が前月1日より前のファイルを「エリア/過去/YYYY-MM」へ。設定した人の権限で動く。モックのDriveで動作確認）
 7. ~~FC店の訪問資料（PDF）~~（実装済み：template の capture／reportPages／openReport）
    - 画面の店舗詳細を売上・原価タブで描画して、その表・グラフ（innerHTML）を A4 のページ枠に入れる。印刷は body.printing と @media print で資料だけを出す
    - ページからあふれる分は .rp-body に zoom をかけて縮小（下限55%）。Playwright の page.pdf でサンプルFC店が4ページになることを確認
