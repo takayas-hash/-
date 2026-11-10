@@ -2055,7 +2055,8 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       if (k === 'schedule') return { name: f.name, ws: extractSchedule(XLSX, ws) };
       if (k === 'wage') return { name: f.name, wage: extractWage(XLSX, ws) };
     }
-    throw new Error(`「${f.name}」の種類が判別できません（売上集計表・1時間ごと詳細・値引詳細のいずれかを選んでください）`);
+    // 種類のわからないファイルは使わずに先へ進む（フォルダに関係ないファイルがあっても止まらないように）
+    return { name: f.name, unknown: true };
   }
   const ym = rows => { const d = new Date(Math.max(...rows.map(r => +r.date))); return `${d.getFullYear()}年${d.getMonth() + 1}月`; };
 
@@ -2283,6 +2284,8 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
         else if (g.std) { if (g.std.kind === 'lane') { if (!(opt.fresh && ST.stdLane)) ST.stdLane = { name: g.name, data: g.std, file: g.file }; } else if (!(opt.fresh && ST.stdBook)) ST.stdBook = { name: g.name, data: g.std, file: g.file }; }
       }
       if (got.some(g => g.usage)) notes.push('食材別の理論差データは分析に使わないため読み込みませんでした');
+      const unk = gotRaw.filter(g => g.unknown);
+      if (unk.length) notes.push(`種類がわからないため使わなかったファイル：${unk.map(g => `「${g.name}」`).join('')}`);
       // 新しい4か月分だけ残す
       Object.keys(ST.months).map(Number).sort((a, b) => b - a).slice(4).forEach(k => { delete ST.months[k]; });
       const withCur = Object.keys(ST.months).map(Number).filter(k => ST.months[k].cur).sort((a, b) => b - a);
