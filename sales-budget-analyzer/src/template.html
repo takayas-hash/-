@@ -136,7 +136,17 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .rp-page .heat { min-width: 0; font-size: 8pt; } .rp-page .heat .c { padding: 1.5mm 1mm; }
 .rp-cmt { white-space: pre-wrap; border: 1px solid #dddcd6; border-radius: 2mm; padding: 2.5mm 3mm; background: #fafaf8; font-size: 9.5pt; line-height: 1.65; }
 .rp-cmt:focus { outline: 2px solid #23407a; }
-.rp-memo { border: 1px solid #dddcd6; border-radius: 2mm; padding: 2.5mm 3mm; min-height: 75mm; white-space: pre-wrap; background: repeating-linear-gradient(transparent 0 7.4mm, #e6e5df 7.4mm 7.6mm); line-height: 7.6mm; }
+.rp-cm { border: 1px solid #dddcd6; border-radius: 2mm; overflow: hidden; }
+.rp-cm-head { display: flex; align-items: baseline; gap: 3mm; padding: 2.5mm 3mm; background: #f2f4f9; border-bottom: 1px solid #dddcd6; font-size: 10.5pt; font-weight: 700; }
+.rp-tag { flex: none; font-size: 8.5pt; font-weight: 700; border-radius: 1mm; padding: .4mm 2mm; color: #fff; background: #23407a; }
+.rp-tag.ng { background: #b42323; } .rp-tag.ok { background: #1d5fae; }
+.rp-cm-item { display: grid; grid-template-columns: 27mm minmax(0, 1fr); gap: 3mm; padding: 2mm 3mm; border-top: 1px solid #ecebe6; font-size: 9.5pt; line-height: 1.6; }
+.rp-cm-item:first-of-type { border-top: 0; }
+.rp-cm-lbl { font-weight: 700; color: #23407a; font-size: 9pt; padding-top: .2mm; }
+.rp-cm-sub { margin-top: 1mm; padding-left: 3mm; border-left: 2px solid #dddcd6; font-size: 8.5pt; color: #3c3f45; }
+.rp-cm-sub.note2 { color: #5d6068; border-left-color: transparent; }
+.rp-cm [contenteditable]:focus { outline: 2px solid #23407a; outline-offset: 1px; }
+.rp-cm b.neg { color: #b42323; } .rp-cm b.pos { color: #1d5fae; }
 .rp-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4mm; }
 .rp-none { color: #5d6068; font-size: 9pt; border: 1px dashed #dddcd6; border-radius: 2mm; padding: 3mm; }
 @media print {
@@ -146,7 +156,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   body.printing #repWrap { position: static; padding: 0; background: none; overflow: visible; }
   body.printing #repBar { display: none; }
   .rp-page { margin: 0; box-shadow: none; break-after: page; page-break-after: always; }
-  .rp-cmt, .rp-memo { background: #fff; }
+  .rp-cm-head { background: #f2f4f9; }
 }
 </style>
 
@@ -338,7 +348,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 <div class="tip" id="tip" hidden></div>
 <div id="repWrap" hidden>
   <div id="repBar">
-    <div><b id="repTitle">訪問資料</b><div class="small muted">コメントと記入欄はクリックして直接書き換えられます。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・縦、余白なし、背景のグラフィックをオン）。</div></div>
+    <div><b id="repTitle">訪問資料</b><div class="small muted">コメントはクリックして直接書き換えられます。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・縦、余白なし、背景のグラフィックをオン）。</div></div>
     <div class="row" style="gap:8px"><button type="button" class="btn" id="repPrint">印刷・PDF保存</button><button type="button" class="btn ghost" id="repClose">閉じる</button></div>
   </div>
   <div id="rep"></div>
@@ -857,6 +867,25 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     tab = keepTab; cur = keepCur;
     return { s, S1, S2 };
   }
+  /**
+   * コメントを項目ごとに見やすく：見出し（【予算未達】など）、「・項目：本文」は項目名と本文に分け、
+   * 「　」で始まる補足は直前の項目の下に小さく。▲の金額・率は赤、＋は青
+   */
+  function cmtHtml(text) {
+    const mark = t => esc(t).replace(/(▲[\d.,]+(?:万円|円|pt|%|h|人|件|日)?)/g, '<b class="neg">$1</b>').replace(/(\+[\d.,]+(?:万円|円))/g, '<b class="pos">$1</b>');
+    const items = []; let head = null;
+    text.split('\n').filter(l => l.trim()).forEach(l => {
+      const h = l.match(/^【([^】]+)】(.*)$/);
+      if (h) { head = { tag: h[1], body: h[2] }; return; }
+      const it = l.match(/^・([^：:]{1,40})[：:](.*)$/);
+      if (it) { const pm = it[1].match(/^(.*?)（(.+)）$/); items.push({ lbl: pm ? pm[1] : it[1], body: it[2], subs: pm ? [`※${pm[2]}`] : [] }); return; }
+      if (/^[　\s]/.test(l) && items.length) { items[items.length - 1].subs.push(l.trim()); return; }
+      items.push({ lbl: '', body: l.replace(/^・/, ''), subs: [] });
+    });
+    const tagCls = t => /未達|課題/.test(t) ? 'ng' : /達成/.test(t) ? 'ok' : 'info';
+    return `<div class="rp-cm">${head ? `<div class="rp-cm-head"><span class="rp-tag ${tagCls(head.tag)}">${esc(head.tag)}</span><span contenteditable="true">${mark(head.body)}</span></div>` : ''}`
+      + items.map(x => `<div class="rp-cm-item"><div class="rp-cm-lbl">${esc(x.lbl)}</div><div class="rp-cm-txt"><div contenteditable="true">${mark(x.body)}</div>${x.subs.map(t => `<div class="rp-cm-sub${/^※/.test(t) ? ' note2' : ''}" contenteditable="true">${mark(t)}</div>`).join('')}</div></div>`).join('') + '</div>';
+  }
   function reportPages({ s, S1, S2 }) {
     const per = $('period').textContent || `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日`;
     const today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
@@ -864,11 +893,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const tblw = h => h ? `<div class="tbl"><table>${h}</table></div>` : '';
     const page = (n, title, body) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料</div><h1>${esc(s.name)}</h1></div><div style="text-align:right"><h2>${title}</h2><div class="muted">${esc(per)}</div></div></div>
       <div class="rp-body">${body}</div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 4</span></div></section>`;
-    return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>コメント</h3><div class="rp-cmt" contenteditable="true">${esc(S1.cmt)}</div></div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
+    return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S1.cmt)}</div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
       + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>曜日区分 × 時間帯の予算比</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div><div><h3>曜日別</h3>${tblw(S1.wd)}</div>`)
-      + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>コメント</h3><div class="rp-cmt" contenteditable="true">${esc(S2.cmt)}</div></div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
+      + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S2.cmt)}</div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
       + page(4, '喫食量・コース・値引', `<div><h3>原価・喫食量・皿数（食べ放題）</h3>${S2.cost || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>${S2.yoy ? `<div><h3>皿数・喫食量の前年比較</h3>${S2.yoy}</div>` : ''}<div><h3>コース構成</h3>${S2.course || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>
-        <div><h3>値引</h3>${S1.discCat ? tblw(S1.discCat) : S1.disc ? tblw(S1.disc) : none('値引詳細を読み込むと表示します。')}</div><div><h3>本日の確認事項・次回までの取り組み</h3><div class="rp-memo" contenteditable="true"></div></div>`);
+        <div><h3>値引</h3>${S1.discCat ? tblw(S1.discCat) : S1.disc ? tblw(S1.disc) : none('値引詳細を読み込むと表示します。')}</div>`);
   }
   /** ページからあふれる分は縮小して、1店舗4ページに収める */
   function fitPages() {
