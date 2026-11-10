@@ -379,6 +379,68 @@ function analyzeStore(cur, prev, monthDays) {
   };
 }
 
+/* ===== 当月の着地見込み ===== */
+const dtOfDate = date => { const wd = WEEKDAYS[(date.getDay() + 6) % 7]; return wd === '土' ? '土曜' : wd === '日' ? '日祝日' : wd === '金' ? '休前日' : '平日'; };
+/**
+ * 残り日の予算 × ここまでの曜日区分別の予算比（売上0の日は除く）で月末の売上を見込む。
+ * 曜日区分の実績が2日未満なら全体の予算比を使う。
+ * 売上集計表に月末までの予算がない日は、ここまでの同じ曜日区分の平均日予算で補う（祝日は判別できない）。
+ * rows：その店の当月の全行（月末までの予算行を含む）、prevRows：前年同月の全行
+ */
+function forecastStore(s, rows, prevRows, lastDate, monthEnd) {
+  const n = monthEnd.getDate() - lastDate.getDate();
+  if (n <= 0) return null;
+  const done = s.daily.filter(d => d.sales > 0 && d.budget > 0);
+  const rateOf = ds => { const b = sum(ds, d => d.budget); return b ? sum(ds, d => d.sales) / b : null; };
+  const pace = rateOf(done);
+  if (pace == null) return null;
+  const typeRate = {}, avgBudget = {};
+  DAYTYPES.forEach(dt => {
+    const ds = done.filter(d => d.dt === dt);
+    typeRate[dt] = ds.length >= 2 ? rateOf(ds) : pace;
+    const bs = s.daily.filter(d => d.dt === dt);
+    avgBudget[dt] = bs.length ? sum(bs, d => d.budget) / bs.length : (s.daily.length ? sum(s.daily, d => d.budget) / s.daily.length : 0);
+  });
+  const fut = {};
+  rows.filter(r => r.date > lastDate).forEach(r => { const k = +r.date; (fut[k] = fut[k] || { budget: 0, dt: r.dt }); fut[k].budget += r.budget; });
+  const days = [];
+  for (let d = lastDate.getDate() + 1; d <= monthEnd.getDate(); d++) {
+    const date = new Date(lastDate.getFullYear(), lastDate.getMonth(), d);
+    const f = fut[+date];
+    const dt = f ? f.dt : dtOfDate(date);
+    const budget = f ? f.budget : avgBudget[dt];
+    days.push({ date, dt, budget, est: !f, fc: budget * typeRate[dt] });
+  }
+  const remBudget = sum(days, d => d.budget), remFc = sum(days, d => d.fc);
+  const monthBudget = s.budget + remBudget, landing = s.sales + remFc, need = monthBudget - s.sales;
+  // 参考：前年の残り期間の実績 × ここまでの前年比
+  const pRem = prevRows.filter(r => r.date.getDate() > lastDate.getDate() && r.date.getDate() <= monthEnd.getDate());
+  const prevBased = s.yoy && pRem.length ? s.sales + sum(pRem, r => r.sales) * s.yoy : null;
+  return {
+    remDays: n, days, estDays: days.filter(d => d.est).length,
+    remByType: DAYTYPES.map(dt => ({ key: dt, days: days.filter(d => d.dt === dt).length })).filter(x => x.days),
+    remBudget, remFc, monthBudget, landing, landDiff: landing - monthBudget, landRate: monthBudget ? landing / monthBudget : null,
+    need, needPerDay: need / n, needRate: remBudget ? need / remBudget : null, pace, typeRate,
+    doneSales: sum(done, d => d.sales), doneBudget: sum(done, d => d.budget),
+    prevBased, prevBasedRate: prevBased != null && monthBudget ? prevBased / monthBudget : null,
+  };
+}
+/** 店舗の見込みを合計して全体の見込みにする */
+function forecastSum(list, area) {
+  const fs = list.filter(Boolean); if (!fs.length) return null;
+  const f0 = fs[0];
+  const remBudget = sum(fs, f => f.remBudget), remFc = sum(fs, f => f.remFc);
+  const monthBudget = area.budget + remBudget, landing = area.sales + remFc, need = monthBudget - area.sales;
+  const days = f0.days.map((d, i) => ({ date: d.date, dt: d.dt, est: fs.some(f => f.days[i] && f.days[i].est), budget: sum(fs, f => f.days[i] ? f.days[i].budget : 0), fc: sum(fs, f => f.days[i] ? f.days[i].fc : 0) }));
+  const pb = fs.every(f => f.prevBased != null) ? sum(fs, f => f.prevBased) : null;
+  return {
+    remDays: f0.remDays, days, estDays: Math.max(...fs.map(f => f.estDays)), remByType: f0.remByType,
+    remBudget, remFc, monthBudget, landing, landDiff: landing - monthBudget, landRate: monthBudget ? landing / monthBudget : null,
+    need, needPerDay: need / f0.remDays, needRate: remBudget ? need / remBudget : null, pace: sum(fs, f => f.doneSales) / sum(fs, f => f.doneBudget),
+    prevBased: pb, prevBasedRate: pb != null && monthBudget ? pb / monthBudget : null,
+  };
+}
+
 const SCOPE_NAME = { direct: '直営', fc: 'FC', all: '全店' };
 const isDirect = r => /^直営/.test(r.fc || ''), isFcStore = r => /^FC/i.test(r.fc || '');
 /** 店舗が対象条件に合うか（FC区分がないデータは直営/FCの区別なし） */
@@ -437,6 +499,9 @@ function analyze(curRows, prevRows, extra) {
   // エリア合計
   const area = analyzeStore(cur.map(r => ({ ...r, code: 'AREA', name: scopeLabel })), prev, monthEnd.getDate());
   area.fullBudget = Object.values(fullBudget).reduce((a, b) => a + b, 0);
+  // 当月の着地見込み（月の途中のときだけ）
+  stores.forEach(s => { s.fc = isFullMonth ? null : forecastStore(s, curRows.filter(r => r.code === s.code), prevRows.filter(r => r.code === s.code), lastDate, monthEnd); });
+  area.fc = isFullMonth ? null : forecastSum(stores.map(s => s.fc), area);
     const byDate = {};
   cur.forEach(r => { if (r.sales > 0 && r.budget > 0) (byDate[+r.date] = byDate[+r.date] || []).push(r); });
   // 共通の不振日：対象店の85%以上が予算比85%未満、かつ同じ曜日区分の月平均より15pt以上低い日
@@ -504,6 +569,7 @@ function storeComment(s, ctx) {
   const ok = s.diff >= 0;
   const period = ctx.isFullMonth ? '' : `（${md(ctx.lastDate)}時点）`;
   L.push(`【${ok ? '予算達成' : '予算未達'}】売上${man(s.sales)}／予算比${pct(s.rate)}（${sman(s.diff)}）${s.yoy ? `・前年比${pct(s.yoy)}` : ''}${period}`);
+  for (const x of forecastLines(s.fc, ctx)) L.push(x);
 
   // 1) 客数・単価の分解
   const main = Math.abs(s.custEff) >= Math.abs(s.upEff) ? 'cust' : 'up';
@@ -712,6 +778,15 @@ function areaComment(a, stores, ctx) {
   const okN = stores.filter(s => s.diff >= 0).length;
   const period = ctx.isFullMonth ? '' : `（${md(ctx.lastDate)}時点）`;
   L.push(`【${ctx.scopeLabel}】売上${man(a.sales)}／予算比${pct(a.rate)}（${sman(a.diff)}）${a.yoy ? `・前年比${pct(a.yoy)}` : ''}${period}。予算達成${okN}店／${stores.length}店。`);
+  if (a.fc) {
+    for (const x of forecastLines(a.fc, ctx)) if (!x.d) L.push(x.t);
+    const fs = stores.filter(x => x.fc);
+    const okF = fs.filter(x => x.fc.landDiff >= 0).length;
+    L.push(`　着地で予算達成見込み${okF}店／${fs.length}店。`);
+    // 挽回が必要な店：着地で未達見込み、残り期間に必要な予算比が高い順
+    const hard = fs.filter(x => x.fc.landDiff < 0 && x.fc.need > 0).sort((x, y) => y.fc.needRate - x.fc.needRate).slice(0, 3);
+    if (hard.length) L.push(`・挽回が必要な店（残り期間に必要な予算比が高い順）：${hard.map(x => `${x.name}（必要${pct(x.fc.needRate)}・1日${man(x.fc.needPerDay)}、着地見込み${sman(x.fc.landDiff)}）`).join('、')}。`);
+  }
   L.push(`・要因分解：客数要因${sman(a.custEff)}（客数予算比${pct(a.custRate)}）、単価要因${sman(a.upEff)}（客単価${yen(a.up)}、予算${syen(a.up - a.bUp)}）。`);
   if (ctx.multiArea) {
     const by = {};
@@ -734,6 +809,25 @@ function areaComment(a, stores, ctx) {
   }
   if (ctx.commonWeak.length) L.push(`・共通の不振日：${ctx.commonWeak.map(c => `${md(c.date)}(${c.wd}${c.dt === '日祝日' && c.wd !== '日' ? '・祝' : ''})${pct(c.rate)}`).join('、')}。対象店の大半が低調のため外部要因の確認を。`);
   return L;
+}
+
+/** 着地見込みのコメント（店舗・全体共通） */
+function forecastLines(f, ctx) {
+  if (!f) return [];
+  const out = [];
+  const rem = `残り${f.remDays}日（${f.remByType.map(x => `${x.key}${x.days}`).join('・')}）`;
+  out.push({ t: `・着地見込み：${man(f.landing)}（月予算${man(f.monthBudget)}比${pct(f.landRate)}・${sman(f.landDiff)}）。${rem}の予算を、ここまでの曜日区分別の予算比で見込んだ値。`, d: false });
+  if (f.need <= 0) out.push({ t: `　月予算はすでに達成済み（${sman(-f.need)}）。`, d: false });
+  else {
+    let t = `　予算達成には残り${f.remDays}日で${man(f.need)}、1日平均${man(f.needPerDay)}が必要（残り期間の予算比${pct(f.needRate)}。ここまでの予算比${pct(f.pace)}`;
+    const gap = f.needRate - f.pace;
+    if (gap >= 0.005) t += `から${pt(gap)}の上積みが必要`;
+    else t += `を維持すれば届く水準`;
+    out.push({ t: t + '）。', d: false });
+  }
+  if (f.estDays) out.push({ t: `　※売上集計表に${f.estDays}日分の予算がないため、その日の予算は同じ曜日区分の平均日予算で補っています（祝日は判別できません）。`, d: false });
+  if (f.prevBased != null) out.push({ t: `　参考：前年の残り期間の実績×ここまでの前年比で見込むと${man(f.prevBased)}（予算比${pct(f.prevBasedRate)}）。`, d: true });
+  return out;
 }
 
 /** 原価分析コメント（店舗） */
@@ -849,4 +943,4 @@ function areaCostComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };

@@ -142,7 +142,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <p class="small muted" style="margin:6px 0 0">データはこのブラウザ内だけに保存されます。毎日の更新は当年の売上集計表だけ入れればOK（前年・値引詳細はそのまま残ります。月が変わると、月の合わないデータは外れます）。</p>
   </div>
-  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店・FC1店）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
+  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店・FC1店、10月20日までの途中経過）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
 
   <div class="tabs" role="tablist" aria-label="分析の種類">
     <button type="button" role="tab" id="tabSales" aria-selected="true">売上分析</button>
@@ -206,6 +206,12 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         <div class="chart" id="daily"></div>
       </div>
     </div>
+    <div id="cumBox">
+      <h3>累計売上の推移</h3>
+      <p class="small muted" style="margin:2px 0 0" id="cumNote"></p>
+      <div class="lg"><span><i style="background:var(--c1)"></i>累計実績</span><span id="cumLgFc"><i style="background:repeating-linear-gradient(90deg,var(--c1) 0 4px,transparent 4px 6px)"></i>着地見込み</span><span><i style="background:var(--c0)"></i>累計予算</span></div>
+      <div class="chart" id="cum"></div>
+    </div>
     <div class="grid2">
       <div><h3>曜日区分別</h3><div class="tbl"><table id="typeTbl"></table></div></div>
       <div><h3>時間帯別</h3><div class="tbl"><table id="bandTbl"></table></div></div>
@@ -242,6 +248,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   <div class="foot">
     <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
+    <p>着地見込み（月の途中のみ）＝実績＋残り日の日予算×ここまでの曜日区分別の予算比（売上0の日は除く。実績が2日未満の曜日区分は全体の予算比）。必要日販＝(月予算−実績)÷残り日数、残り期間の必要予算比＝(月予算−実績)÷残り日の予算合計。売上集計表に月末までの予算がない日は、同じ曜日区分の平均日予算で補います。</p>
     <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。原価分析の率はすべて値引前売上高（純売上高＋値引）が分母で、社内の原価管理表と同じ基準です。原価管理表を読み込むと、原価率理論差（値引前原価率−理論原価率）とロス込原価率理論差（さらに値引前ロス率を引いた値）は原価管理表の数字を使います。読み込んでいない場合の理論差（概算）＝仕入率−理論原価率。月末在庫の増減を含むため月ごとにぶれます。ロス率＝廃棄額÷純売上高（売上集計表の「廃棄額」列）。突出日＝その店の1日平均ロスの3倍以上かつ1万円以上の日。原価率＝原価÷純売上高（売上集計表の「原価」列。メニュー別の予定原価×販売数の合計と一致）。原価率の平均との差は「1人あたり原価（喫食）」と「客単価」の影響に分解しています。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
   </div>
 </div>
@@ -276,7 +283,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       const budget = Math.round(base * (year === 2026 ? 1.05 : 1));
       let p = perf * (0.9 + rnd() * 0.2) * (weather === '雨' ? 0.9 : 1);
       if (code === '9001' && dt !== '平日') p *= 0.94;
-      const sales = Math.round(base * p);
+      // 当年は20日までの途中経過（着地見込みの例を見せるため）
+      const sales = year === 2026 && d > 20 ? 0 : Math.round(base * p);
       const up = 3050 + (code === '9002' ? 120 : 0) + (rnd() - .5) * 150;
       const cust = Math.round(sales / up);
       const shape = dt === '平日' || dt === '休前日' ? shapeWk : shapeHd;
@@ -481,6 +489,68 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function kpi(label, v, sub, c) { return `<div class="kpi"><div class="label">${label}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`; }
   const fmtD = d => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 
+  /* ---------- 着地見込み ---------- */
+  function fcKpis(f, sub) {
+    if (!f) return '';
+    return kpi('着地見込み', man(f.landing), `月予算比 ${pct(f.landRate)}・${sman(f.landDiff)}${sub ? `<br>${sub}` : ''}`, cls(f.landDiff))
+      + (f.need > 0 ? kpi('必要日販', man(f.needPerDay), `残り${f.remDays}日・残り予算の${pct(f.needRate)}`, f.needRate > f.pace + 0.005 ? 'neg' : '')
+        : kpi('必要日販', '達成済み', `残り${f.remDays}日`, 'pos'));
+  }
+  function fcCells(f) {
+    if (!f) return '<td class="n muted" colspan="4">－</td>';
+    return `<td class="n">${man(f.landing)}</td><td class="n ${cls(f.landDiff)}">${pct(f.landRate)}</td>`
+      + `<td class="n">${f.need > 0 ? man(f.needPerDay) : '達成済み'}</td><td class="n ${f.need > 0 && f.needRate > f.pace + 0.005 ? 'neg' : ''}">${f.need > 0 ? pct(f.needRate) : '－'}</td>`;
+  }
+  /** 累計売上の推移：実績・予算・着地見込み（1本の軸） */
+  function renderCum(s) {
+    const f = s.fc;
+    const y0 = R.lastDate.getFullYear(), m0 = R.lastDate.getMonth();
+    const N = new Date(y0, m0 + 1, 0).getDate();
+    const pts = [];
+    let cb = 0, ca = 0;
+    const byDay = {}; s.daily.forEach(d => { byDay[d.date.getDate()] = d; });
+    const fcDay = {}; if (f) f.days.forEach(d => { fcDay[d.date.getDate()] = d; });
+    let cf = null;
+    for (let d = 1; d <= N; d++) {
+      const x = byDay[d], y = fcDay[d];
+      if (x) { cb += x.budget; ca += x.sales; }
+      else if (y) { cb += y.budget; cf = (cf == null ? ca : cf) + y.fc; }
+      else if (d > R.lastDate.getDate()) { if (!f) break; }
+      pts.push({ d, wd: x ? x.wd : y ? WEEKDAYS[(y.date.getDay() + 6) % 7] : '', b: cb, a: d <= R.lastDate.getDate() ? ca : null, f: d >= R.lastDate.getDate() && f ? (d === R.lastDate.getDate() ? ca : cf) : null, est: y && y.est });
+    }
+    $('cumLgFc').hidden = !f;
+    $('cumNote').textContent = f ? `${R.lastDate.getMonth() + 1}/${R.lastDate.getDate()}以降の点線は、残り日の予算×ここまでの曜日区分別の予算比で見込んだ値です。${f.estDays ? `予算のない${f.estDays}日分は同じ曜日区分の平均日予算で補っています。` : ''}` : '月間の累計実績と累計予算です。';
+    if (!pts.length) { $('cum').innerHTML = ''; return; }
+    const W = 640, H = 230, L = 52, Rr = 112, T = 12, B = 32;
+    const mx = Math.max(...pts.map(p => Math.max(p.b, p.a || 0, p.f || 0))) * 1.05 || 1;
+    const xs = d => L + (d - 1) / Math.max(1, N - 1) * (W - L - Rr), ys = v => T + (1 - v / mx) * (H - T - B);
+    const line = (key, extra) => { const ps = pts.filter(p => p[key] != null); return ps.length > 1 ? `<path d="${ps.map((p, i) => `${i ? 'L' : 'M'}${xs(p.d).toFixed(1)},${ys(p[key]).toFixed(1)}`).join(' ')}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" ${extra}/>` : ''; };
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W * 1.4}px" role="img" aria-label="累計売上の推移">`;
+    // 目盛り（4本）
+    const step = Math.pow(10, Math.floor(Math.log10(mx / 4))), unit = [1, 2, 2.5, 5, 10].map(k => k * step).find(u => mx / u <= 5);
+    for (let v = 0; v <= mx; v += unit) svg += `<line x1="${L}" x2="${W - Rr}" y1="${ys(v)}" y2="${ys(v)}" stroke="var(--line)" stroke-width="1"/><text x="${L - 6}" y="${ys(v) + 3}" text-anchor="end">${v ? man(v).replace('万円', '万') : '0'}</text>`;
+    [1, 5, 10, 15, 20, 25, N].filter((d, i, a) => d <= N && a.indexOf(d) === i).forEach(d => { svg += `<text x="${xs(d)}" y="${H - B + 16}" text-anchor="middle">${m0 + 1}/${d}</text>`; });
+    svg += line('b', 'stroke="var(--c0)"') + line('a', 'stroke="var(--c1)"') + line('f', 'stroke="var(--c1)" stroke-dasharray="5 4"');
+    // 直接ラベル（右端）
+    const lastP = pts[pts.length - 1], lab = [];
+    lab.push({ y: ys(lastP.b), t: `予算 ${man(lastP.b).replace('万円', '万')}` });
+    if (f && lastP.f != null) lab.push({ y: ys(lastP.f), t: `見込み ${man(lastP.f).replace('万円', '万')}`, b: true });
+    else if (lastP.a != null) lab.push({ y: ys(lastP.a), t: `実績 ${man(lastP.a).replace('万円', '万')}`, b: true });
+    lab.sort((p, q) => p.y - q.y); if (lab.length === 2 && lab[1].y - lab[0].y < 14) { const m = (lab[0].y + lab[1].y) / 2; lab[0].y = m - 7; lab[1].y = m + 7; }
+    lab.forEach(l => { svg += `<text x="${W - Rr + 6}" y="${l.y + 3}" style="${l.b ? 'font-weight:700;fill:var(--fg)' : ''}">${l.t}</text>`; });
+    // 実績の最終日の点
+    const lp = pts.find(p => p.d === R.lastDate.getDate());
+    if (lp && f) svg += `<circle cx="${xs(lp.d)}" cy="${ys(lp.a)}" r="4" fill="var(--c1)" stroke="var(--panel)" stroke-width="2"/>`;
+    // ホバー（日ごとの縦帯）
+    const bw = (W - L - Rr) / Math.max(1, N - 1);
+    pts.forEach(p => {
+      const v = p.a != null ? `累計実績 ${man(p.a)}` : `着地見込み（累計） ${man(p.f)}`;
+      const tipTxt = `${m0 + 1}/${p.d}${p.wd ? `（${p.wd}）` : ''}|${v}|累計予算 ${man(p.b)}${p.est ? '（推計）' : ''}|予算比 ${pct((p.a != null ? p.a : p.f) / p.b)}`;
+      svg += `<rect x="${xs(p.d) - bw / 2}" y="${T}" width="${bw}" height="${H - T - B}" fill="transparent" data-tip="${esc(tipTxt)}"/>`;
+    });
+    $('cum').innerHTML = svg + '</svg>';
+  }
+
   function render() {
     const a = R.area;
     $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost');
@@ -492,15 +562,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     $('areaTitle').textContent = `${R.titleLabel}（${R.stores.length}店）`;
     $('kpis').innerHTML = kpi('売上', man(a.sales), `予算 ${man(a.budget)}`) + kpi('予算比', pct(a.rate), `差額 ${sman(a.diff)}`, cls(a.diff))
       + kpi('客数要因', sman(a.custEff), `客数予算比 ${pct(a.custRate)}`, cls(a.custEff)) + kpi('単価要因', sman(a.upEff), `客単価 ${yen(a.up)}`, cls(a.upEff))
-      + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `前年比 ${pct(a.yoy)}` : '');
+      + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `前年比 ${pct(a.yoy)}` : '')
+      + fcKpis(a.fc, `達成見込み ${R.stores.filter(s => s.fc && s.fc.landDiff >= 0).length}／${R.stores.filter(s => s.fc).length}店`);
     $('areaComment').value = commentText(a.lines, detail); fit($('areaComment'));
 
     const maxAbs = Math.max(1, ...R.stores.map(s => Math.abs(s.diff)));
     const rows = [...R.stores].sort((x, y) => x.rate - y.rate);
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th><th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">前年比</th></tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th>${a.fc ? '<th class="n">着地見込み</th><th class="n">着地予算比</th><th class="n">必要日販</th><th class="n">残り期間の必要予算比</th>' : ''}<th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">前年比</th></tr></thead><tbody>`
       + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}<td><span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '達成' : '未達'}</span></td>
         <td class="n">${man(s.sales)}</td><td class="n ${cls(s.diff)}">${pct(s.rate)}</td><td class="n ${cls(s.diff)}">${sman(s.diff)}</td>
-        <td><span class="bar" style="width:${Math.round(Math.abs(s.diff) / maxAbs * 110)}px;background:var(${s.diff < 0 ? '--neg' : '--pos'})"></span></td>
+        <td><span class="bar" style="width:${Math.round(Math.abs(s.diff) / maxAbs * 110)}px;background:var(${s.diff < 0 ? '--neg' : '--pos'})"></span></td>${a.fc ? fcCells(s.fc) : ''}
         <td class="n ${cls(s.custEff)}">${sman(s.custEff)}</td><td class="n ${cls(s.upEff)}">${sman(s.upEff)}</td><td class="n">${pct(s.custRate)}</td><td class="n">${yen(s.up)}</td><td class="n">${pct(s.yoy)}</td></tr>`).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
@@ -518,7 +589,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     $('sKpis').innerHTML = kpi('売上', man(s.sales), `予算 ${man(s.budget)}`) + kpi('予算比', pct(s.rate), `差額 ${sman(s.diff)}`, cls(s.diff))
       + kpi('客数要因', sman(s.custEff), `客数 ${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`, cls(s.custEff))
       + kpi('単価要因', sman(s.upEff), `客単価 ${yen(s.up)}（予算${syen(s.up - s.bUp)}）`, cls(s.upEff))
-      + kpi('前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし');
+      + kpi('前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし')
+      + fcKpis(s.fc);
     $('storeComment').value = commentText(s.lines, detail); fit($('storeComment'));
 
     // ヒートマップ
@@ -559,6 +631,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       svg += `<text x="${x + w / 2}" y="${base + 18}" text-anchor="middle">${d.date.getDate()}</text><text x="${x + w / 2}" y="${base + 31}" text-anchor="middle" style="${we ? 'font-weight:700;fill:var(--fg)' : ''}">${d.wd}</text>`;
     });
     $('daily').innerHTML = svg + '</svg>';
+    renderCum(s);
 
     // 表
     $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th></tr></thead><tbody>`
