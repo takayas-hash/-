@@ -2470,7 +2470,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       // 新しい4か月分だけ残す
       Object.keys(ST.months).map(Number).sort((a, b) => b - a).slice(4).forEach(k => { delete ST.months[k]; });
       const withCur = Object.keys(ST.months).map(Number).filter(k => ST.months[k].cur).sort((a, b) => b - a);
-      if (!withCur.length) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
+      if (!withCur.length) throw new Error(GAS ? 'このエリアのフォルダに売上集計表（当年）がありません。フォルダの直下に置いてください' : '売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
       // 表示する月：今回入れた売上集計表の月 → 今回入れたファイルの月 → 前回の月
       const tCur = touched.filter(k => withCur.includes(k));
       ST.active = loadedCur.length ? Math.max(...loadedCur) : tCur.length ? Math.max(...tCur) : withCur.includes(ST.active) ? ST.active : withCur[0];
@@ -2495,7 +2495,8 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       let saved = true;
       if (opt.nosave) saved = null; else try { await store.put(STORE); } catch (e) { saved = false; }
       setStatus(`${files.length}ファイルを読み込みました（${R.stores.length}店舗）。` + (saved === null ? (opt.done || '') : saved ? 'このブラウザに保存したので、次回はファイルなしで表示されます。' : '※この環境ではブラウザに保存できませんでした。') + (notes.length ? '　' + notes.join('。') + '。' : ''));
-    } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
+    } catch (e) { console.error(e); if (opt.fail) opt.fail(e); else setStatus('読み込めませんでした：' + e.message, true); return false; }
+    return true;
   }
   $('file').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
   const drop = $('drop');
@@ -3367,6 +3368,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
+  let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
   async function loadDrive() {
     const v = $('driveArea').value;
@@ -3393,8 +3395,9 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
       }
       if (stale()) return;
       HIST = hist;
-      await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています。` });
-    } catch (e) { console.error(e); if (!stale()) setStatus('読み込めませんでした：' + (e.message || e), true); }
+      const ok = await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています。`, fail: e => { throw e; } });
+      if (ok) shownLabel = label;
+    } catch (e) { console.error(e); if (!stale()) setStatus(`「${label}」を読み込めませんでした：${e.message || e}。` + (shownLabel ? `画面は「${shownLabel}」の表示のままです。` : ''), true); }
     if (!stale()) $('driveLoad').disabled = false;
   }
   $('driveLoad').addEventListener('click', loadDrive);
