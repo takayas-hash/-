@@ -82,14 +82,17 @@ function extractRows(XLSX, ws) {
 }
 
 /* ===== 追加データ（1時間ごと詳細・値引詳細） ===== */
-function headerIndex(aoa, must) {
-  for (let i = 0; i < Math.min(aoa.length, 10); i++) { const r = aoa[i]; if (r && must.every(m => r.includes(m))) return i; }
+function headerIndex(aoa, must, lim) {
+  for (let i = 0; i < Math.min(aoa.length, lim || 10); i++) { const r = aoa[i]; if (r && must.every(m => r.includes(m))) return i; }
   return -1;
 }
 /** シートの種類を判定：summary（売上集計表）／hourly（1時間ごと詳細）／payment（値引・受取内訳） */
 function sheetKind(XLSX, ws) {
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 10 });
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 30 });
   if (headerIndex(aoa, ['値引後売上高', '理論原価率', '原価率理論差']) >= 0) return 'inventory';
+  if (headerIndex(aoa, ['従業員コード', '確定出勤', '労働時間']) >= 0) return 'timecard';
+  if (headerIndex(aoa, ['従業員コード', '労働時間(W/S)']) >= 0) return 'schedule';
+  if (headerIndex(aoa, ['社員番号', '時給'], 30) >= 0) return 'wage';
   if (headerIndex(aoa, ['店舗コード', '営業日', '純売上高(合計)']) >= 0) return 'summary';
   if (headerIndex(aoa, ['店舗コード', '時刻', '売上当年']) >= 0) return 'hourly';
   if (headerIndex(aoa, ['店舗コード', '受取内訳', '金額']) >= 0) return 'payment';
@@ -379,6 +382,169 @@ function analyzeStore(cur, prev, monthDays) {
   };
 }
 
+/* ===== 勤怠（タイムカード・勤務スケジュール・時給） ===== */
+const numc = v => typeof v === 'string' ? num(v.replace(/[,\s円]/g, '')) : num(v);
+/** 時刻 → 0時からの分（"11:00"・"2026/11/1 11:00"・Date・Excelの時刻値） */
+function toMin(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return v.getHours() * 60 + v.getMinutes();
+  if (typeof v === 'number') return Math.round((v % 1) * 1440);
+  const m = String(v).match(/(\d{1,2}):(\d{2})\s*$/);
+  return m ? +m[1] * 60 + +m[2] : null;
+}
+/** 勤務の区間（出勤〜退勤、分）。退勤が出勤以前なら翌日 */
+function shiftSpan(a, b) { const s = toMin(a), e = toMin(b); if (s == null || e == null) return null; return { s, e: e <= s ? e + 1440 : e }; }
+/** 深夜（22時〜翌5時）にかかる分 */
+const nightOf = sp => sp ? Math.max(0, Math.min(sp.e, 29 * 60) - Math.max(sp.s, 22 * 60)) + Math.max(0, Math.min(sp.e, 5 * 60) - sp.s) : 0;
+const MONTHS_EN = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+/** タイムカード（確定労働実績）。日付は「01(日)」、年月は「月度」（Nov-26 など）から */
+function extractTimecard(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const hr = headerIndex(aoa, ['従業員コード', '確定出勤', '労働時間']); const H = aoa[hr];
+  const c = n => H.indexOf(n);
+  const C = { ym: c('月度'), code: c('店舗コード'), store: c('店舗名'), kind: c('雇用形態名称'), emp: c('従業員コード'), name: c('従業員名'), day: c('日付'),
+    wsIn: c('W/S出勤'), wsOut: c('W/S退勤'), type: c('勤務種別'), in: c('確定出勤'), out: c('確定退勤'), labor: c('労働時間'), brk: c('休憩時間'), ot: c('残業時間'), night: c('深夜時間') };
+  const out = [];
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || r[C.emp] == null || r[C.emp] === '') continue;
+    let y = null, mo = null; const ymv = r[C.ym];
+    if (ymv instanceof Date) { y = ymv.getFullYear(); mo = ymv.getMonth(); }
+    else { const m = String(ymv || '').match(/([A-Za-z]{3})[-\s]?(\d{2,4})|(\d{4})[\/年-](\d{1,2})/); if (m) { if (m[1]) { mo = MONTHS_EN[m[1]]; y = +m[2] < 100 ? 2000 + +m[2] : +m[2]; } else { y = +m[3]; mo = +m[4] - 1; } } }
+    const dv = r[C.day]; let date = null;
+    if (dv instanceof Date) date = toDate(dv); else { const d = parseInt(String(dv || ''), 10); if (d && y != null) date = new Date(y, mo, d); }
+    if (!date) continue;
+    const done = r[C.out] != null && r[C.out] !== '' && num(r[C.labor]) > 0;
+    out.push({ code: String(r[C.code]).trim(), store: String(r[C.store] || '').replace(/^焼肉きんぐ/, ''), emp: String(r[C.emp]).trim(), name: String(r[C.name] || '').trim(),
+      staff: /社員/.test(String(r[C.kind] || '')), date, type: String(r[C.type] || ''), done, labor: done ? num(r[C.labor]) : 0, ot: done ? num(r[C.ot]) : 0, night: done ? num(r[C.night]) : 0,
+      ws: shiftSpan(r[C.wsIn], r[C.wsOut]) });
+  }
+  return out;
+}
+/** 勤務スケジュール表（休憩を除いた予定の労働時間） */
+function extractSchedule(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const hr = headerIndex(aoa, ['従業員コード', '労働時間(W/S)']); const H = aoa[hr];
+  const c = n => H.indexOf(n);
+  const C = { area: c('営業部名'), code: c('店舗コード'), store: c('店舗名'), emp: c('従業員コード'), cls: c('従業員区分'), name: c('従業員名'), date: c('営業日'), in: c('出勤時刻(W/S)'), out: c('退勤時刻(W/S)'), mins: c('労働時間(W/S)') };
+  const out = [];
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || r[C.emp] == null || r[C.emp] === '') continue;
+    const date = toDate(typeof r[C.date] === 'string' ? r[C.date].replace(/-/g, '/') : r[C.date]); if (!date) continue;
+    const mins = num(r[C.mins]); if (!mins) continue;
+    out.push({ code: String(r[C.code]).trim(), store: String(r[C.store] || '').replace(/^焼肉きんぐ/, ''), area: C.area >= 0 ? String(r[C.area] || '').trim() : '', emp: String(r[C.emp]).trim(), name: String(r[C.name] || '').trim(),
+      staff: String(r[C.cls]) === '0', date, mins, span: shiftSpan(r[C.in], r[C.out]) });
+  }
+  return out;
+}
+/** 時給データ（社員番号・時給・繁忙手当） */
+function extractWage(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const hr = headerIndex(aoa, ['社員番号', '時給'], 30); const H = aoa[hr].map(h => String(h || '').trim());
+  const c = n => H.indexOf(n);
+  const C = { code: c('所属コード'), emp: c('社員番号'), name: c('氏名'), wage: c('時給'), busy: c('繁忙手当'), status: c('在籍区分') };
+  const out = [];
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || r[C.emp] == null || r[C.emp] === '') continue;
+    const wage = numc(r[C.wage]); if (!wage) continue;
+    out.push({ emp: String(r[C.emp]).trim(), code: C.code >= 0 ? String(r[C.code] || '').trim() : '', name: String(r[C.name] || '').trim(), wage, busy: C.busy >= 0 ? numc(r[C.busy]) : 0 });
+  }
+  return out;
+}
+
+// 残業アラートの基準（月の残業時間）
+const OT_WARN = 30 * 60, OT_LIMIT = 45 * 60;
+const PREMIUM_OT = 0.25, PREMIUM_NIGHT = 0.25;
+/**
+ * 当月の労働時間・雑給（パート）・残業の見込み
+ * 確定日まで＝タイムカードの実績、それ以降＝勤務スケジュール（休憩を除いた予定時間）。
+ * スケジュールがなければタイムカードの勤務予定から「拘束8時間以上は休憩1時間」で見込む。
+ * 予定の合計が、同じ曜日区分の実績平均の半分に満たない日は「予定未作成」とみなして実績平均で補う。
+ */
+function analyzeLabor(tc, ws, wage, opt) {
+  if (!tc.length && !ws.length) return null;
+  const all = tc.concat(ws);
+  const anyDate = all[0].date, y = anyDate.getFullYear(), mo = anyDate.getMonth();
+  const N = new Date(y, mo + 1, 0).getDate();
+  const dtOf = date => (opt.dtByDate && opt.dtByDate[+date]) || dtOfDate(date);
+  // 確定日：実績のある人が、その日の予定人数の半分以上いる最後の日
+  const planCnt = {}, doneCnt = {};
+  (ws.length ? ws : tc.filter(r => r.ws)).forEach(r => { const d = r.date.getDate(); planCnt[d] = (planCnt[d] || 0) + 1; });
+  tc.filter(r => r.done).forEach(r => { const d = r.date.getDate(); doneCnt[d] = (doneCnt[d] || 0) + 1; });
+  let cut = 0;
+  for (let d = 1; d <= N; d++) if ((doneCnt[d] || 0) > 0 && (doneCnt[d] || 0) >= (planCnt[d] || 0) * 0.5) cut = d;
+  const wageOf = {}; wage.forEach(w => { wageOf[w.emp] = w; });
+  // 予定：店舗×従業員×日
+  const plan = {};
+  if (ws.length) ws.forEach(r => { if (r.date.getDate() > cut) (plan[r.code] = plan[r.code] || []).push({ ...r, ot: Math.max(0, r.mins - 480), night: nightOf(r.span) }); });
+  else tc.filter(r => r.ws && r.date.getDate() > cut).forEach(r => { const span = r.ws.e - r.ws.s, mins = span >= 480 ? span - 60 : span; (plan[r.code] = plan[r.code] || []).push({ ...r, mins, ot: Math.max(0, mins - 480), night: nightOf(r.ws) }); });
+  const codes = [...new Set(all.map(r => r.code))].filter(c => !opt.pick || opt.pick.has(c));
+  const stores = codes.map(code => {
+    const act = tc.filter(r => r.code === code && r.done && r.date.getDate() <= cut);
+    const pl = plan[code] || [];
+    const name = (act[0] || pl[0] || all.find(r => r.code === code)).store;
+    // パートの時給：時給データ。なければ店舗のパート平均
+    const partW = [...new Set(act.concat(pl).filter(r => !r.staff).map(r => r.emp))].map(e => wageOf[e]).filter(Boolean).map(w => w.wage + (w.busy || 0));
+    const avgW = partW.length ? partW.reduce((a, b) => a + b, 0) / partW.length : null;
+    const noWage = new Set();
+    const cost = (r, mins) => { if (r.staff) return 0; const w = wageOf[r.emp]; if (!w) noWage.add(r.emp); const h = w ? w.wage + (w.busy || 0) : avgW || 0; return mins / 60 * h + (r.ot / 60) * h * PREMIUM_OT + (r.night / 60) * h * PREMIUM_NIGHT; };
+    // 日別
+    const days = [];
+    for (let d = 1; d <= N; d++) {
+      const date = new Date(y, mo, d), dt = dtOf(date);
+      if (d <= cut) { const rs = act.filter(r => r.date.getDate() === d); days.push({ date, dt, done: true, mins: sum(rs, r => r.labor), staffMins: sum(rs.filter(r => r.staff), r => r.labor), cost: sum(rs, r => cost(r, r.labor)), ot: sum(rs, r => r.ot), night: sum(rs, r => r.night) }); }
+      else { const rs = pl.filter(r => r.date.getDate() === d); days.push({ date, dt, done: false, mins: sum(rs, r => r.mins), staffMins: sum(rs.filter(r => r.staff), r => r.mins), cost: sum(rs, r => cost(r, r.mins)), ot: sum(rs, r => r.ot), night: sum(rs, r => r.night) }); }
+    }
+    // 予定未作成の日を補う（同じ曜日区分の実績平均の半分未満）
+    const doneDays = days.filter(d => d.done && d.mins > 0);
+    const avgBy = dt => { const ds = doneDays.filter(d => d.dt === dt); const use = ds.length ? ds : doneDays; return use.length ? { mins: sum(use, d => d.mins) / use.length, staffMins: sum(use, d => d.staffMins) / use.length, cost: sum(use, d => d.cost) / use.length } : null; };
+    days.filter(d => !d.done).forEach(d => { const a = avgBy(d.dt); if (a && d.mins < a.mins * 0.5) { d.est = true; d.planMins = d.mins; d.mins = a.mins; d.staffMins = a.staffMins; d.cost = a.cost; } });
+    const past = days.filter(d => d.done), fut = days.filter(d => !d.done);
+    // 個人別（残業・雑給）
+    const people = {};
+    const add = (r, mins, isPlan) => { const p = (people[r.emp] = people[r.emp] || { emp: r.emp, name: r.name, staff: r.staff, mins: 0, planMins: 0, ot: 0, planOt: 0, night: 0, cost: 0, days: 0, planDays: 0 });
+      if (isPlan) { p.planMins += mins; p.planOt += r.ot; p.planDays++; } else { p.mins += mins; p.ot += r.ot; p.days++; } p.night += r.night; p.cost += cost(r, mins); };
+    act.forEach(r => add(r, r.labor, false)); pl.forEach(r => add(r, r.mins, true));
+    const list = Object.values(people).map(p => ({ ...p, totalOt: p.ot + p.planOt, totalMins: p.mins + p.planMins, wage: wageOf[p.emp] ? wageOf[p.emp].wage : null }));
+    const s = {
+      code, name, cut, N, days, people: list,
+      mins: sum(past, d => d.mins), staffMins: sum(past, d => d.staffMins), cost: sum(past, d => d.cost),
+      planMins: sum(fut, d => d.mins), planCost: sum(fut, d => d.cost), estDays: fut.filter(d => d.est).length,
+      avgWage: avgW, noWage: noWage.size, wageless: !avgW,
+    };
+    s.landMins = s.mins + s.planMins; s.landCost = s.cost + s.planCost;
+    s.alerts = list.filter(p => p.totalOt >= OT_WARN).sort((a, b) => b.totalOt - a.totalOt);
+    return s;
+  }).filter(s => s.landMins > 0).sort((a, b) => a.code.localeCompare(b.code));
+  const T = k => sum(stores, s => s[k]);
+  const wd = stores.filter(s => !s.wageless), TW = k => sum(wd, s => s[k]);
+  const area = { mins: T('mins'), staffMins: T('staffMins'), cost: TW('cost'), planMins: T('planMins'), planCost: TW('planCost'), landMins: T('landMins'), landCost: TW('landCost'), wageless: stores.length - wd.length, wagelessNames: stores.filter(s => s.wageless).map(s => s.name),
+    estDays: Math.max(0, ...stores.map(s => s.estDays)), noWage: TW('noWage'), alerts: stores.flatMap(s => s.alerts.map(p => ({ ...p, store: s.name }))).sort((a, b) => b.totalOt - a.totalOt), cut, N };
+  return { stores, area, cut, N, y, mo, hasSchedule: ws.length > 0, hasTimecard: tc.length > 0, hasWage: wage.length > 0 };
+}
+const hrs = m => (Math.round(m / 60 * 10) / 10).toLocaleString('ja-JP') + 'h';
+const hrs0 = m => Math.round(m / 60).toLocaleString('ja-JP') + 'h';
+/** 人のコメント（店舗・全体共通）。f：売上の見込み（雑給率に使う） */
+function laborLines(s, L, f, sales, ctx) {
+  const out = [], push = (t, d) => out.push({ t, d: !!d });
+  const cutTxt = L.cut ? `${L.mo + 1}/${L.cut}時点` : '実績なし';
+  const land = L.cut < L.N;
+  push(`【労働時間】実績${hrs0(s.mins)}（${cutTxt}。うち社員${hrs0(s.staffMins)}）${land ? `、着地見込み${hrs0(s.landMins)}（残り${L.N - L.cut}日の勤務予定${hrs0(s.planMins)}）` : ''}。`);
+  if (s.estDays) push(`　※残り${s.estDays}日は勤務予定が未作成（予定が同じ曜日区分の実績平均の半分未満）のため、実績平均で補っています。`);
+  if (L.hasWage && s.wageless === true) push('・雑給：時給データにこの店舗のパートがいないため計算できません（時給データの店舗を確認してください）。');
+  else if (L.hasWage) {
+    const landSales = f ? f.landing : null;
+    let t = `・雑給（パート）：実績${man(s.cost)}${land ? `、着地見込み${man(s.landCost)}` : ''}`;
+    if (sales) t += `。雑給率${pct(s.cost / sales)}（実績）${landSales ? `／${pct(s.landCost / landSales)}（売上・雑給とも着地見込み）` : ''}`;
+    push(t + `。残業・深夜は25%割増で計算${s.wageless ? `（時給データのない${s.wagelessNames.join('・')}を除く）` : ''}。`);
+    if (s.noWage) push(`　時給データにない${s.noWage}名（新規入社など）は店舗のパート平均時給${s.avgWage ? yen(s.avgWage) : ''}で計算しています。`, true);
+  }
+  if (s.alerts && s.alerts.length) {
+    const over = s.alerts.filter(p => p.totalOt >= OT_LIMIT);
+    push(`・残業アラート（月の残業見込み${OT_WARN / 60}h以上）：${s.alerts.slice(0, 5).map(p => `${p.store ? p.store + '・' : ''}${p.name}${p.staff ? '（社員）' : ''}${hrs(p.totalOt)}（実績${hrs(p.ot)}＋予定${hrs(p.planOt)}）`).join('、')}${s.alerts.length > 5 ? ` ほか${s.alerts.length - 5}名` : ''}。${over.length ? `うち${over.length}名は${OT_LIMIT / 60}h以上の見込みで、勤務予定の見直しが必要。` : ''}`);
+  } else push(`・残業アラート：月の残業見込みが${OT_WARN / 60}h以上の人はいません。`);
+  return out;
+}
+
 /* ===== 当月の着地見込み ===== */
 const dtOfDate = date => { const wd = WEEKDAYS[(date.getDay() + 6) % 7]; return wd === '土' ? '土曜' : wd === '日' ? '日祝日' : wd === '金' ? '休前日' : '平日'; };
 /**
@@ -458,6 +624,7 @@ function scopeCounts(rows, area) {
 
 function analyze(curRows, prevRows, extra) {
   extra = extra || {};
+  let tc = extra.tc || [], wsch = extra.ws || [], wage = extra.wage || [];
   let hourly = extra.hourly || [], pays = extra.pays || [], pPays = extra.pPays || [], menu = extra.menu || [], pMenu = extra.pMenu || [], inv = extra.inv || [];
   // 対象店舗の絞り込み：営業部、直営／FC／全店
   const scope = extra.scope || 'all', areaSel = extra.area || '';
@@ -502,6 +669,12 @@ function analyze(curRows, prevRows, extra) {
   // 当月の着地見込み（月の途中のときだけ）
   stores.forEach(s => { s.fc = isFullMonth ? null : forecastStore(s, curRows.filter(r => r.code === s.code), prevRows.filter(r => r.code === s.code), lastDate, monthEnd); });
   area.fc = isFullMonth ? null : forecastSum(stores.map(s => s.fc), area);
+  // 人：労働時間・雑給・残業
+  let labor = null;
+  if (tc.length || wsch.length) {
+    const dtByDate = {}; curRows.forEach(r => { dtByDate[+r.date] = r.dt; });
+    labor = analyzeLabor(tc, wsch, wage, { pick, dtByDate });
+  }
     const byDate = {};
   cur.forEach(r => { if (r.sales > 0 && r.budget > 0) (byDate[+r.date] = byDate[+r.date] || []).push(r); });
   // 共通の不振日：対象店の85%以上が予算比85%未満、かつ同じ曜日区分の月平均より15pt以上低い日
@@ -548,8 +721,26 @@ function analyze(curRows, prevRows, extra) {
   stores.forEach(s => { s.lines = storeComment(s, ctx); s.costLines = costComment(s, ctx); });
   area.hasInv = withInv.length > 0;
   area.lines = areaComment(area, stores, ctx);
+  if (labor) {
+    // 売上の実績期間と勤怠の確定日が同じときだけ、実績の雑給率を出す
+    const sameCut = labor.cut === lastDate.getDate() && labor.mo === lastDate.getMonth();
+    stores.forEach(s => { s.labor = labor.stores.find(x => x.code === s.code) || null; s.laborLines = s.labor ? laborLines(s.labor, labor, s.fc, sameCut ? s.sales : null, ctx) : [{ t: '勤怠データにこの店舗がありません。', d: false }]; });
+    const a = labor.area, fs = stores.filter(s => s.labor);
+    area.labor = a;
+    const full = fs.length === stores.length && !a.wageless;
+    area.laborLines = laborLines(a, labor, full ? area.fc : null, sameCut && full ? area.sales : null, ctx);
+    if (labor.hasWage && fs.length > 1) {
+      const rate = s => s.labor.wageless ? null : s.fc ? s.labor.landCost / s.fc.landing : sameCut ? s.labor.cost / s.sales : null;
+      const rk = fs.filter(s => rate(s) != null).sort((x, y) => rate(y) - rate(x));
+      const fmt = xs => xs.map(s => `${s.name}${pct(rate(s))}`).join('、');
+      if (rk.length >= 5) area.laborLines.push({ t: `・雑給率の高い店（${area.fc ? '着地見込み' : '実績'}）：${fmt(rk.slice(0, 3))}／低い店：${fmt(rk.slice(-2).reverse())}。`, d: false });
+      else if (rk.length) area.laborLines.push({ t: `・店舗別の雑給率（${area.fc ? '着地見込み' : '実績'}、高い順）：${fmt(rk)}。`, d: false });
+    }
+    const est = fs.filter(s => s.labor.estDays).map(s => `${s.name}${s.labor.estDays}日`);
+    if (est.length) area.laborLines.push({ t: `・勤務予定の未作成：${est.join('、')}（実績平均で補っています）。`, d: true });
+  }
   area.costLines = areaCostComment(area, stores, ctx);
-  return { stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0,  hasPays: pays.length > 0 };
+  return { labor, stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0,  hasPays: pays.length > 0 };
 }
 
 /* ===== コメント生成 ===== */
@@ -943,4 +1134,4 @@ function areaCostComment(a, stores, ctx) {
 
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
