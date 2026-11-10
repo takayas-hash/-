@@ -1,0 +1,868 @@
+<title>予算差異アナライザー</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap">
+<style>
+/* Layout: 帳票のような左揃え一列。上から「全体→店舗一覧→店舗詳細」の順に要約から詳細へ */
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --fg: #1d1f24; --muted: #5d6068; --line: #dddcd6;
+  --accent: #23407a; --accent-ink: #ffffff; --accent-soft: #e6ebf5;
+  --neg: #d03b3b; --pos: #2a78d6; --mid: #f0efec; --neg-ink: #b42323; --pos-ink: #1d5fae;
+  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c0: #a3a29c; --prev: #b9b8b1;
+  --font-display: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-body: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141518; --panel: #1d1f23; --fg: #eceae4; --muted: #a7a8ad; --line: #34363c;
+  --accent: #8fb0ef; --accent-ink: #10131a; --accent-soft: #232c3e;
+  --neg: #e05252; --pos: #3987e5; --mid: #383835; --neg-ink: #ff8b84; --pos-ink: #8ab8f5;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c0: #6b6a64; --prev: #5d5c57; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #141518; --panel: #1d1f23; --fg: #eceae4; --muted: #a7a8ad; --line: #34363c;
+  --accent: #8fb0ef; --accent-ink: #10131a; --accent-soft: #232c3e;
+  --neg: #e05252; --pos: #3987e5; --mid: #383835; --neg-ink: #ff8b84; --pos-ink: #8ab8f5;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c0: #6b6a64; --prev: #5d5c57; color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.65; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: 1.6rem; font-weight: 900; letter-spacing: .02em; }
+h2 { font-size: 1.15rem; font-weight: 700; }
+h3 { font-size: .98rem; font-weight: 700; }
+.num, td.n, th.n { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+.label { font-size: .75rem; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+
+header.top { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: end; justify-content: space-between; }
+header.top p { margin: 4px 0 0; max-width: 60ch; }
+.drop { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border: 2px dashed var(--line); border-radius: 10px; padding: 14px 16px; background: var(--panel); }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.btn { font: inherit; font-weight: 700; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:focus-visible, .seg button:focus-visible, tr.pick:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+#file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.status { min-height: 1.4em; }
+.status.err { color: var(--neg-ink); font-weight: 700; }
+.saved { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+.saved ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; font-size: .88rem; }
+.saved li { overflow-wrap: anywhere; }
+.stk { display: grid; grid-template-columns: 8.5em minmax(0, 1fr) 4.5em; align-items: center; gap: 4px 10px; font-size: .82rem; }
+.stk .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stk .bar100 { display: flex; gap: 2px; height: 20px; min-width: 0; }
+.stk .bar100 span { display: block; height: 100%; min-width: 2px; color: #fff; font-size: .7rem; line-height: 20px; text-align: center; overflow: hidden; white-space: nowrap; }
+.stk .bar100 span:first-child { border-radius: 4px 0 0 4px; } .stk .bar100 span:last-child { border-radius: 0 4px 4px 0; }
+.stk .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.stk .me { font-weight: 700; }
+.lg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .78rem; color: var(--muted); margin: 6px 0 10px; }
+.lg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.gb { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 6px 10px; font-size: .82rem; align-items: center; }
+.gb .bars { display: grid; gap: 2px; min-width: 0; }
+.gb .bars div { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gb .bars b { display: block; height: 12px; border-radius: 0 4px 4px 0; flex: none; }
+.gb .bars em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--muted); font-size: .75rem; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--line); }
+.tabs button { font: inherit; font-family: var(--font-display); font-weight: 700; font-size: 1rem; background: transparent; color: var(--muted); border: 0; border-bottom: 3px solid transparent; margin-bottom: -2px; padding: 8px 16px; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tabs button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.note { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; font-size: .9rem; }
+.flag { display: inline-block; font-size: .72rem; border-radius: 4px; padding: 0 6px; background: color-mix(in oklab, var(--neg) 16%, transparent); color: var(--neg-ink); white-space: nowrap; }
+.banner { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; font-size: .9rem; }
+
+section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.kpi { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
+.kpi .v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.neg { color: var(--neg-ink); } .pos { color: var(--pos-ink); }
+.pill { display: inline-block; font-size: .75rem; font-weight: 700; border-radius: 999px; padding: 1px 9px; white-space: nowrap; }
+.pill.ok { background: color-mix(in oklab, var(--pos) 18%, transparent); color: var(--pos-ink); }
+.pill.ng { background: color-mix(in oklab, var(--neg) 18%, transparent); color: var(--neg-ink); }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: .85rem; border: 0; background: transparent; color: var(--fg); padding: 6px 12px; cursor: pointer; }
+.seg button:disabled { color: var(--muted); opacity: .5; cursor: not-allowed; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+textarea.comment { width: 100%; font: inherit; font-size: .92rem; line-height: 1.75; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; resize: vertical; min-height: 12em; }
+
+.tbl { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { font-size: .75rem; color: var(--muted); font-weight: 700; letter-spacing: .04em; }
+td.n, th.n { text-align: right; }
+tr.pick { cursor: pointer; }
+tr.pick:hover td { background: var(--accent-soft); }
+tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 700; }
+.bar { display: inline-block; height: 8px; border-radius: 0 4px 4px 0; vertical-align: middle; }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 20px; }
+.grid2 > * { min-width: 0; }
+
+.heat { display: grid; grid-template-columns: 5.5em repeat(5, minmax(64px, 1fr)); gap: 2px; font-size: .82rem; min-width: 440px; }
+.heat .h { color: var(--muted); font-weight: 700; font-size: .72rem; padding: 4px; line-height: 1.3; }
+.heat .c { border-radius: 4px; padding: 8px 6px; text-align: center; font-variant-numeric: tabular-nums; line-height: 1.3; cursor: default; }
+.heat .c b { display: block; font-size: .95rem; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: .75rem; color: var(--muted); flex-wrap: wrap; }
+.legend .ramp { width: 160px; height: 10px; border-radius: 3px; background: linear-gradient(90deg, color-mix(in oklab, var(--neg) 75%, var(--mid)), var(--mid), color-mix(in oklab, var(--pos) 75%, var(--mid))); }
+
+.chart { position: relative; overflow-x: auto; }
+.chart svg { display: block; }
+.chart text { fill: var(--muted); font-size: 10px; font-family: var(--font-body); }
+.tip { position: fixed; pointer-events: none; background: var(--fg); color: var(--bg); font-size: .8rem; padding: 6px 10px; border-radius: 6px; line-height: 1.5; z-index: 20; max-width: 260px; }
+.foot { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
+.foot p { margin: 0; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) { tr.pick td { transition: background .12s; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="label">月次 売上予算 差異分析</div>
+      <h1>予算差異アナライザー</h1>
+      <p class="muted small">売上集計表（当年・前年）を読み込むと、店舗ごとに曜日区分・時間帯別の予算差を分解し、報告用コメントの下書きを作ります。ファイルはこのブラウザ内だけで処理され、外部へ送信されません。</p>
+    </div>
+    <label class="drop" id="drop" for="file">
+      <span class="btn">ファイルを選択</span>
+      <span class="small muted">売上集計表の<b>当年・前年</b>をまとめて選択（ドラッグ＆ドロップ可）<br>任意で<b>値引詳細</b>・<b>メニュー別（ABC分析）</b>の当年・前年、<b>原価管理表</b>も入れると、値引・原価・喫食量・コース構成・原価率理論差の分析が加わります<br>CSV・Excelどちらも可。従来の管理用 .xlsm でもOK</span>
+      <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
+    </label>
+  </header>
+  <div class="status small" id="status" role="status"></div>
+  <div class="saved" id="saved" hidden>
+    <div class="row" style="align-items:flex-start">
+      <div style="min-width:0"><div class="label">保存中のデータ <span id="savedAt" class="muted" style="letter-spacing:0;font-weight:400"></span></div><ul id="savedList"></ul></div>
+      <div class="row" style="gap:8px">
+        <button type="button" class="btn ghost" id="clearBtn">保存データを削除</button>
+        <span id="clearAsk" hidden class="small">削除しますか？ <button type="button" class="btn" id="clearYes">削除する</button> <button type="button" class="btn ghost" id="clearNo">やめる</button></span>
+      </div>
+    </div>
+    <p class="small muted" style="margin:6px 0 0">データはこのブラウザ内だけに保存されます。毎日の更新は当年の売上集計表だけ入れればOK（前年・値引詳細はそのまま残ります。月が変わると、月の合わないデータは外れます）。</p>
+  </div>
+  <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店・FC1店）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
+
+  <div class="tabs" role="tablist" aria-label="分析の種類">
+    <button type="button" role="tab" id="tabSales" aria-selected="true">売上分析</button>
+    <button type="button" role="tab" id="tabCost" aria-selected="false">原価分析</button>
+  </div>
+
+  <section class="card" id="areaCard">
+    <div class="row">
+      <div><div class="label" id="period"></div><h2 id="areaTitle">直営店全体</h2></div>
+      <div class="row" style="gap:8px">
+        <select id="areaSel" class="btn ghost" aria-label="営業部" hidden></select>
+        <div class="seg" role="group" aria-label="対象店舗">
+          <button type="button" id="scDirect" aria-pressed="true">直営のみ</button>
+          <button type="button" id="scFc" aria-pressed="false">FCのみ</button>
+          <button type="button" id="scAll" aria-pressed="false">全店</button>
+        </div>
+        <div class="seg" role="group" aria-label="コメントの長さ">
+          <button type="button" id="mShort" aria-pressed="true">簡潔版</button>
+          <button type="button" id="mLong" aria-pressed="false">詳細版</button>
+        </div>
+        <button type="button" class="btn ghost" id="copyAll">全店コメントを一括コピー</button>
+      </div>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <textarea class="comment" id="areaComment" aria-label="全体コメント" spellcheck="false"></textarea>
+    <div class="row"><span class="small muted">コメントは直接編集できます。一括コピーは「店舗名⇥コメント」の形式で、Excelにそのまま貼り付けできます。</span><button type="button" class="btn ghost" id="copyArea">全体コメントをコピー</button></div>
+  </section>
+
+  <section class="card">
+    <div class="row"><h2 id="storeTblTitle">店舗別 予算差と要因</h2><span class="small muted">行をクリックすると下に詳細を表示</span></div>
+    <div class="tbl"><table id="storeTbl"></table></div>
+    <div data-tab="cost" hidden id="courseAllBox">
+      <h3>店舗別のコース構成</h3>
+      <p class="small muted" style="margin:2px 0 0">年齢区分（大人・シニア・小学生・幼児）を合算。プレミアムコースの比率が高い順。</p>
+      <div class="lg" id="courseLegend"></div>
+      <div class="stk" id="courseAll"></div>
+    </div>
+  </section>
+
+  <section class="card" id="storeCard">
+    <div class="row">
+      <div><div class="label">店舗詳細</div><h2 id="storeName"></h2></div>
+      <select id="storeSel" aria-label="店舗を選択" class="btn ghost"></select>
+    </div>
+    <div class="kpis" id="sKpis"></div>
+    <div>
+      <div class="row" style="margin-bottom:8px"><h3>報告コメント（下書き）</h3><button type="button" class="btn ghost" id="copyStore">この店舗のコメントをコピー</button></div>
+      <textarea class="comment" id="storeComment" aria-label="店舗コメント" spellcheck="false"></textarea>
+    </div>
+    <div class="stack" data-tab="sales">
+    <div class="grid2">
+      <div>
+        <h3>曜日区分 × 時間帯の予算比</h3>
+        <p class="small muted" style="margin:2px 0 8px">時間帯の予算は、前年同月の同じ曜日区分の時間帯構成比で日予算を按分した値です。</p>
+        <div class="tbl"><div class="heat" id="heat"></div></div>
+        <div class="legend" style="margin-top:8px"><span>未達</span><span class="ramp"></span><span>超過</span><span>（100%＝グレー、±20%で最も濃く）</span></div>
+      </div>
+      <div>
+        <h3>日別の予算差</h3>
+        <p class="small muted" style="margin:2px 0 8px">棒の上下＝予算との差額。</p>
+        <div class="chart" id="daily"></div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div><h3>曜日区分別</h3><div class="tbl"><table id="typeTbl"></table></div></div>
+      <div><h3>時間帯別</h3><div class="tbl"><table id="bandTbl"></table></div></div>
+    </div>
+    <div><h3>曜日別</h3><div class="tbl"><table id="wdTbl"></table></div></div>
+    <div id="discCatBox" hidden><h3>値引の前年比較（分類別）</h3><p class="small muted" style="margin:2px 0 8px">利用件数＝値引が使われた会計の数。客単価への影響＝1人あたり値引（税抜換算）の前年差で、値引が増えるとマイナス。</p><div class="tbl"><table id="discCatTbl"></table></div></div>
+    <div id="discBox" hidden><h3>値引の内訳（上位10）</h3><div class="tbl"><table id="discTbl"></table></div></div>
+    </div>
+    <div class="stack" data-tab="cost" hidden>
+    <div id="invBox">
+      <h3>原価率理論差の推移（原価管理表）</h3>
+      <div id="invBody"></div>
+    </div>
+    <div id="yoyBox">
+      <div class="row"><h3>皿数・喫食量の前年比較（食べ放題フード・1人あたり）</h3>
+        <div class="seg" role="group" aria-label="指標"><button type="button" id="yQty" aria-pressed="true">皿数</button><button type="button" id="yG" aria-pressed="false">喫食量</button><button type="button" id="yCost" aria-pressed="false">原価</button></div></div>
+      <div id="yoyBody"></div>
+    </div>
+    <div id="courseBox">
+      <h3>コース構成</h3>
+      <div class="lg" id="courseLegend2"></div>
+      <div class="stk" id="courseStore"></div>
+      <div class="tbl" style="margin-top:10px"><table id="courseTbl"></table></div>
+    </div>
+    <div id="costBox" hidden>
+      <h3>原価・喫食量・皿数</h3>
+      <p class="small muted" style="margin:2px 0 8px">メニュー別データより。1人あたり＝総客数で割った値。平均＝表示中の対象店の合計を総客数で割った値。</p>
+      <div class="kpis" id="costKpis" style="margin-bottom:12px"></div>
+      <div class="tbl"><table id="costTbl"></table></div>
+    </div>
+    <div id="lossBox" hidden><h3>ロス（廃棄額）</h3><div class="kpis" id="lossKpis" style="margin-bottom:12px"></div><div class="tbl"><table id="lossWdTbl"></table></div></div>
+    </div>
+  </section>
+
+  <div class="foot">
+    <p>計算方法：売上＝純売上高（税抜・値引後）。客数要因＝(客数実績−客数予算)×予算客単価、単価要因＝(実績客単価−予算客単価)×客数実績。両者の合計は予算差と一致します。</p>
+    <p>値引による誘客の客数換算＝利用件数（従業員食事を除く）の前年差×当年の1組あたり平均人数（1会計で複数の値引を使う場合もあるため目安）。原価分析の率はすべて値引前売上高（純売上高＋値引）が分母で、社内の原価管理表と同じ基準です。原価管理表を読み込むと、原価率理論差（値引前原価率−理論原価率）とロス込原価率理論差（さらに値引前ロス率を引いた値）は原価管理表の数字を使います。読み込んでいない場合の理論差（概算）＝仕入率−理論原価率。月末在庫の増減を含むため月ごとにぶれます。ロス率＝廃棄額÷純売上高（売上集計表の「廃棄額」列）。突出日＝その店の1日平均ロスの3倍以上かつ1万円以上の日。原価率＝原価÷純売上高（売上集計表の「原価」列。メニュー別の予定原価×販売数の合計と一致）。原価率の平均との差は「1人あたり原価（喫食）」と「客単価」の影響に分解しています。共通の不振日＝対象店舗の85%以上が予算比85%未満で、かつ同じ曜日区分の月平均より予算比が15ポイント以上低かった日。対象は画面上部で営業部と「直営のみ／FCのみ／全店」を切り替えられます（売上集計表の「営業部」「FC区分」列で判定）。前年比較は同じ日付範囲・同じ曜日区分（平日／休前日／土曜／日祝日）で行います。月の途中で読み込んだ場合は、実績のある最終日までで集計します。</p>
+  </div>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/*CORE*/
+</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let R = null, cur = null, detail = false, scope = 'direct', areaSel = '', last = null, tab = 'sales';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const cls = v => v < 0 ? 'neg' : 'pos';
+  const fit = ta => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 4) + 'px'; };
+  ['areaComment', 'storeComment'].forEach(id => $(id).addEventListener('input', e => fit(e.target)));
+  addEventListener('resize', () => { fit($('areaComment')); fit($('storeComment')); });
+
+  /* ---------- サンプルデータ（架空） ---------- */
+  function sampleRows(year) {
+    let seed = year * 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const stores = [['9001', 'サンプル店A', 1.00, 0.93], ['9002', 'サンプル店B', 0.85, 1.04], ['9003', 'サンプル店C', 1.15, 0.97], ['9004', 'サンプル店D', 0.95, 1.01]];
+    const shapeWk = { 11: .04, 12: .05, 13: .03, 17: .14, 18: .2, 19: .22, 20: .17, 21: .1, 22: .05 };
+    const shapeHd = { 11: .07, 12: .1, 13: .08, 14: .05, 15: .04, 16: .06, 17: .13, 18: .16, 19: .15, 20: .1, 21: .05, 22: .01 };
+    const out = [];
+    for (const [code, name, scale, perf] of stores) for (let d = 1; d <= 31; d++) {
+      const date = new Date(year, 9, d); const wd = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
+      const dt = wd === '土' ? '土曜' : wd === '日' ? '日祝日' : wd === '金' ? '休前日' : '平日';
+      const base = { 平日: 420000, 休前日: 620000, 土曜: 1050000, 日祝日: 980000 }[dt] * scale;
+      const weather = rnd() < .2 ? '雨' : rnd() < .5 ? '曇' : '晴';
+      const budget = Math.round(base * (year === 2026 ? 1.05 : 1));
+      let p = perf * (0.9 + rnd() * 0.2) * (weather === '雨' ? 0.9 : 1);
+      if (code === '9001' && dt !== '平日') p *= 0.94;
+      const sales = Math.round(base * p);
+      const up = 3050 + (code === '9002' ? 120 : 0) + (rnd() - .5) * 150;
+      const cust = Math.round(sales / up);
+      const shape = dt === '平日' || dt === '休前日' ? shapeWk : shapeHd;
+      const hourS = new Array(25).fill(0), hourC = new Array(25).fill(0);
+      for (const h in shape) { let k = shape[h]; if (code === '9001' && (h == 19 || h == 20) && dt !== '平日') k *= 0.85; hourS[h] = Math.round(sales * k); hourC[h] = Math.round(cust * k); }
+      const tot = hourS.reduce((a, b) => a + b, 0); hourS[19] += sales - tot;
+      out.push({ code, name, fc: code === '9004' ? 'FC' : '直営', area: 'サンプルエリア', cost: Math.round(sales * (0.42 + rnd() * 0.05)), loss: Math.round(sales * (d % 7 === 2 ? 0.03 : 0.005) * rnd()), buy: 0, date, wd, dt, weather, sales, cust, groups: Math.round(cust / 3.2), budget, custBudget: Math.round(budget / 3080), disc: Math.round(sales * .04), hourS, hourC });
+    }
+    return out;
+  }
+
+  /* ---------- 読み込み ---------- */
+  function setStatus(t, err) { const s = $('status'); s.textContent = t; s.className = 'status small' + (err ? ' err' : ''); }
+  // 1ファイルを読み、{cur, prev} または {raw} を返す
+  async function readOne(f) {
+    const r = await readOneInner(f);
+    r.file = { name: f.name, raw: await f.arrayBuffer() };
+    return r;
+  }
+  async function readOneInner(f) {
+    const buf = await f.arrayBuffer();
+    let wb;
+    if (/\.(csv|txt|tsv)$/i.test(f.name)) {
+      // CSVは UTF-8 → だめなら Shift-JIS で読む
+      let text;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) { text = new TextDecoder('shift_jis').decode(buf); }
+      wb = XLSX.read(text.replace(/^﻿/, ''), { type: 'string', cellDates: true, dense: true, raw: false });
+    } else {
+      // 管理用の大きい .xlsm は必要シートだけ読む
+      wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true, sheets: [SHEET_CUR, SHEET_PREV] });
+      if (!findSheet(wb, SHEET_CUR)) wb = XLSX.read(buf, { type: 'array', cellDates: true, dense: true });
+    }
+    // 原価管理表：店舗ごとのシートをまとめて読む
+    const invs = wb.SheetNames.filter(n => isInventorySheet(XLSX, wb.Sheets[n])).map(n => extractInventory(XLSX, wb.Sheets[n])).filter(Boolean);
+    if (invs.length) return { name: f.name, inv: invs };
+    const wsC = findSheet(wb, SHEET_CUR);
+    if (wsC) return { name: f.name, cur: extractRows(XLSX, wsC), prev: extractRows(XLSX, findSheet(wb, SHEET_PREV)) };
+    for (const n of wb.SheetNames) {
+      const ws = wb.Sheets[n], k = sheetKind(XLSX, ws);
+      if (k === 'summary') return { name: f.name, raw: extractRows(XLSX, ws) };
+      if (k === 'hourly') return { name: f.name, hourly: extractHourly(XLSX, ws) };
+      if (k === 'payment') return { name: f.name, pays: extractPayments(XLSX, ws) };
+      if (k === 'menu') return { name: f.name, menu: extractMenu(XLSX, ws) };
+      if (k === 'usage') return { name: f.name, usage: true }; // 食材別の理論差データは使わない
+    }
+    throw new Error(`「${f.name}」の種類が判別できません（売上集計表・1時間ごと詳細・値引詳細のいずれかを選んでください）`);
+  }
+  const ym = rows => { const d = new Date(Math.max(...rows.map(r => +r.date))); return `${d.getFullYear()}年${d.getMonth() + 1}月`; };
+
+  /* ---------- 保存（このブラウザの IndexedDB。外部には送信しない） ---------- */
+  const store = {
+    db: null,
+    open() {
+      if (this.db) return Promise.resolve(this.db);
+      return new Promise((res, rej) => {
+        try {
+          const q = indexedDB.open('budget-analyzer', 1);
+          q.onupgradeneeded = () => q.result.createObjectStore('kv');
+          q.onsuccess = () => { this.db = q.result; res(this.db); };
+          q.onerror = () => rej(q.error);
+        } catch (e) { rej(e); }
+      });
+    },
+    async tx(mode, fn) {
+      // 環境によっては応答が返らないため3秒で打ち切る
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000));
+      const db = await Promise.race([this.open(), timeout]);
+      return Promise.race([timeout, new Promise((res, rej) => { const x = db.transaction('kv', mode); const r = fn(x.objectStore('kv')); x.oncomplete = () => res(r && r.result); x.onerror = () => rej(x.error); })]);
+    },
+    get() { return this.tx('readonly', s => s.get('data')).catch(() => null); },
+    put(v) { return this.tx('readwrite', s => s.put(v, 'data')); },
+    clear() { return this.tx('readwrite', s => s.delete('data')); },
+  };
+  const pref = {
+    get(k, d) { try { const v = localStorage.getItem('ba.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('ba.' + k, JSON.stringify(v)); } catch (e) { /* 保存できない環境では無視 */ } },
+  };
+  let S = null; // 保存中のデータ {cur, prev, pays, hourly, savedAt}
+  // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
+  const DATA_VERSION = 3;
+  async function reparse(v) {
+    const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly'];
+    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || [])];
+    if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
+    const cache = new Map();
+    const parse = async f => { if (!cache.has(f.raw)) cache.set(f.raw, await readOneInner(new File([f.raw], f.name))); return cache.get(f.raw); };
+    const N = { ...v };
+    for (const k of slots) {
+      const x = v[k]; if (!x) continue;
+      const g = await parse(x.file);
+      const rows = k === 'cur' ? (g.cur || g.raw) : k === 'prev' ? (x.sheet === 'prev' ? g.prev : g.raw) : (g.pays || g.menu || g.hourly);
+      N[k] = { ...x, rows: rows || [] };
+    }
+    delete N.usage;
+    if (v.invFiles) { N.invFiles = []; for (const x of v.invFiles) { const g = await parse(x.file); const keep = new Set(x.rows.map(r => r.code)); N.invFiles.push({ ...x, rows: (g.inv || []).filter(r => keep.has(r.code)) }); } }
+    N.v = DATA_VERSION;
+    return N;
+  }
+  const maxD = rows => { const ds = rows.filter(r => r.date).map(r => +r.date); return ds.length ? new Date(Math.max(...ds)) : null; };
+  const mKey = rows => { const d = maxD(rows); return d ? d.getFullYear() * 12 + d.getMonth() : null; };
+  const fmtYM = rows => { const d = maxD(rows); return d ? `${d.getFullYear()}年${d.getMonth() + 1}月（〜${d.getMonth() + 1}/${d.getDate()}）` : ''; };
+  const fmtTime = d => `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  function renderSaved() {
+    const box = $('saved');
+    if (!S || !S.cur) { box.hidden = true; return; }
+    const item = (label, x) => x ? `<li><span class="label">${label}</span> ${esc(x.name)} <span class="muted">${fmtYM(x.rows)}</span></li>` : `<li class="muted"><span class="label">${label}</span> なし</li>`;
+    $('savedList').innerHTML = item('当年', S.cur) + item('前年', S.prev) + item('値引詳細（当年）', S.pays) + item('値引詳細（前年）', S.pPays) + item('メニュー別（当年）', S.menu) + item('メニュー別（前年）', S.pMenu)
+      + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
+    $('savedAt').textContent = `保存日時 ${fmtTime(new Date(S.savedAt))}`;
+    $('clearAsk').hidden = true; $('clearBtn').hidden = false;
+    box.hidden = false;
+  }
+  function runSaved() {
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], inv: (S.invFiles || []).flatMap(x => x.rows) });
+    $('sampleBanner').hidden = true;
+    renderSaved();
+  }
+
+  async function handleFiles(list) {
+    const files = [...list].filter(Boolean);
+    if (!files.length) return;
+    setStatus(`${files.map(f => `「${f.name}」`).join('')}を読み込み中…`);
+    await new Promise(r => setTimeout(r, 30));
+    try {
+      const got = [];
+      for (const f of files) got.push(await readOne(f));
+      const N = S ? { ...S } : {};
+      const notes = [];
+      const book = got.find(g => g.cur);
+      const raws = got.filter(g => g.raw).sort((a, b) => mKey(b.raw) - mKey(a.raw));
+      if (book) {
+        N.cur = { name: book.name, rows: book.cur, file: book.file };
+        N.prev = book.prev.length ? { name: book.name + '（前年シート）', rows: book.prev, file: book.file, sheet: 'prev' } : null;
+      } else if (raws.length >= 2) {
+        N.cur = { name: raws[0].name, rows: raws[0].raw, file: raws[0].file };
+        N.prev = { name: raws[1].name, rows: raws[1].raw, file: raws[1].file };
+        if (mKey(raws[0].raw) === mKey(raws[1].raw)) notes.push('2つの売上集計表が同じ年月です。前年分か確認してください');
+      } else if (raws.length === 1) {
+        const r = raws[0];
+        // 保存中の当年より古い月なら前年分、それ以外は当年分として差し替え
+        if (N.cur && mKey(r.raw) < mKey(N.cur.rows)) N.prev = { name: r.name, rows: r.raw, file: r.file };
+        else N.cur = { name: r.name, rows: r.raw, file: r.file };
+      }
+      if (!N.cur) throw new Error('売上集計表（当年）がありません。最初は売上集計表を一緒に選んでください');
+      // 原価管理表：ファイルごとに保持し、同じ店舗は新しいファイルで差し替え
+      for (const g of got.filter(g => g.inv)) {
+        const codes = g.inv.map(r => r.code);
+        N.invFiles = (N.invFiles || []).map(x => ({ ...x, rows: x.rows.filter(r => !codes.includes(r.code)) })).filter(x => x.rows.length);
+        N.invFiles.push({ name: g.name, rows: g.inv, file: g.file });
+      }
+      // 食材別の理論差データは使わない
+      delete N.usage;
+      if (got.some(g => g.usage)) notes.push('食材別の理論差データは分析に使わないため読み込みませんでした');
+      const pays = got.filter(g => g.pays), hourly = got.filter(g => g.hourly);
+      // メニュー別も日付（期間の終了日）で当年分・前年分を判別
+      for (const g of got.filter(g => g.menu)) {
+        if (mKey(g.menu) != null && mKey(g.menu) < mKey(N.cur.rows)) N.pMenu = { name: g.name, rows: g.menu, file: g.file };
+        else N.menu = { name: g.name, rows: g.menu, file: g.file };
+      }
+      // 値引詳細は日付で当年分・前年分を判別（当年より古い月なら前年分）
+      for (const g of pays) {
+        const k = mKey(g.pays);
+        if (k != null && k < mKey(N.cur.rows)) N.pPays = { name: g.name, rows: g.pays, file: g.file };
+        else N.pays = { name: g.name, rows: g.pays, file: g.file };
+      }
+      if (hourly.length) N.hourly = { name: hourly[0].name, rows: hourly[0].hourly, file: hourly[0].file };
+      // 月が合わない保存データは外す
+      const ck = mKey(N.cur.rows);
+      if (N.prev && mKey(N.prev.rows) !== ck - 12) { notes.push(`前年データ（${fmtYM(N.prev.rows)}）が当年の前年同月ではないため外しました`); N.prev = null; }
+      if (N.pays && mKey(N.pays.rows) !== ck) { notes.push(`値引詳細（${fmtYM(N.pays.rows)}）が当年と別の月のため外しました`); N.pays = null; }
+      if (N.menu && mKey(N.menu.rows) !== ck) { notes.push(`メニュー別（${fmtYM(N.menu.rows)}）が当年と別の月のため外しました`); N.menu = null; }
+      if (N.pMenu && mKey(N.pMenu.rows) !== ck - 12) { notes.push(`前年のメニュー別（${fmtYM(N.pMenu.rows)}）が前年同月ではないため外しました`); N.pMenu = null; }
+      if (N.pPays && mKey(N.pPays.rows) !== ck - 12) { notes.push(`前年の値引詳細（${fmtYM(N.pPays.rows)}）が前年同月ではないため外しました`); N.pPays = null; }
+      if (N.hourly && mKey(N.hourly.rows) !== ck) N.hourly = null;
+      if (N.invFiles) N.invFiles = N.invFiles.filter(x => { const ok = mKey(x.rows) === ck; if (!ok) notes.push(`原価管理表（${fmtYM(x.rows)}）が当年と別の月のため外しました`); return ok; });
+      N.savedAt = Date.now();
+      N.v = DATA_VERSION;
+      S = N;
+      runSaved();
+      let saved = true;
+      try { await store.put(S); } catch (e) { saved = false; }
+      setStatus(`${files.length}ファイルを読み込みました（${R.stores.length}店舗）。` + (saved ? 'このブラウザに保存したので、次回はファイルなしで表示されます。' : '※この環境ではブラウザに保存できませんでした。') + (notes.length ? '　' + notes.join('。') + '。' : ''));
+    } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
+  }
+  $('file').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+
+  function run(curRows, prevRows, extra) {
+    last = [curRows, prevRows, extra || {}];
+    const eff = syncControls(curRows);
+    R = analyze(curRows, prevRows, { ...(extra || {}), scope: eff.scope, area: eff.area });
+    const worst = [...R.stores].sort((a, b) => a.diff - b.diff)[0];
+    cur = worst ? worst.code : null;
+    render();
+  }
+
+  /* ---------- 描画 ---------- */
+  function kpi(label, v, sub, c) { return `<div class="kpi"><div class="label">${label}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`; }
+  const fmtD = d => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+
+  function render() {
+    const a = R.area;
+    $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost');
+    document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; });
+    if (tab === 'cost') { renderCost(); return; }
+    $('storeTblTitle').textContent = '店舗別 予算差と要因';
+    $('period').textContent = `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
+    const okN = R.stores.filter(s => s.diff >= 0).length;
+    $('areaTitle').textContent = `${R.titleLabel}（${R.stores.length}店）`;
+    $('kpis').innerHTML = kpi('売上', man(a.sales), `予算 ${man(a.budget)}`) + kpi('予算比', pct(a.rate), `差額 ${sman(a.diff)}`, cls(a.diff))
+      + kpi('客数要因', sman(a.custEff), `客数予算比 ${pct(a.custRate)}`, cls(a.custEff)) + kpi('単価要因', sman(a.upEff), `客単価 ${yen(a.up)}`, cls(a.upEff))
+      + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `前年比 ${pct(a.yoy)}` : '');
+    $('areaComment').value = commentText(a.lines, detail); fit($('areaComment'));
+
+    const maxAbs = Math.max(1, ...R.stores.map(s => Math.abs(s.diff)));
+    const rows = [...R.stores].sort((x, y) => x.rate - y.rate);
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th><th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">前年比</th></tr></thead><tbody>`
+      + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}<td><span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '達成' : '未達'}</span></td>
+        <td class="n">${man(s.sales)}</td><td class="n ${cls(s.diff)}">${pct(s.rate)}</td><td class="n ${cls(s.diff)}">${sman(s.diff)}</td>
+        <td><span class="bar" style="width:${Math.round(Math.abs(s.diff) / maxAbs * 110)}px;background:var(${s.diff < 0 ? '--neg' : '--pos'})"></span></td>
+        <td class="n ${cls(s.custEff)}">${sman(s.custEff)}</td><td class="n ${cls(s.upEff)}">${sman(s.upEff)}</td><td class="n">${pct(s.custRate)}</td><td class="n">${yen(s.up)}</td><td class="n">${pct(s.yoy)}</td></tr>`).join('') + '</tbody>';
+    $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
+      const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
+      tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+    $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+    renderStore();
+  }
+
+  function renderStore() {
+    const s = R.stores.find(x => x.code === cur) || R.stores[0];
+    if (!s) return;
+    if (tab === 'cost') { renderStoreCost(s); return; }
+    $('storeName').innerHTML = `${esc(s.name)} <span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '予算達成' : '予算未達'}</span>`;
+    $('sKpis').innerHTML = kpi('売上', man(s.sales), `予算 ${man(s.budget)}`) + kpi('予算比', pct(s.rate), `差額 ${sman(s.diff)}`, cls(s.diff))
+      + kpi('客数要因', sman(s.custEff), `客数 ${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`, cls(s.custEff))
+      + kpi('単価要因', sman(s.upEff), `客単価 ${yen(s.up)}（予算${syen(s.up - s.bUp)}）`, cls(s.upEff))
+      + kpi('前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし');
+    $('storeComment').value = commentText(s.lines, detail); fit($('storeComment'));
+
+    // ヒートマップ
+    let h = '<div></div>' + BANDS.map(b => `<div class="h">${b.name}<br><span style="font-weight:400">${b.label}</span></div>`).join('');
+    DAYTYPES.forEach((dt, ti) => {
+      const days = s.byType[ti].days;
+      h += `<div class="h">${dt}<br><span style="font-weight:400">${days}日</span></div>`;
+      s.grid[ti].forEach((c, bi) => {
+        if (!days || c.budget < 1000) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
+        const r = c.sales / c.budget, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
+        const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
+        const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}|按分予算 ${man(c.budget)}|予算比 ${pct(r)}・${sman(c.sales - c.budget)}${c.pSales ? `|前年比 ${pct(c.sales / c.pSales)}` : ''}`;
+        h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${sman(c.sales - c.budget).replace('万円', '万')}</span></div>`;
+      });
+    });
+    $('heat').innerHTML = h;
+
+    // 日別バー
+    const D = s.daily, W = Math.max(320, D.length * 22 + 50), Hh = 200, top = 14, base = 140, half = 110;
+    const mx = Math.max(1, ...D.map(d => Math.abs(d.diff)));
+    const sc = v => v / mx * (half / 2 + 10);
+    const mid = top + (base - top) / 2;
+    let svg = `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" role="img" aria-label="日別の予算差">`;
+    svg += `<line x1="40" x2="${W - 4}" y1="${mid}" y2="${mid}" stroke="var(--line)" stroke-width="1"/><text x="36" y="${mid + 3}" text-anchor="end">±0</text>`;
+    svg += `<text x="36" y="${top + 6}" text-anchor="end">${sman(mx).replace('万円', '万')}</text><text x="36" y="${base}" text-anchor="end">${sman(-mx).replace('万円', '万')}</text>`;
+    D.forEach((d, i) => {
+      const x = 46 + i * 22, hgt = Math.max(1, Math.abs(sc(d.diff)));
+      const y = d.diff >= 0 ? mid - hgt : mid;
+      const r = 3, w = 14;
+      // データ端だけ丸める
+      const path = d.diff >= 0
+        ? `M${x},${mid} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${mid} Z`
+        : `M${x},${mid} V${mid + hgt - r} Q${x},${mid + hgt} ${x + r},${mid + hgt} H${x + w - r} Q${x + w},${mid + hgt} ${x + w},${mid + hgt - r} V${mid} Z`;
+      const tipTxt = `${d.date.getMonth() + 1}/${d.date.getDate()}（${d.wd}・${d.dt}）|売上 ${man(d.sales)}|予算 ${man(d.budget)}|予算比 ${pct(d.rate)}・${sman(d.diff)}|客数 ${d.cust}人${d.loss ? `|ロス ${yen(d.loss)}（売上比${pct(d.loss / d.sales)}）` : ''}`;
+      svg += `<rect x="${x - 3}" y="${top}" width="${w + 6}" height="${base - top + 50}" fill="transparent" data-tip="${esc(tipTxt)}"/>`;
+      svg += `<path d="${path}" fill="var(${d.diff < 0 ? '--neg' : '--pos'})" pointer-events="none"/>`;
+      const we = d.wd === '土' || d.wd === '日' || (d.dt === '日祝日');
+      svg += `<text x="${x + w / 2}" y="${base + 18}" text-anchor="middle">${d.date.getDate()}</text><text x="${x + w / 2}" y="${base + 31}" text-anchor="middle" style="${we ? 'font-weight:700;fill:var(--fg)' : ''}">${d.wd}</text>`;
+    });
+    $('daily').innerHTML = svg + '</svg>';
+
+    // 表
+    $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th></tr></thead><tbody>`
+      + s.byType.filter(t => t.days).map(t => `<tr><td>${t.key}</td><td class="n">${t.days}${s.hasPrev ? `<span class="muted small">（前年${t.pDays}）</span>` : ''}</td><td class="n">${man(t.sales)}</td><td class="n ${cls(t.diff)}">${pct(t.rate)}</td><td class="n ${cls(t.diff)}">${sman(t.diff)}</td><td class="n">${man(t.avg)}</td><td class="n">${t.pAvg ? man(t.pAvg) : '－'}</td></tr>`).join('') + '</tbody>';
+    $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th></tr></thead><tbody>`
+      + s.byBand.map((b, bi) => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td></tr>`).join('') + '</tbody>';
+    // 値引内訳
+    const dd = s.discDetail;
+    $('discBox').hidden = !dd;
+    const dc = s.discCmp, pd = s.pDiscDetail;
+    const dlt = (v, unit) => { v = Math.round(v); return `<span class="${v < 0 ? 'neg' : v > 0 ? 'pos' : ''}">${v > 0 ? '+' : v < 0 ? '▲' : '±'}${Math.abs(v).toLocaleString('ja-JP')}${unit}</span>`; };
+    $('discCatBox').hidden = !dc;
+    if (dc) $('discCatTbl').innerHTML = `<thead><tr><th>分類</th><th class="n">利用件数</th><th class="n">前年</th><th class="n">件数差</th><th class="n">値引額（税込）</th><th class="n">前年</th><th class="n">客単価への影響</th></tr></thead><tbody>`
+      + [...dc.cats].sort((x, y) => y.amount - x.amount).map(c => `<tr><td>${esc(c.cat)}${c.lure ? '' : ' <span class="muted small">誘客対象外</span>'}</td><td class="n">${c.count.toLocaleString('ja-JP')}</td><td class="n muted">${c.pCount.toLocaleString('ja-JP')}</td><td class="n">${c.lure ? dlt(c.dCount, '件') : '<span class="muted">－</span>'}</td><td class="n">${yen(c.amount)}</td><td class="n muted">${yen(c.pAmount)}</td><td class="n">${dlt(c.upEff, '円')}</td></tr>`).join('')
+      + `<tr><td><b>誘客計</b> <span class="muted small">従食除く</span></td><td class="n"><b>${dc.count.toLocaleString('ja-JP')}</b></td><td class="n muted">${dc.pCount.toLocaleString('ja-JP')}</td><td class="n">${dlt(dc.dCount, '件')}</td><td class="n"><b>${yen(dd.total)}</b><div class="small muted">全分類</div></td><td class="n muted">${yen(pd.total)}</td><td class="n">${dlt(sum(dc.cats, c => c.upEff), '円')}</td></tr></tbody>`;
+    if (dd) $('discTbl').innerHTML = `<thead><tr><th>値引の種類</th><th>分類</th><th class="n">件数</th>${pd ? '<th class="n">前年件数</th>' : ''}<th class="n">金額（税込）</th><th class="n">構成比</th></tr></thead><tbody>`
+      + dd.items.slice(0, 10).map(it => { const pi = pd && pd.items.find(x => x.name === it.name); return `<tr><td>${esc(it.name)}</td><td class="muted">${esc(it.cat)}</td><td class="n">${it.count.toLocaleString('ja-JP')}</td>${pd ? `<td class="n muted">${pi ? pi.count.toLocaleString('ja-JP') : '－'}</td>` : ''}<td class="n">${yen(it.amount)}</td><td class="n">${pct(it.amount / dd.total)}</td></tr>`; }).join('')
+      + `<tr><td><b>合計</b></td><td></td><td class="n">${dd.count.toLocaleString('ja-JP')}</td>${pd ? `<td class="n muted">${pd.count.toLocaleString('ja-JP')}</td>` : ''}<td class="n"><b>${yen(dd.total)}</b></td><td class="n">1人あたり ${yen(dd.total / s.cust)}</td></tr></tbody>`;
+    $('wdTbl').innerHTML = `<thead><tr><th></th>${s.byWd.map(w => `<th class="n">${w.key}</th>`).join('')}</tr></thead><tbody>`
+      + `<tr><td>日数</td>${s.byWd.map(w => `<td class="n">${w.days}</td>`).join('')}</tr>`
+      + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
+      + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr>`
+      + '</tbody>';
+  }
+
+  /* ---------- 原価分析 ---------- */
+  const p2 = v => v == null ? '－' : (v * 100).toFixed(2) + '%';
+  const ptx = v => v == null ? '－' : (v >= 0 ? '+' : '▲') + Math.abs(v * 100).toFixed(1) + 'pt';
+  function renderCost() {
+    const a = R.area;
+    $('kpis').innerHTML = kpi('理論原価率', pct(a.costRate), a.pCostRate != null ? `前年 ${pct(a.pCostRate)}（${ptx(a.costRate - a.pCostRate)}）` : '')
+      + kpi('ロス率（値引前）', p2(a.lossRate), a.pLossRate != null ? `前年 ${p2(a.pLossRate)}` : '')
+      + (a.menu ? kpi('食べ放題フード', a.menu.foodQty.toFixed(1) + '皿/人', `${Math.round(a.menu.foodG).toLocaleString('ja-JP')}g/人`) + kpi('1人あたり原価', yen(a.menu.costPP), `精肉 ${a.menu.meatQty.toFixed(2)}皿`) : '')
+      + (a.inv ? kpi('原価率理論差', pt2(a.inv.gap), `値引前原価率 ${pct2(a.inv.preRate)}`) + kpi('ロス込理論差', pt2(a.inv.gapExLoss), `原価管理表 ${a.inv.n}店`)
+        : kpi('理論差（概算）', ptx(a.gapRate), `仕入率 ${pct(a.buyRate)}${a.pGapRate != null ? `・前年 ${ptx(a.pGapRate)}` : ''}`));
+    $('areaComment').value = commentText(a.costLines, detail); fit($('areaComment'));
+    $('storeTblTitle').textContent = R.stores.some(s => s.inv) ? '店舗別 原価・ロス・原価率理論差' : '店舗別 原価・ロス・理論差（概算）';
+    const rows = [...R.stores].sort((x, y) => (y.costRate || 0) - (x.costRate || 0));
+    const bR = a.benchCostRate != null ? a.benchCostRate : a.costRate;
+    const premOf = s => s.menu ? sum(s.menu.courses.filter(c => /プレミアム/.test(c.name)), c => c.share) : null;
+    const hasInv = R.stores.some(s => s.inv);
+    const g3 = s => s.inv && s.inv.trend.length ? avgOf(s.inv.trend.slice(-3).map(x => x.gapExLoss).filter(v => v != null)) : null;
+    const gapCols = hasInv ? '<th class="n">値引前原価率</th><th class="n">原価率理論差</th><th class="n">ロス込理論差</th><th class="n">直近3か月</th>' : '<th class="n">仕入率</th><th class="n">理論差（概算）</th>';
+    const gapCells = s => hasInv ? (s.inv ? `<td class="n">${pct2(s.inv.preRate)}</td><td class="n">${pt2(s.inv.gap)}</td><td class="n"><b>${pt2(s.inv.gapExLoss)}</b></td><td class="n">${g3(s) != null ? pt2(g3(s)) : '－'}</td>` : '<td class="n muted" colspan="4">原価管理表なし</td>') : `<td class="n">${pct(s.buyRate)}</td><td class="n">${ptx(s.gapRate)}</td>`;
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">理論原価率</th><th class="n">平均差</th><th class="n">前年差</th>${gapCols}<th class="n">ロス率</th><th class="n">1人あたり原価</th><th class="n">フード皿/人</th><th class="n">プレミアム比率</th></tr></thead><tbody>`
+      + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}
+        <td class="n">${pct(s.costRate)}</td><td class="n ${s.costRate - bR > 0 ? 'neg' : 'pos'}">${s.costRate != null && bR != null ? ptx(s.costRate - bR) : '－'}</td><td class="n">${s.pCostRate != null ? ptx(s.costRate - s.pCostRate) : '－'}</td>
+        ${gapCells(s)}<td class="n">${p2(s.lossRate)}</td>
+        <td class="n">${s.menu ? yen(s.menu.costPP) : '－'}</td><td class="n">${s.menu ? s.menu.foodQty.toFixed(1) : '－'}</td><td class="n">${premOf(s) != null ? pct(premOf(s)) : '－'}</td></tr>`).join('') + '</tbody>';
+    $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
+      const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
+      tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+    $('storeSel').innerHTML = R.stores.map(s => `<option value="${esc(s.code)}"${s.code === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+    renderCourseAll();
+    renderStore();
+  }
+  function renderStoreCost(s) {
+    $('storeName').textContent = s.name;
+    const I = s.inv;
+    $('sKpis').innerHTML = (I ? kpi('値引前原価率', pct2(I.preRate), `実質原価率 ${pct2(I.realRate)}`) : '')
+      + kpi('理論原価率', I ? pct2(I.theory) : pct(s.costRate), [R.area.benchCostRate != null && R.stores.length > 1 ? `平均 ${pct(R.area.benchCostRate)}` : '', s.pCostRate != null ? `前年 ${pct(s.pCostRate)}` : ''].filter(Boolean).join('・'))
+      + (I ? kpi('原価率理論差', pt2(I.gap), sman(I.gapAmt)) + kpi('ロス込理論差', pt2(I.gapExLoss), `ロス率 ${p2(I.lossPre)}`)
+        : kpi('仕入率', pct(s.buyRate), s.pBuyRate != null ? `前年 ${pct(s.pBuyRate)}` : '') + kpi('理論差（概算）', ptx(s.gapRate), `うちロス ${ptx(s.lossRate || 0)}`))
+      + (I ? '' : kpi('ロス率', p2(s.lossRate), s.loss ? `ロス額 ${man(s.loss)}` : ''));
+    $('storeComment').value = commentText(s.costLines, detail); fit($('storeComment'));
+    // ロス
+    $('lossBox').hidden = s.lossRate == null;
+    if (s.lossRate != null) {
+      const p2 = v => (v * 100).toFixed(2) + '%';
+      $('lossKpis').innerHTML = kpi('ロス額', man(s.loss), `1日平均 ${yen(s.avgLoss)}`)
+        + kpi('ロス率', p2(s.lossRate), [R.stores.length > 1 && R.area.benchLossRate != null ? `平均 ${p2(R.area.benchLossRate)}` : '', s.pLossRate != null ? `前年 ${p2(s.pLossRate)}` : ''].filter(Boolean).join('・'))
+        + (s.lossSpikes.length ? kpi('突出日', s.lossSpikes.map(d => `${d.date.getMonth() + 1}/${d.date.getDate()}`).join('・'), s.lossSpikes.map(d => `${d.wd} ${man(d.loss)}`).join('・')) : '');
+      $('lossWdTbl').innerHTML = `<thead><tr><th></th>${s.lossByWd.map(w => `<th class="n">${w.key}</th>`).join('')}</tr></thead><tbody>`
+        + `<tr><td>ロス額</td>${s.lossByWd.map(w => `<td class="n">${w.days ? man(w.loss) : '－'}</td>`).join('')}</tr>`
+        + `<tr><td>構成比</td>${s.lossByWd.map(w => `<td class="n">${s.loss ? pct(w.loss / s.loss) : '－'}</td>`).join('')}</tr></tbody>`;
+    }
+    // 原価・喫食
+    const m = s.menu, A = R.area.menu, PM = s.pMenuAgg;
+    $('costBox').hidden = !(m && A);
+    if (m && A) {
+      const one = R.stores.length <= 1;
+      const sub = (a, p, f) => [one ? '' : `平均 ${f(a)}`, p != null ? `前年 ${f(p)}` : ''].filter(Boolean).join('・');
+      const f1 = v => v.toFixed(1) + '皿', fg = v => Math.round(v).toLocaleString('ja-JP') + 'g', f2 = v => v.toFixed(2) + '皿';
+      $('costKpis').innerHTML = kpi('原価率', pct(s.costRate), sub(R.area.benchCostRate, s.pCostRate, pct))
+        + kpi('1人あたり原価', yen(m.costPP), sub(A.costPP, PM && PM.costPP, yen))
+        + kpi('食べ放題フード', f1(m.foodQty), sub(A.foodQty, PM && PM.foodQty, f1))
+        + kpi('喫食量', fg(m.foodG), sub(A.foodG, PM && PM.foodG, fg))
+        + kpi('精肉', f2(m.meatQty), sub(A.meatQty, PM && PM.meatQty, f2));
+      $('costTbl').innerHTML = `<thead><tr><th>分類（食べ放題）</th><th class="n">皿/人</th>${one ? '' : '<th class="n">平均</th>'}${PM ? '<th class="n">前年</th>' : ''}<th class="n">g/人</th><th class="n">原価/人</th>${one ? '' : '<th class="n">平均との差</th>'}</tr></thead><tbody>`
+        + m.cats.map(c => { const a = A.cats.find(x => x.cat === c.cat), pc = PM && PM.cats.find(x => x.cat === c.cat); const d = a ? c.costPP - a.costPP : 0;
+          return `<tr><td>${esc(c.cat)}</td><td class="n">${c.qtyPP.toFixed(2)}</td>${one ? '' : `<td class="n muted">${a ? a.qtyPP.toFixed(2) : '－'}</td>`}${PM ? `<td class="n muted">${pc ? pc.qtyPP.toFixed(2) : '－'}</td>` : ''}<td class="n">${Math.round(c.gPP)}</td><td class="n">${yen(c.costPP)}</td>${one ? '' : `<td class="n ${d > 0 ? 'neg' : d < 0 ? 'pos' : ''}">${Math.round(d) === 0 ? '±0円' : syen(d)}</td>`}</tr>`; }).join('')
+        + `<tr><td><b>合計</b></td><td class="n"><b>${m.foodQty.toFixed(2)}</b></td>${one ? '' : `<td class="n muted">${A.foodQty.toFixed(2)}</td>`}${PM ? `<td class="n muted">${PM.foodQty.toFixed(2)}</td>` : ''}<td class="n">${Math.round(m.foodG).toLocaleString('ja-JP')}</td><td class="n"><b>${yen(m.foodCost)}</b></td>${one ? '' : `<td class="n">${syen(m.foodCost - A.foodCost)}</td>`}</tr></tbody>`;
+    }
+    renderInv(s); renderYoy(s); renderCourseStore(s);
+  }
+  /* ---------- 原価管理表のグラフ ---------- */
+  function renderInv(s) {
+    const box = $('invBody'), I = s.inv;
+    if (!I) { box.innerHTML = '<p class="note">原価管理表（店舗別の棚卸・原価率理論差のExcel）を読み込むと、正式な原価率理論差と13か月の推移を表示します。読み込むまでは、仕入率から計算した概算を表示しています。</p>'; return; }
+    const T = I.trend.filter(x => x.theory != null);
+    let html = '';
+    if (T.length >= 2) {
+      const W = Math.max(600, T.length * 46 + 150), H1 = 170, H2 = 130, L0 = 52, R0 = 96, IN = 22;
+      const xs = i => L0 + IN + i * ((W - L0 - R0 - IN) / (T.length - 1));
+      const vals = T.flatMap(x => [x.theory, x.pre]).filter(v => v != null);
+      let lo = Math.min(...vals), hi = Math.max(...vals); const pad = Math.max(0.002, (hi - lo) * 0.15); lo -= pad; hi += pad;
+      const ys = v => 14 + (1 - (v - lo) / (hi - lo)) * (H1 - 40);
+      const ticks = [lo + pad, (lo + hi) / 2, hi - pad];
+      const path = k => T.map((x, i) => x[k] == null ? '' : `${i && T[i - 1][k] != null ? 'L' : 'M'}${xs(i).toFixed(1)},${ys(x[k]).toFixed(1)}`).join('');
+      const mlab = d => `${d.getMonth() + 1}月`;
+      let svg = `<svg width="${W}" height="${H1}" viewBox="0 0 ${W} ${H1}" role="img" aria-label="理論原価率と値引前原価率の推移">`;
+      ticks.forEach(v => { svg += `<line x1="${L0}" x2="${W - R0}" y1="${ys(v)}" y2="${ys(v)}" stroke="var(--line)"/><text x="${L0 - 6}" y="${ys(v) + 3}" text-anchor="end">${(v * 100).toFixed(1)}%</text>`; });
+      svg += `<path d="${path('theory')}" fill="none" stroke="var(--c1)" stroke-width="2"/><path d="${path('pre')}" fill="none" stroke="var(--c2)" stroke-width="2"/>`;
+      T.forEach((x, i) => {
+        if (x.theory != null) svg += `<circle cx="${xs(i)}" cy="${ys(x.theory)}" r="4" fill="var(--c1)" stroke="var(--panel)" stroke-width="2"/>`;
+        if (x.pre != null) svg += `<circle cx="${xs(i)}" cy="${ys(x.pre)}" r="4" fill="var(--c2)" stroke="var(--panel)" stroke-width="2"/>`;
+        svg += `<text x="${xs(i)}" y="${H1 - 6}" text-anchor="middle"${i === T.length - 1 ? ' style="font-weight:700;fill:var(--fg)"' : ''}>${x.date.getMonth() === 0 || i === 0 ? `${String(x.date.getFullYear()).slice(2)}/` : ''}${mlab(x.date)}</text>`;
+        svg += `<rect x="${xs(i) - 18}" y="0" width="36" height="${H1}" fill="transparent" data-tip="${esc(`${x.date.getFullYear()}年${x.date.getMonth() + 1}月|理論原価率 ${pct2(x.theory)}|値引前原価率 ${pct2(x.pre)}|値引前ロス率 ${pct2(x.loss)}|ロス込理論差 ${x.gapExLoss != null ? pt2(x.gapExLoss) : '－'}${x.inv ? `|棚卸高 ${man(x.inv)}` : ''}`)}"/>`;
+      });
+      const last = T[T.length - 1];
+      svg += `<text x="${xs(T.length - 1) + 8}" y="${ys(last.theory) + 4}" style="fill:var(--fg)">理論 ${(last.theory * 100).toFixed(2)}%</text><text x="${xs(T.length - 1) + 8}" y="${ys(last.pre) + (last.pre > last.theory ? -6 : 14)}" style="fill:var(--fg)">実 ${(last.pre * 100).toFixed(2)}%</text></svg>`;
+      // ロス込理論差の棒
+      // 縦の範囲はデータに合わせる（0と±0.5ptは必ず入れる）
+      const G = T.map(x => x.gapExLoss ?? 0), gHi = Math.max(0.005, ...G), gLo = Math.min(-0.005, ...G), mx = Math.max(gHi, -gLo);
+      const top = 16, bot = H2 - 16, k = (bot - top) / (gHi - gLo), z = top + gHi * k, sc = v => v * k;
+      let svg2 = `<svg width="${W}" height="${H2}" viewBox="0 0 ${W} ${H2}" role="img" aria-label="ロス込原価率理論差の推移">`;
+      svg2 += `<line x1="${L0}" x2="${W - R0}" y1="${z}" y2="${z}" stroke="var(--muted)"/><text x="${L0 - 6}" y="${z + 3}" text-anchor="end">±0</text>`;
+      if (gHi > 0.0055) svg2 += `<text x="${L0 - 6}" y="${z - sc(gHi) + 3}" text-anchor="end">+${(gHi * 100).toFixed(1)}</text>`;
+      if (gLo < -0.0055) svg2 += `<text x="${L0 - 6}" y="${z - sc(gLo) + 3}" text-anchor="end">▲${(-gLo * 100).toFixed(1)}</text>`;
+      T.forEach((x, i) => {
+        const v = x.gapExLoss; if (v == null) return;
+        const h = Math.max(1, Math.abs(sc(v))), y = v >= 0 ? z - h : z, w = 18;
+        svg2 += `<rect x="${xs(i) - w / 2}" y="${y}" width="${w}" height="${h}" rx="3" fill="${i === T.length - 1 ? 'var(--c1)' : 'var(--prev)'}" data-tip="${esc(`${x.date.getFullYear()}年${x.date.getMonth() + 1}月|ロス込理論差 ${pt2(v)}`)}"/>`;
+        svg2 += `<text x="${xs(i)}" y="${v >= 0 ? y - 4 : y + h + 11}" text-anchor="middle"${i === T.length - 1 ? ' style="font-weight:700;fill:var(--fg)"' : ''}>${(v >= 0 ? '+' : '▲') + Math.abs(v * 100).toFixed(1)}</text>`;
+      });
+      svg2 += `<line x1="${L0}" x2="${W - R0}" y1="${z - sc(0.005)}" y2="${z - sc(0.005)}" stroke="var(--line)" stroke-dasharray="3 3"/><line x1="${L0}" x2="${W - R0}" y1="${z + sc(0.005)}" y2="${z + sc(0.005)}" stroke="var(--line)" stroke-dasharray="3 3"/>`
+        + `<text x="${W - R0 + 16}" y="${z - sc(0.005) + 3}">+0.5</text><text x="${W - R0 + 16}" y="${z + sc(0.005) + 3}">▲0.5</text></svg>`;
+      html += `<div class="lg"><span><i style="background:var(--c1)"></i>理論原価率</span><span><i style="background:var(--c2)"></i>値引前原価率（実際）</span><span>点にカーソルを当てるとロス率・棚卸高も表示</span></div><div class="chart">${svg}</div>`
+        + `<h3 style="font-size:.9rem;margin-top:8px">ロス込原価率理論差（pt）</h3><p class="small muted" style="margin:2px 0 4px">マイナス＝理論より使用が少ない、プラス＝多い。点線は±0.5pt。青が当月。</p><div class="chart">${svg2}</div>`;
+    }
+    // 大分類別
+    const A = R.area.inv;
+    if (I.cats.length && I.preSales) {
+      html += `<h3 style="font-size:.9rem;margin-top:12px">大分類別の仕入・原価（食材）</h3><div class="tbl"><table><thead><tr><th>大分類</th><th class="n">仕入</th><th class="n">原価</th><th class="n">原価比</th>${A && R.stores.length > 1 ? '<th class="n">平均</th><th class="n">差</th>' : ''}</tr></thead><tbody>`
+        + [...I.cats].sort((a, b) => b.cost - a.cost).map(c => { const r = c.cost / I.preSales, av = A && A.catRate[c.cat]; return `<tr><td>${esc(c.cat)}</td><td class="n">${yen(c.buy)}</td><td class="n">${yen(c.cost)}</td><td class="n">${pct2(r)}</td>${A && R.stores.length > 1 ? `<td class="n muted">${av != null ? pct2(av) : '－'}</td><td class="n">${av != null ? pt2(r - av) : '－'}</td>` : ''}</tr>`; }).join('')
+        + `</tbody></table></div><p class="small muted" style="margin:4px 0 0">原価比＝原価÷値引前売上高。棚卸高 ${man(I.close)}（前月 ${man(I.open)}）</p>`;
+    }
+    box.innerHTML = html;
+  }
+
+  /* ---------- 原価タブのグラフ ---------- */
+  let yMetric = 'qty';
+  // コースの色：表示中の対象店全体で多い順に上位5種へ固定の色、残りは「その他」
+  function courseColors() {
+    const A = R.area.menu; const map = {};
+    (A ? A.courses : []).slice(0, 5).forEach((c, i) => { map[c.name] = `var(--c${i + 1})`; });
+    return map;
+  }
+  function courseSegs(courses, map) {
+    const segs = []; let other = 0;
+    courses.forEach(c => { if (map[c.name]) segs.push({ name: c.name, share: c.share, color: map[c.name] }); else other += c.share; });
+    const order = Object.keys(map);
+    segs.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+    if (other > 0.0005) segs.push({ name: 'その他', share: other, color: 'var(--c0)' });
+    return segs;
+  }
+  function stackRow(label, courses, map, me) {
+    const segs = courseSegs(courses, map);
+    const prem = sum(courses.filter(c => /プレミアム/.test(c.name)), c => c.share);
+    return `<div class="lbl ${me ? 'me' : ''}" title="${esc(label)}">${esc(label)}</div><div class="bar100">`
+      + segs.map(g => `<span style="width:${(g.share * 100).toFixed(2)}%;background:${g.color}" data-tip="${esc(`${label}|${g.name} ${pct(g.share)}`)}">${g.share >= 0.15 ? pct(g.share) : ''}</span>`).join('')
+      + `</div><div class="v">プ ${pct(prem)}</div>`;
+  }
+  function legendHtml(map) {
+    return Object.keys(map).map(n => `<span><i style="background:${map[n]}"></i>${esc(n)}</span>`).join('') + '<span><i style="background:var(--c0)"></i>その他</span><span>右端の「プ」＝プレミアムコース比率</span>';
+  }
+  function renderCourseAll() {
+    const box = $('courseAllBox'); const map = courseColors();
+    const list = R.stores.filter(s => s.menu && s.menu.courses.length);
+    if (!list.length) { $('courseAll').innerHTML = '<p class="small muted" style="grid-column:1/-1">メニュー別（ABC分析）を読み込むと表示されます。</p>'; $('courseLegend').innerHTML = ''; return; }
+    const premOf = s => sum(s.menu.courses.filter(c => /プレミアム/.test(c.name)), c => c.share);
+    $('courseLegend').innerHTML = legendHtml(map);
+    $('courseAll').innerHTML = [...list].sort((a, b) => premOf(b) - premOf(a)).map(s => stackRow(s.name, s.menu.courses, map, s.code === cur)).join('')
+      + (R.area.menu && list.length > 1 ? stackRow('対象店平均', R.area.menu.courses, map, false) : '');
+  }
+  function renderYoy(s) {
+    const m = s.menu, P = s.pMenuAgg, box = $('yoyBody');
+    ['yQty', 'yG', 'yCost'].forEach(id => $(id).setAttribute('aria-pressed', { yQty: 'qty', yG: 'g', yCost: 'cost' }[id] === yMetric));
+    if (!m) { box.innerHTML = '<p class="small muted">メニュー別（ABC分析）を読み込むと表示されます。</p>'; return; }
+    if (!P) { box.innerHTML = '<p class="note">前年同月のメニュー別（ABC分析）を読み込むと、当年と前年を並べて表示します。</p>'; return; }
+    const key = { qty: 'qtyPP', g: 'gPP', cost: 'costPP' }[yMetric];
+    const fmt = { qty: v => v.toFixed(2) + '皿', g: v => Math.round(v) + 'g', cost: v => yen(v) }[yMetric];
+    const tot = { qty: [m.foodQty, P.foodQty], g: [m.foodG, P.foodG], cost: [m.foodCost, P.foodCost] }[yMetric];
+    const cats = m.cats.map(c => { const p = P.cats.find(x => x.cat === c.cat); return { cat: c.cat, cur: c[key], prev: p ? p[key] : 0 }; });
+    P.cats.forEach(p => { if (!cats.some(c => c.cat === p.cat)) cats.push({ cat: p.cat, cur: 0, prev: p[key] }); });
+    cats.sort((a, b) => Math.max(b.cur, b.prev) - Math.max(a.cur, a.prev));
+    const mx = Math.max(1e-9, ...cats.map(c => Math.max(c.cur, c.prev)));
+    const d = tot[0] - tot[1];
+    const row = (lbl, c) => {
+      const dd = c.cur - c.prev, dTxt = c.prev ? `${dd >= 0 ? '+' : '▲'}${fmt(Math.abs(dd))}` : '';
+      return `<div>${esc(lbl)}</div><div class="bars" data-tip="${esc(`${lbl}|当年 ${fmt(c.cur)}|前年 ${fmt(c.prev)}${dTxt ? `|差 ${dTxt}` : ''}`)}">
+        <div><b style="width:${(c.cur / mx * 55).toFixed(1)}%;background:var(--c1)"></b><em>${fmt(c.cur)}${dTxt ? `（${dTxt}）` : ''}</em></div>
+        <div><b style="width:${(c.prev / mx * 55).toFixed(1)}%;background:var(--prev)"></b><em>${fmt(c.prev)}</em></div></div>`;
+    };
+    box.innerHTML = `<p class="small" style="margin:4px 0 0">合計 <b>${fmt(tot[0])}</b>（前年 ${fmt(tot[1])}、<span class="${d > 0 ? 'neg' : 'pos'}">${d >= 0 ? '+' : '▲'}${fmt(Math.abs(d))}</span>）</p>`
+      + `<div class="lg"><span><i style="background:var(--c1)"></i>当年</span><span><i style="background:var(--prev)"></i>前年</span><span>（　）内は前年差</span></div>`
+      + `<div class="gb">${cats.map(c => row(c.cat, c)).join('')}</div>`;
+  }
+  function renderCourseStore(s) {
+    const map = courseColors();
+    if (!s.menu || !s.menu.courses.length) { $('courseStore').innerHTML = '<p class="small muted" style="grid-column:1/-1">メニュー別（ABC分析）を読み込むと表示されます。</p>'; $('courseLegend2').innerHTML = ''; $('courseTbl').innerHTML = ''; return; }
+    $('courseLegend2').innerHTML = legendHtml(map);
+    const rows = [['当店（当年）', s.menu.courses, true]];
+    if (s.pMenuAgg) rows.push(['当店（前年）', s.pMenuAgg.courses, false]);
+    if (R.stores.length > 1 && R.area.menu) rows.push(['対象店平均', R.area.menu.courses, false]);
+    $('courseStore').innerHTML = rows.map(r => stackRow(r[0], r[1], map, r[2])).join('');
+    const names = [...Object.keys(map), 'その他'];
+    const shareOf = (courses, n) => n === 'その他' ? sum(courses.filter(c => !map[c.name]), c => c.share) : (courses.find(c => c.name === n) || { share: 0 }).share;
+    $('courseTbl').innerHTML = `<thead><tr><th></th>${names.map(n => `<th class="n">${esc(n)}</th>`).join('')}</tr></thead><tbody>`
+      + rows.map(r => `<tr><td>${esc(r[0])}</td>${names.map(n => `<td class="n">${pct(shareOf(r[1], n))}</td>`).join('')}</tr>`).join('') + '</tbody>';
+  }
+  $('yQty').addEventListener('click', () => { yMetric = 'qty'; renderStore(); });
+  $('yG').addEventListener('click', () => { yMetric = 'g'; renderStore(); });
+  $('yCost').addEventListener('click', () => { yMetric = 'cost'; renderStore(); });
+
+  /* ---------- ツールチップ ---------- */
+  const tip = $('tip');
+  function showTip(el, x, y) { tip.innerHTML = el.dataset.tip.split('|').map((t, i) => i ? esc(t) : `<b>${esc(t)}</b>`).join('<br>'); tip.hidden = false; const r = tip.getBoundingClientRect(); tip.style.left = Math.min(innerWidth - r.width - 8, x + 12) + 'px'; tip.style.top = Math.max(8, y - r.height - 12) + 'px'; }
+  document.addEventListener('pointermove', e => { const el = e.target.closest && e.target.closest('[data-tip]'); if (el) showTip(el, e.clientX, e.clientY); else tip.hidden = true; });
+  document.addEventListener('focusin', e => { const el = e.target.closest('[data-tip]'); if (el) { const r = el.getBoundingClientRect(); showTip(el, r.left, r.top); } });
+  document.addEventListener('focusout', () => { tip.hidden = true; });
+
+  /* ---------- 操作 ---------- */
+  $('storeSel').addEventListener('change', e => { cur = e.target.value; render(); });
+  function setMode(d) { detail = d; pref.set('detail', d); $('mShort').setAttribute('aria-pressed', !d); $('mLong').setAttribute('aria-pressed', d); render(); }
+  const SC_BTN = { direct: 'scDirect', fc: 'scFc', all: 'scAll' }, SC_TXT = { direct: '直営のみ', fc: 'FCのみ', all: '全店' };
+  /** データに合わせて営業部の選択肢と、直営／FC／全店ボタン（店舗数・押せるか）を整える */
+  function syncControls(rows) {
+    // 選んだ営業部・対象はそのまま覚えておき、データにない場合だけ表示を切り替える
+    const areas = listAreas(rows), sel = $('areaSel');
+    const area = areas.includes(areaSel) ? areaSel : '';
+    sel.hidden = areas.length <= 1;
+    sel.innerHTML = `<option value="">すべての営業部（${areas.length}）</option>` + areas.map(a => `<option value="${esc(a)}"${a === area ? ' selected' : ''}>${esc(a)}</option>`).join('');
+    const c = scopeCounts(rows, area);
+    let sc = scope;
+    if (!c.hasFc) sc = 'all';
+    else if (!c[sc]) sc = c.direct ? 'direct' : c.fc ? 'fc' : 'all';
+    for (const k in SC_BTN) {
+      const b = $(SC_BTN[k]);
+      b.textContent = `${SC_TXT[k]} ${c[k]}`;
+      b.disabled = !c[k] || (!c.hasFc && k !== 'all');
+      b.setAttribute('aria-pressed', k === sc);
+    }
+    return { area, scope: sc };
+  }
+  function rerun() { try { if (last) run(...last); } catch (e) { setStatus('切り替えできませんでした：' + e.message, true); } }
+  function setScope(sc) { scope = sc; pref.set('scope', sc); rerun(); }
+  for (const k in SC_BTN) $(SC_BTN[k]).addEventListener('click', () => setScope(k));
+  $('areaSel').addEventListener('change', e => { areaSel = e.target.value; pref.set('area', areaSel); rerun(); });
+  $('mShort').addEventListener('click', () => setMode(false));
+  $('mLong').addEventListener('click', () => setMode(true));
+  async function copy(text, btn) {
+    const old = btn.textContent;
+    try { await navigator.clipboard.writeText(text); btn.textContent = 'コピーしました'; }
+    catch (e) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); btn.textContent = 'コピーしました'; } catch (_) { btn.textContent = '選択してコピーしてください'; } ta.remove(); }
+    setTimeout(() => { btn.textContent = old; }, 1600);
+  }
+  $('copyArea').addEventListener('click', e => copy($('areaComment').value, e.currentTarget));
+  $('copyStore').addEventListener('click', e => copy($('storeComment').value, e.currentTarget));
+  function setTab(tb) { tab = tb; pref.set('tab', tb); render(); }
+  $('tabSales').addEventListener('click', () => setTab('sales'));
+  $('tabCost').addEventListener('click', () => setTab('cost'));
+  $('copyAll').addEventListener('click', e => {
+    const q = t => '"' + t.replace(/"/g, '""') + '"';
+    const key = tab === 'cost' ? 'costLines' : 'lines';
+    const lines = [[R.scopeLabel, $('areaComment').value], ...R.stores.map(s => [s.name, s.code === cur ? $('storeComment').value : commentText(s[key], detail)])];
+    copy(lines.map(([n, c]) => `${n}\t${q(c)}`).join('\n'), e.currentTarget);
+  });
+
+  $('clearBtn').addEventListener('click', () => { $('clearBtn').hidden = true; $('clearAsk').hidden = false; });
+  $('clearNo').addEventListener('click', () => { $('clearAsk').hidden = true; $('clearBtn').hidden = false; });
+  $('clearYes').addEventListener('click', async () => {
+    try { await store.clear(); } catch (e) { /* なし */ }
+    S = null; renderSaved(); run(sampleRows(2026), sampleRows(2025)); $('sampleBanner').hidden = false;
+    setStatus('保存データを削除しました。');
+  });
+
+  // 前回の表示設定
+  scope = pref.get('scope', 'direct'); areaSel = pref.get('area', ''); detail = pref.get('detail', false); tab = pref.get('tab', 'sales');
+  $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
+  try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
+  store.get().then(async v => {
+    if (!v || !v.cur) return;
+    let msg = '前回保存したデータを表示しています。新しいファイルを入れると更新されます。', err = false;
+    if (v.v !== DATA_VERSION) {
+      const N = await reparse(v).catch(e => { console.error(e); return null; });
+      if (N) { v = N; try { await store.put(v); } catch (e) { /* 保存できなくても表示は続ける */ } msg = 'ツールの更新に合わせて、保存してあるファイルを読み直しました。'; }
+      else { msg = '以前の版で保存したデータのため、原価・ロスなど一部の分析が表示されません。お手数ですが、売上集計表などのファイルをもう一度読み込んでください（次回からはツールを更新しても自動で読み直します）。'; err = true; }
+    }
+    S = v;
+    try { runSaved(); setStatus(msg, err); }
+    catch (e) { console.error(e); setStatus('保存データを表示できませんでした：' + e.message, true); }
+  });
+  if (typeof XLSX === 'undefined') setStatus('Excel読み込み用ライブラリを取得できませんでした。ネットワーク接続を確認して再読み込みしてください。', true);
+})();
+</script>
