@@ -133,6 +133,12 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       <input type="file" id="file" accept=".csv,.txt,.xlsx,.xlsm,.xls" multiple>
     </label>
   </header>
+  <div class="saved" id="drivePanel" hidden>
+    <div class="row" style="align-items:flex-end">
+      <div style="min-width:0"><div class="label">共有ドライブから読み込む</div><div class="small muted" id="driveInfo">エリアのフォルダにある最新のファイルと、共通フォルダの時給データ・標準比マスタを読み込みます。</div></div>
+      <div class="row" style="gap:8px"><select id="driveArea" class="btn ghost" aria-label="エリア"></select><button type="button" class="btn" id="driveLoad">最新のデータを読み込む</button></div>
+    </div>
+  </div>
   <div class="status small" id="status" role="status"></div>
   <div class="saved" id="saved" hidden>
     <div class="row" style="align-items:flex-start">
@@ -1655,6 +1661,15 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
     get(k, d) { try { const v = localStorage.getItem('ba.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem('ba.' + k, JSON.stringify(v)); } catch (e) { /* 保存できない環境では無視 */ } },
   };
+  /* ---------- Apps Script（ウェブアプリ）として動いているとき ---------- */
+  const GAS = typeof google !== 'undefined' && google.script && google.script.run;
+  const call = (fn, ...a) => new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...a));
+  let stdMem = null; // ウェブアプリでは店舗設定をサーバーに保存し、全員で共有する
+  const stdSettingsAll = () => GAS ? (stdMem || {}) : pref.get('stdSettings', {});
+  function saveStdSetting(code, v, all) {
+    if (GAS) { stdMem = all; call('saveStdSetting', code, v).catch(e => setStatus('店舗設定を保存できませんでした：' + (e.message || e), true)); }
+    else pref.set('stdSettings', all);
+  }
   let S = null; // 保存中のデータ {cur, prev, pays, hourly, savedAt}
   // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
   const DATA_VERSION = 3;
@@ -1690,25 +1705,42 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
       + (S.stdBook ? `<li><span class="label">標準比マスタ</span> ${esc(S.stdBook.name)} <span class="muted">${Object.keys(S.stdBook.data.info).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ</span> なし</li>')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
-    $('savedAt').textContent = `保存日時 ${fmtTime(new Date(S.savedAt))}`;
-    $('clearAsk').hidden = true; $('clearBtn').hidden = false;
+    $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
+    $('saved').querySelector('p').hidden = !!GAS;
+    $('clearAsk').hidden = true; $('clearBtn').hidden = !!GAS;
     box.hidden = false;
   }
   function runSaved() {
-    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: S.stdBook ? S.stdBook.data : null, stdSettings: pref.get('stdSettings', {}), inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(S.cur.rows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: S.pays ? S.pays.rows : [], pPays: S.pPays ? S.pPays.rows : [], menu: S.menu ? S.menu.rows : [], pMenu: S.pMenu ? S.pMenu.rows : [], tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: S.stdBook ? S.stdBook.data : null, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
 
-  async function handleFiles(list) {
+  /** 同じ種類・同じ月のファイル（エリアごとの売上集計表など）は行をつなげて1つにする */
+  const MERGE_KINDS = ['raw', 'pays', 'menu', 'tc', 'ws', 'hourly'];
+  function mergeSame(got) {
+    const out = [], idx = {};
+    for (const g of got) {
+      const k = MERGE_KINDS.find(x => g[x]);
+      if (!k) { out.push(g); continue; }
+      const key = k + ':' + mKey(g[k]);
+      if (idx[key] == null) { idx[key] = out.length; out.push({ ...g }); continue; }
+      const m = out[idx[key]];
+      m[k] = m[k].concat(g[k]); m.name += '、' + g.name; m.file = null; // つなげたものは元ファイルとして保存しない
+    }
+    return out;
+  }
+  async function handleFiles(list, opt) {
+    opt = opt || {};
     const files = [...list].filter(Boolean);
     if (!files.length) return;
-    setStatus(`${files.map(f => `「${f.name}」`).join('')}を読み込み中…`);
+    setStatus(opt.label || `${files.map(f => `「${f.name}」`).join('')}を読み込み中…`);
     await new Promise(r => setTimeout(r, 30));
     try {
-      const got = [];
+      let got = [];
       for (const f of files) got.push(await readOne(f));
-      const N = S ? { ...S } : {};
+      got = mergeSame(got);
+      const N = S && !opt.fresh ? { ...S } : {};
       const notes = [];
       const book = got.find(g => g.cur);
       const raws = got.filter(g => g.raw).sort((a, b) => mKey(b.raw) - mKey(a.raw));
@@ -1716,9 +1748,11 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
         N.cur = { name: book.name, rows: book.cur, file: book.file };
         N.prev = book.prev.length ? { name: book.name + '（前年シート）', rows: book.prev, file: book.file, sheet: 'prev' } : null;
       } else if (raws.length >= 2) {
+        // いちばん新しい月を当年、その12か月前を前年とする
+        const p = raws.find(r => mKey(r.raw) === mKey(raws[0].raw) - 12);
         N.cur = { name: raws[0].name, rows: raws[0].raw, file: raws[0].file };
-        N.prev = { name: raws[1].name, rows: raws[1].raw, file: raws[1].file };
-        if (mKey(raws[0].raw) === mKey(raws[1].raw)) notes.push('2つの売上集計表が同じ年月です。前年分か確認してください');
+        if (p) N.prev = { name: p.name, rows: p.raw, file: p.file };
+        if (raws.length > (p ? 2 : 1)) notes.push(`売上集計表のうち当年・前年同月以外の${raws.length - (p ? 2 : 1)}件は使っていません`);
       } else if (raws.length === 1) {
         const r = raws[0];
         // 保存中の当年より古い月なら前年分、それ以外は当年分として差し替え
@@ -1747,12 +1781,14 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
         if (k != null && k < mKey(N.cur.rows)) N.pPays = { name: g.name, rows: g.pays, file: g.file };
         else N.pays = { name: g.name, rows: g.pays, file: g.file };
       }
-      // 勤怠：タイムカード・勤務スケジュールは当月分、時給データは最新のファイルで差し替え（月が変わっても残す）
+      // 勤怠：タイムカード・勤務スケジュールは当月分、時給データ・標準比マスタは最新のファイルで差し替え（月が変わっても残す）
+      const ck0 = mKey(N.cur.rows), pickM = xs => xs.find(g => mKey(g.tc || g.ws) === ck0) || xs[0];
+      const tcs = got.filter(g => g.tc), wss = got.filter(g => g.ws);
+      if (tcs.length) { const g = pickM(tcs); N.tc = { name: g.name, rows: g.tc, file: g.file }; }
+      if (wss.length) { const g = pickM(wss); N.ws = { name: g.name, rows: g.ws, file: g.file }; }
       for (const g of got) {
-        if (g.tc) N.tc = { name: g.name, rows: g.tc, file: g.file };
-        if (g.ws) N.ws = { name: g.name, rows: g.ws, file: g.file };
-        if (g.wage) N.wage = { name: g.name, rows: g.wage, file: g.file };
-        if (g.std) N.stdBook = { name: g.name, data: g.std, file: g.file };
+        if (g.wage && !(opt.fresh && N.wage)) N.wage = { name: g.name, rows: g.wage, file: g.file };
+        if (g.std && !(opt.fresh && N.stdBook)) N.stdBook = { name: g.name, data: g.std, file: g.file };
       }
       if (hourly.length) N.hourly = { name: hourly[0].name, rows: hourly[0].hourly, file: hourly[0].file };
       // 月が合わない保存データは外す
@@ -1771,8 +1807,8 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
       S = N;
       runSaved();
       let saved = true;
-      try { await store.put(S); } catch (e) { saved = false; }
-      setStatus(`${files.length}ファイルを読み込みました（${R.stores.length}店舗）。` + (saved ? 'このブラウザに保存したので、次回はファイルなしで表示されます。' : '※この環境ではブラウザに保存できませんでした。') + (notes.length ? '　' + notes.join('。') + '。' : ''));
+      if (opt.nosave) saved = null; else try { await store.put(S); } catch (e) { saved = false; }
+      setStatus(`${files.length}ファイルを読み込みました（${R.stores.length}店舗）。` + (saved === null ? (opt.done || '') : saved ? 'このブラウザに保存したので、次回はファイルなしで表示されます。' : '※この環境ではブラウザに保存できませんでした。') + (notes.length ? '　' + notes.join('。') + '。' : ''));
     } catch (e) { console.error(e); setStatus('読み込めませんでした：' + e.message, true); }
   }
   $('file').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
@@ -2009,11 +2045,11 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
     const yn = (id, label, v) => `<label class="small">${label} <select class="btn ghost" data-k="${id}" style="padding:4px 8px"><option value="1"${v ? ' selected' : ''}>○</option><option value="0"${v ? '' : ' selected'}>×</option></select></label>`;
     const nb = (id, label, v, step) => `<label class="small">${label} <input type="number" data-k="${id}" value="${v ?? ''}" step="${step || 1}" min="0" style="width:4.5em;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)"></label>`;
     $('stdSet').innerHTML = `<span class="label">店舗設定${x.custom ? '' : '（初期値のまま）'}</span>` + nb('tables', '卓数', x.tables) + yn('lunchWd', '平日ランチ営業', st.lunchWd) + yn('lunchHd', '休日ランチ営業', st.lunchHd) + yn('auto', '自動案内', st.auto) + nb('t8', 'T8台数', st.t8) + nb('hoursWd', '営業時間 平日', st.hoursWd, 0.5) + nb('hoursHd', '営業時間 休日', st.hoursHd, 0.5)
-      + `<span class="small muted">変更するとすぐ再計算し、このブラウザに保存します</span>`;
+      + `<span class="small muted">${GAS ? '変更するとすぐ再計算し、全員共通の設定として保存します' : '変更するとすぐ再計算し、このブラウザに保存します'}</span>`;
     $('stdSet').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
-      const all = pref.get('stdSettings', {}), cur0 = { ...STD_DEFAULT, ...(all[s.code] || {}) };
+      const all = stdSettingsAll(), cur0 = { ...STD_DEFAULT, ...(all[s.code] || {}) };
       $('stdSet').querySelectorAll('[data-k]').forEach(e => { const k = e.dataset.k; cur0[k] = e.tagName === 'SELECT' ? e.value === '1' : +e.value; });
-      all[s.code] = cur0; pref.set('stdSettings', all);
+      all[s.code] = cur0; saveStdSetting(s.code, cur0, all);
       if (last) last[2] = { ...last[2], stdSettings: all };
       const keep = s.code; rerun(); cur = keep; render();
     }));
@@ -2332,7 +2368,8 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
   scope = pref.get('scope', 'direct'); areaSel = pref.get('area', ''); detail = pref.get('detail', false); tab = pref.get('tab', 'sales');
   $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
-  store.get().then(async v => {
+  if (GAS) startDrive();
+  else store.get().then(async v => {
     if (!v || !v.cur) return;
     let msg = '前回保存したデータを表示しています。新しいファイルを入れると更新されます。', err = false;
     if (v.v !== DATA_VERSION) {
@@ -2344,6 +2381,46 @@ if (typeof module !== 'undefined') module.exports = { isStdBook, extractStd, std
     try { runSaved(); setStatus(msg, err); }
     catch (e) { console.error(e); setStatus('保存データを表示できませんでした：' + e.message, true); }
   });
+  async function startDrive() {
+    $('drivePanel').hidden = false; $('drop').hidden = true; $('clearBtn').hidden = true;
+    document.querySelector('header.top p').textContent = '共有ドライブのエリアフォルダにある売上集計表・勤怠などを読み込み、売上・原価・人（労働時間・雑給・標準比）を分析して報告用コメントの下書きを作ります。見られるのは、ドライブで共有されているエリアだけです。';
+    $('saved').querySelector('.label').firstChild.textContent = '読み込んだデータ ';
+    $('sampleBanner').innerHTML = 'いま表示しているのは<b>サンプルデータ</b>です。エリアを選んで「最新のデータを読み込む」を押すと、共有ドライブのファイルで分析します。';
+    try {
+      setStatus('共有ドライブを確認しています…');
+      const cfg = await call('getConfig');
+      stdMem = cfg.stdSettings || {};
+      if (!cfg.areas.length) { setStatus(cfg.error || '見られるエリアのフォルダがありません。フォルダの共有設定を確認してください。', true); return; }
+      const sel = $('driveArea');
+      sel.innerHTML = (cfg.areas.length > 1 ? `<option value="*">すべてのエリア（${cfg.areas.length}）</option>` : '') + cfg.areas.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+      const keep = pref.get('driveArea', '');
+      if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+      $('driveInfo').textContent = `${cfg.user ? cfg.user + ' として表示。' : ''}見られるエリア：${cfg.areas.map(a => a.name).join('、')}。${cfg.common ? '' : '※共通フォルダが見つかりません（時給データ・標準比マスタなしで分析します）。'}`;
+      setStatus('');
+      loadDrive();
+    } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
+  }
+  async function loadDrive() {
+    const v = $('driveArea').value; pref.set('driveArea', v);
+    const ids = v === '*' ? [...$('driveArea').options].map(o => o.value).filter(x => x !== '*') : [v];
+    const label = $('driveArea').selectedOptions[0].textContent;
+    $('driveLoad').disabled = true;
+    try {
+      setStatus(`「${label}」のファイルを探しています…`);
+      const list = await call('listFiles', ids);
+      if (!list.length) throw new Error('フォルダにファイルがありません');
+      const files = []; let n = 0;
+      const b64ToFile = (r) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new File([u], r.name); };
+      // 4件ずつ並行して取得
+      for (let i = 0; i < list.length; i += 4) {
+        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; setStatus(`共有ドライブから読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r); })));
+        files.push(...part);
+      }
+      await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています。` });
+    } catch (e) { console.error(e); setStatus('読み込めませんでした：' + (e.message || e), true); }
+    $('driveLoad').disabled = false;
+  }
+  $('driveLoad').addEventListener('click', loadDrive);
   if (typeof XLSX === 'undefined') setStatus('Excel読み込み用ライブラリを取得できませんでした。ネットワーク接続を確認して再読み込みしてください。', true);
 })();
 </script>
