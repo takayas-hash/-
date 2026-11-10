@@ -273,10 +273,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     </div>
     <div class="grid2">
       <div>
-        <h3>曜日区分 × 時間帯の予算比</h3>
-        <p class="small muted" style="margin:2px 0 8px">時間帯の予算は、前年同月の同じ曜日区分の時間帯構成比で日予算を按分した値です。</p>
+        <h3 id="heatTitle">曜日区分 × 時間帯の前年比（1日あたり）</h3>
+        <p class="small muted" style="margin:2px 0 8px" id="heatNote">曜日区分ごとの日数の違い（休前日5日と4日など）を除くため、1日あたりの売上で前年と比べています。下の段は1日あたりの前年差。</p>
         <div class="tbl"><div class="heat" id="heat"></div></div>
-        <div class="legend" style="margin-top:8px"><span>未達</span><span class="ramp"></span><span>超過</span><span>（100%＝グレー、±20%で最も濃く）</span></div>
+        <div class="legend" style="margin-top:8px"><span id="lgNeg">前年割れ</span><span class="ramp"></span><span id="lgPos">前年超え</span><span>（100%＝グレー、±20%で最も濃く）</span></div>
       </div>
       <div>
         <h3>日別の予算差</h3>
@@ -748,9 +748,12 @@ function analyzeStore(cur, prev, monthDays) {
     pShare[d.dt].forEach((sh, b) => { grid[ti][b].budget += d.budget * sh; });
   });
   prev.forEach(d => { const ti = DAYTYPES.indexOf(d.dt); for (let h = 1; h <= 24; h++) grid[ti][HOUR_TO_BAND[h]].pSales += d.hourS[h]; });
+  // 前年比は曜日区分ごとの日数の違いを除くため1日あたりで比べる
+  grid.forEach((row, ti) => row.forEach(c => { const d = byType[ti].days, pd = byType[ti].pDays; c.d = d; c.pd = pd;
+    c.yoyDay = c.pSales > 0 && d && pd ? (c.sales / d) / (c.pSales / pd) : null; c.dayDiff = d && pd ? c.sales / d - c.pSales / pd : null; }));
   const byBand = BANDS.map((bd, b) => {
     const s = sum(grid, r => r[b].sales), bu = sum(grid, r => r[b].budget), c = sum(grid, r => r[b].cust), p = sum(grid, r => r[b].pSales);
-    return { key: bd.key, name: bd.name, label: bd.label, sales: s, budget: bu, diff: s - bu, rate: bu ? s / bu : null, cust: c, pSales: p, yoy: p ? s / p : null };
+    return { key: bd.key, name: bd.name, label: bd.label, sales: s, budget: bu, diff: s - bu, rate: bu ? s / bu : null, cust: c, pSales: p, yoy: p ? s / p : null, pDiff: s - p };
   });
 
   // 天候
@@ -1564,8 +1567,22 @@ function storeComment(s, ctx) {
     if (cal.length) L.d(`　前年比の暦差：${cal.join('、')}（前年比を見る際は考慮）。`);
   }
 
-  // 3) 時間帯
-  const bands = s.byBand.filter(b => b.budget > s.budget * 0.02);
+  // 3) 時間帯：前年データがあれば前年比で見る（時間帯の予算は按分のため参考程度）
+  const hasPY = s.hasPrev && s.byBand.some(b => b.pSales > 0);
+  if (hasPY) {
+    const bs = s.byBand.filter(b => b.pSales > s.pSales * 0.02 || b.sales > s.sales * 0.02);
+    const neg = bs.filter(b => b.pDiff < 0).sort((a, b) => a.pDiff - b.pDiff), pos = bs.filter(b => b.pDiff >= 0).sort((a, b) => b.pDiff - a.pDiff);
+    const t = b => `${b.name}(${b.label})${pct(b.yoy)}・${sman(b.pDiff)}`;
+    let line = '・時間帯別（前年比）：' + (neg.length ? `${neg.slice(0, 2).map(t).join('、')}が前年割れ` : `全時間帯で前年超え（${pos.slice(0, 2).map(t).join('、')}）`);
+    if (neg.length && pos.length) line += `。${pos[0].name}は${pct(pos[0].yoy)}と前年超え`;
+    L.push(line + '。');
+    // 曜日区分×時間帯で前年から最も落ちているところ（1日あたりの差×日数＝月への影響が最大）
+    let w = null;
+    s.grid.forEach((row, ti) => row.forEach((c, bi) => { if (c.yoyDay == null || c.dayDiff == null) return; const imp = c.dayDiff * c.d; if (!w || imp < w.imp) w = { imp, ti, bi, c }; }));
+    if (w && w.imp < 0 && Math.abs(w.imp) >= Math.abs(Math.min(0, s.sales - s.pSales)) * 0.2)
+      L.push(`　前年から最も落ちているのは「${DAYTYPES[w.ti]}×${BANDS[w.bi].name}」で、1日あたり前年比${pct(w.c.yoyDay)}（1日${sman(w.c.dayDiff)}）。`);
+  }
+  const bands = hasPY ? [] : s.byBand.filter(b => b.budget > s.budget * 0.02);
   const bNeg = bands.filter(b => b.diff < 0).sort((a, b) => a.diff - b.diff);
   const bPos = bands.filter(b => b.diff >= 0).sort((a, b) => b.diff - a.diff);
   const bTxt = b => `${b.name}(${b.label})${pct(b.rate)}・${sman(b.diff)}${b.yoy ? `／前年比${pct(b.yoy)}` : ''}`;
@@ -1754,8 +1771,13 @@ function areaComment(a, stores, ctx) {
   if (best.length) L.push(`・達成額上位：${best.map(s => `${s.name}${sman(s.diff)}（${pct(s.rate)}）`).join('、')}。`);
   const t = a.byType.filter(x => x.budget > 0).sort((x, y) => x.diff - y.diff);
   if (t.length) L.push(`・曜日区分：${t.map(x => `${x.key}${pct(x.rate)}`).join('、')}。`);
-  const b = a.byBand.filter(x => x.budget > a.budget * 0.02).sort((x, y) => x.diff - y.diff);
-  if (b.length) L.push(`・時間帯：${b.map(x => `${x.name}${pct(x.rate)}（${sman(x.diff)}）`).join('、')}。`);
+  if (a.hasPrev && a.byBand.some(x => x.pSales > 0)) {
+    const b = a.byBand.filter(x => x.pSales > a.pSales * 0.02).sort((x, y) => x.pDiff - y.pDiff);
+    if (b.length) L.push(`・時間帯（前年比）：${b.map(x => `${x.name}${pct(x.yoy)}（${sman(x.pDiff)}）`).join('、')}。`);
+  } else {
+    const b = a.byBand.filter(x => x.budget > a.budget * 0.02).sort((x, y) => x.diff - y.diff);
+    if (b.length) L.push(`・時間帯：${b.map(x => `${x.name}${pct(x.rate)}（${sman(x.diff)}）`).join('、')}。`);
+  }
   if (a.discDetail) {
     const dd = a.discDetail;
     L.push(`・値引：税込${man(dd.total)}（値引率${pct(a.discRate)}${a.pDiscRate != null ? `、前年${pct(a.pDiscRate)}` : ''}）。内訳は${dd.cats.slice(0, 4).map(c => `${c.cat}${Math.round(c.amount / dd.total * 100)}%`).join('、')}。`);
@@ -1904,22 +1926,27 @@ function followUp(s0, s1) {
     const d = Math.round((r1 - r0) * (lowerBetter ? -1 : 1) * (unit === 'loss' ? 10000 : 1000)) / (unit === 'loss' ? 10000 : 1000); // 表示の桁で丸めてから判定
     if (unit === 'loss' && Math.abs(d) < 0.0005) return; // ロス率は変化があるときだけ
     const th = unit === 'loss' ? 0.0005 : 0.02;
-    const st = unit === 'rate' && !lowerBetter && r1 >= 1 ? 'solved' : d >= th ? 'better' : d <= -th ? 'worse' : 'flat';
+    const st = (unit === 'rate' || unit === 'yoy') && !lowerBetter && r1 >= 1 ? 'solved' : d >= th ? 'better' : d <= -th ? 'worse' : 'flat';
     out.push({ label, r0, r1, unit, lowerBetter, st }); };
   add('予算比', s0.rate, s1.rate, false, 'rate');
   // 未達だった曜日区分（未達額の大きい順に2つ）
   s0.byType.filter(t => t.budget > 0 && t.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 2).forEach(t => { const u = s1.byType.find(x => x.key === t.key); if (u && u.budget > 0) add(t.key, t.rate, u.rate, false, 'rate'); });
-  // 未達だった時間帯（2つ）
-  s0.byBand.filter(b => b.budget > s0.budget * 0.02 && b.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 2).forEach(b => { const u = s1.byBand.find(x => x.key === b.key); if (u && u.budget > 0) add(b.name, b.rate, u.rate, false, 'rate'); });
-  // 最大の未達ポイント（曜日区分×時間帯）
-  let w = null; s0.grid.forEach((row, ti) => row.forEach((c, bi) => { const d = c.sales - c.budget; if (c.budget > 0 && d < 0 && (!w || d < w.d)) w = { d, ti, bi }; }));
-  if (w) { const c0 = s0.grid[w.ti][w.bi], c1 = s1.grid[w.ti][w.bi]; if (c1 && c1.budget > 0) add(`${DAYTYPES[w.ti]}×${BANDS[w.bi].name}`, c0.sales / c0.budget, c1.sales / c1.budget, false, 'rate'); }
+  if (s0.hasPrev && s1.hasPrev) {
+    // 時間帯・曜日区分×時間帯は前年比で（時間帯の予算は按分のため）
+    s0.byBand.filter(b => b.pSales > 0 && b.pDiff < 0).sort((a, b) => a.pDiff - b.pDiff).slice(0, 2).forEach(b => { const u = s1.byBand.find(x => x.key === b.key); if (u && u.yoy != null) add(`${b.name}（前年比）`, b.yoy, u.yoy, false, 'yoy'); });
+    let w = null; s0.grid.forEach((row, ti) => row.forEach((c, bi) => { if (c.dayDiff == null || c.yoyDay == null) return; const imp = c.dayDiff * c.d; if (imp < 0 && (!w || imp < w.imp)) w = { imp, ti, bi }; }));
+    if (w) { const c0 = s0.grid[w.ti][w.bi], c1 = s1.grid[w.ti][w.bi]; if (c1 && c1.yoyDay != null) add(`${DAYTYPES[w.ti]}×${BANDS[w.bi].name}（前年比）`, c0.yoyDay, c1.yoyDay, false, 'yoy'); }
+  } else {
+    s0.byBand.filter(b => b.budget > s0.budget * 0.02 && b.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 2).forEach(b => { const u = s1.byBand.find(x => x.key === b.key); if (u && u.budget > 0) add(b.name, b.rate, u.rate, false, 'rate'); });
+    let w = null; s0.grid.forEach((row, ti) => row.forEach((c, bi) => { const d = c.sales - c.budget; if (c.budget > 0 && d < 0 && (!w || d < w.d)) w = { d, ti, bi }; }));
+    if (w) { const c0 = s0.grid[w.ti][w.bi], c1 = s1.grid[w.ti][w.bi]; if (c1 && c1.budget > 0) add(`${DAYTYPES[w.ti]}×${BANDS[w.bi].name}`, c0.sales / c0.budget, c1.sales / c1.budget, false, 'rate'); }
+  }
   if (s0.custRate != null && s0.custRate < 1 && s0.custEff < 0) add('客数予算比', s0.custRate, s1.custRate, false, 'rate');
   if (s0.lossRate != null && s1.lossRate != null) add('ロス率', s0.lossRate, s1.lossRate, true, 'loss');
   // 同じ名前が重なったら最初のものだけ
   return out.filter((x, i) => out.findIndex(y => y.label === x.label) === i);
 }
-const FU_TXT = { solved: '解消（予算達成）', better: '改善中', flat: '横ばい（課題が続いている）', worse: '悪化' };
+const FU_TXT = { solved: '解消（予算達成・前年超え）', better: '改善中', flat: '横ばい（課題が続いている）', worse: '悪化' };
 /** 1行のコメント（状況ごとにまとめる）。L0・L1：月の呼び名（例「10月」「11月途中」） */
 function followUpLine(items, L0, L1, viewingLater) {
   if (!items.length) return null;
@@ -2418,12 +2445,24 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
         + fu.map(x => { const d = (x.r1 - x.r0) * 100; return `<tr><td>${esc(x.label)}</td><td class="n">${fv0(x)}</td><td class="n"><b>${fv(x)}</b></td><td class="n ${(x.lowerBetter ? -d : d) >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '▲'}${Math.abs(d).toFixed(x.unit === 'loss' ? 2 : 1)}pt</td><td>${pill[x.st]}</td></tr>`; }).join('') + '</tbody>';
     }
 
-    // ヒートマップ
+    // ヒートマップ：前年データがあれば前年比（1日あたり）、なければ按分予算比
+    const py = s.hasPrev && s.grid.some(r => r.some(c => c.pSales > 0));
+    $('heatTitle').textContent = py ? '曜日区分 × 時間帯の前年比（1日あたり）' : '曜日区分 × 時間帯の予算比';
+    $('heatNote').textContent = py ? '曜日区分ごとの日数の違い（休前日5日と4日など）を除くため、1日あたりの売上で前年と比べています。下の段は1日あたりの前年差。' : '前年データがないため予算比で表示しています（時間帯の予算は、日予算を時間帯に按分した参考値）。';
+    $('lgNeg').textContent = py ? '前年割れ' : '未達'; $('lgPos').textContent = py ? '前年超え' : '超過';
     let h = '<div></div>' + BANDS.map(b => `<div class="h">${b.name}<br><span style="font-weight:400">${b.label}</span></div>`).join('');
     DAYTYPES.forEach((dt, ti) => {
       const days = s.byType[ti].days;
       h += `<div class="h">${dt}<br><span style="font-weight:400">${days}日</span></div>`;
       s.grid[ti].forEach((c, bi) => {
+        if (py) {
+          if (!days || c.yoyDay == null || (c.sales < 1000 && c.pSales < 1000)) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
+          const r = c.yoyDay, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
+          const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
+          const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|売上 ${man(c.sales)}（${c.d}日）|前年 ${man(c.pSales)}（${c.pd}日）|1日あたり前年比 ${pct(r)}・1日${sman(c.dayDiff)}`;
+          h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${sman(c.dayDiff).replace('万円', '万')}/日</span></div>`;
+          return;
+        }
         if (!days || c.budget < 1000) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
         const r = c.sales / c.budget, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
         const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
@@ -2461,7 +2500,9 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     // 表
     $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th></tr></thead><tbody>`
       + s.byType.filter(t => t.days).map(t => `<tr><td>${t.key}</td><td class="n">${t.days}${s.hasPrev ? `<span class="muted small">（前年${t.pDays}）</span>` : ''}</td><td class="n">${man(t.sales)}</td><td class="n ${cls(t.diff)}">${pct(t.rate)}</td><td class="n ${cls(t.diff)}">${sman(t.diff)}</td><td class="n">${man(t.avg)}</td><td class="n">${t.pAvg ? man(t.pAvg) : '－'}</td></tr>`).join('') + '</tbody>';
-    $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th></tr></thead><tbody>`
+    if (py) $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">前年</th><th class="n">前年比</th><th class="n">前年差</th><th class="n">客数</th></tr></thead><tbody>`
+      + s.byBand.map(b => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n muted">${man(b.pSales)}</td><td class="n ${cls(b.pDiff)}">${pct(b.yoy)}</td><td class="n ${cls(b.pDiff)}">${sman(b.pDiff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td></tr>`).join('') + '</tbody>';
+    else $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th></tr></thead><tbody>`
       + s.byBand.map((b, bi) => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td></tr>`).join('') + '</tbody>';
     // 値引内訳
     const dd = s.discDetail;
@@ -2489,7 +2530,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const shown = id => $(id) && !$(id).hidden;
     cur = code;
     tab = 'sales'; renderStore();
-    const S1 = { kpis: $('sKpis').innerHTML, cmt: commentText(s.lines, detail), cum: box('cum'), daily: box('daily'), heat: box('heat'), type: box('typeTbl'), band: box('bandTbl'), wd: box('wdTbl'),
+    const S1 = { heatTitle: $('heatTitle').textContent, kpis: $('sKpis').innerHTML, cmt: commentText(s.lines, detail), cum: box('cum'), daily: box('daily'), heat: box('heat'), type: box('typeTbl'), band: box('bandTbl'), wd: box('wdTbl'),
       discCat: shown('discCatBox') ? box('discCatTbl') : '', disc: shown('discBox') ? box('discTbl') : '' };
     tab = 'cost'; renderStore();
     const S2 = { kpis: $('sKpis').innerHTML, cmt: commentText(s.costLines, detail), loss: shown('lossBox') ? '<div class="kpis">' + $('lossKpis').innerHTML + '</div><div class="tbl"><table>' + $('lossWdTbl').innerHTML + '</table></div>' : '',
@@ -2555,7 +2596,7 @@ if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tc
     const page = (n, title, body) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料</div><h1>${esc(s.name)}</h1></div><div style="text-align:right"><h2>${title}</h2><div class="muted">${esc(per)}</div></div></div>
       <div class="rp-body">${body}</div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 4</span></div></section>`;
     return page(1, '売上の概況', `<div class="kpis">${S1.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S1.cmt, true)}</div><div><h3>累計売上の推移（実績・予算・着地見込み）</h3><div class="chart">${S1.cum}</div></div>`)
-      + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>曜日区分 × 時間帯の予算比</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div><div><h3>曜日別</h3>${tblw(S1.wd)}</div>`)
+      + page(2, '売上の詳細', `<div><h3>日別の予算差</h3><div class="chart">${S1.daily}</div></div><div><h3>${esc(S1.heatTitle)}</h3><div class="heat">${S1.heat}</div></div><div><h3>曜日区分別</h3>${tblw(S1.type)}</div><div><h3>時間帯別</h3>${tblw(S1.band)}</div><div><h3>曜日別</h3>${tblw(S1.wd)}</div>`)
       + page(3, '原価・ロス', `<div class="kpis">${S2.kpis}</div><div><h3>分析コメント</h3>${cmtHtml(S2.cmt, true)}</div><div><h3>ロス（廃棄額）</h3>${S2.loss || none('売上集計表の「廃棄額」がありません。')}</div><div><h3>原価率理論差の推移</h3>${S2.inv || none('原価管理表を読み込むと、原価率理論差と13か月の推移を表示します。')}</div>`)
       + page(4, '喫食量・コース・値引', `<div><h3>原価・喫食量・皿数（食べ放題）</h3>${S2.cost || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>${S2.yoy ? `<div><h3>皿数・喫食量の前年比較</h3>${S2.yoy}</div>` : ''}<div><h3>コース構成</h3>${S2.course || none('メニュー別（ABC分析）を読み込むと表示します。')}</div>
         <div><h3>値引</h3>${S1.discCat ? tblw(S1.discCat) : S1.disc ? tblw(S1.disc) : none('値引詳細を読み込むと表示します。')}</div>`);
