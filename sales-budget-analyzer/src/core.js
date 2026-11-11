@@ -92,7 +92,8 @@ function headerIndex(aoa, must, lim) {
   return -1;
 }
 /* ===== NPS（お客様アンケート）：業態ごとのシート。見出し行に code・NPS・推奨・批判。後半は「先月差」 ===== */
-const NPS_QSC = [['Q', '料理'], ['S1', '入店・案内'], ['S2', '接客'], ['C', '清潔さ'], ['sp', '提供']];
+// QSCs：Q平均・S平均・C平均・sp平均の4つ。[キー, 表示, 意味, 列の見出し, 内訳の列（Q_1・Q1_1、S1_1・S2_1、C_1、sp_1・s_8）]
+const NPS_QSC = [['Q', 'Q', '品質', 'Q平均', /^Q\d*_\d+$/], ['S', 'S', 'サービス', 'S平均', /^S\d_\d+$/], ['C', 'C', 'クレンリネス', 'C平均', /^C_\d+$/], ['s', 's', 'スピード', 'sp平均', /^sp?_\d+$/]];
 function npsHeader(aoa) {
   for (let i = 0; i < Math.min(aoa.length, 12); i++) { const r = (aoa[i] || []).map(x => String(x == null ? '' : x).trim()); if (r.includes('code') && r.includes('NPS') && r.includes('推奨') && r.includes('批判')) return i; }
   return -1;
@@ -116,10 +117,10 @@ function extractNps(XLSX, wb) {
     // 時間帯：最初の4つ＝土日祝、次の4つ＝平日（今月）。先月差の側も同じ順
     const bandCols = cur => { const cs = []; const names = ['ランチ', 'アイドル', 'ディナー', 'ALL']; for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (names.includes(H[c])) cs.push(c); return cs.slice(0, 8); };
     const bc = bandCols(true), bd = bandCols(false);
-    const qsc = cur => NPS_QSC.map(([k, label]) => {
-      const tot = idxIn(k, cur), items = [];
-      for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (new RegExp('^' + (k === 'sp' ? 's(p)?' : k) + '_\\d+$').test(H[c]) && G[c]) items.push({ c, label: G[c] });
-      return { k, label, tot, items };
+    const qsc = cur => NPS_QSC.map(([k, label, mean, head, re]) => {
+      const tot = idxIn(head, cur), items = [];
+      for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (re.test(H[c]) && G[c]) items.push({ c, label: G[c] });
+      return { k, label, mean, tot, items };
     });
     const qc = qsc(true), qd = qsc(false);
     const rec = (r, isAvg) => {
@@ -128,19 +129,26 @@ function extractNps(XLSX, wb) {
       return {
         n: numv(g(nCol)), nps: pctv(g(idx('NPS'))), crit: numv(g(idx('批判'))), neu: numv(g(idx('中立'))), pro: numv(g(idx('推奨'))),
         bands: bands(bc), bandsDiff: isAvg ? null : bands(bd),
-        qsc: qc.map((q, i) => ({ k: q.k, label: q.label, v: numv(g(q.tot)), d: isAvg ? null : numv(g(qd[i].tot)),
+        qsc: qc.map((q, i) => ({ k: q.k, label: q.label, mean: q.mean, v: numv(g(q.tot)), d: isAvg ? null : numv(g(qd[i].tot)),
           items: q.items.map(it => { const di = qd[i].items.find(x => x.label === it.label); return { label: it.label, v: numv(g(it.c)), d: isAvg || !di ? null : numv(g(di.c)) }; }).filter(x => x.v != null) })),
         repeat: numv(g(idx('リピート率'))),
       };
     };
     const ranked = aoa.slice(hr + 1).filter(r => r && typeof r[0] === 'number' && typeof r[idx('業態ランキング')] === 'number').length;
     if (avgRow) out.brands[sn] = rec(avgRow, true);
+    const inSheet = [];
     aoa.slice(hr + 1).forEach(r => {
       if (!r || r[0] == null || !/^\d+$/.test(String(r[0]).trim())) return;
       const g = c => c >= 0 ? r[c] : null;
       const x = rec(r, false);
       Object.assign(x, { code: String(r[0]).trim(), name: String(g(idx('店舗名')) || ''), brand: sn, am: g(idx('AM')) || '', grade: g(idx('総合評価')), rank: numv(g(idx('業態ランキング'))), rankN: ranked, areaRank: numv(g(idx('エリアランキング'))) });
-      if (x.nps != null) out.stores[x.code] = x;
+      if (x.nps != null) { out.stores[x.code] = x; inSheet.push(x); }
+    });
+    // 内訳の項目の業態平均（平均の行には内訳がないので、業態の全店を回答数で重み付けして出す）
+    const B = out.brands[sn];
+    if (B) B.qsc.forEach((q, i) => {
+      const labels = [...new Set(inSheet.flatMap(x => x.qsc[i].items.map(it => it.label)))];
+      q.items = labels.map(label => { let w = 0, t = 0; inSheet.forEach(x => { const it = x.qsc[i].items.find(y => y.label === label); if (it && it.v != null && x.n) { w += x.n; t += it.v * x.n; } }); return { label, v: w ? t / w : null }; }).filter(it => it.v != null);
     });
   });
   return out;
@@ -158,10 +166,36 @@ function npsYm(period, refK) {
 /** NPSの履歴に残す分（対象の店だけ。1店あたり数十バイト）：NPS・回答数・推奨・批判・QSC5つ、と業態平均 */
 function npsSnapshot(data, codes, ym) {
   if (!data || !ym) return null;
-  const recs = Object.values(data.stores).filter(x => !codes || codes.has(x.code)).map(x => ({ c: x.code, b: x.brand, nps: x.nps, n: x.n, pro: x.pro, crit: x.crit, q: Object.fromEntries(x.qsc.filter(q => q.v != null).map(q => [q.k, q.v])) }));
+  const recs = Object.values(data.stores).filter(x => !codes || codes.has(x.code)).map(x => ({ c: x.code, b: x.brand, nps: x.nps, n: x.n, pro: x.pro, crit: x.crit, q: Object.fromEntries(x.qsc.filter(q => q.v != null).map(q => [q.k, q.v])), v: 2 }));
   const brands = {}; recs.forEach(r => { const a = data.brands[r.b]; if (a && !brands[r.b]) brands[r.b] = { nps: a.nps, q: Object.fromEntries(a.qsc.filter(q => q.v != null).map(q => [q.k, q.v])) }; });
   return recs.length ? { ym, recs, brands, at: Date.now() } : null;
 }
+/**
+ * NPS・QSCsのコメント：QSCsの4つを業態平均と比べ、差の大きい順に内訳の項目まで掘り下げる。先月より下がったものも
+ * np：その店、avg：業態平均（内訳の項目の平均つき）
+ */
+function qscLines(np, avg) {
+  if (!np) return [];
+  const L = [], f1 = v => v.toFixed(1), sd = v => (v >= 0 ? '+' : '▲') + Math.abs(v).toFixed(1);
+  const A = k => avg && avg.qsc.find(x => x.k === k);
+  L.push({ t: `・NPS：${f1(np.nps)}${avg ? `（業態平均${f1(avg.nps)}・${sd(np.nps - avg.nps)}）` : ''}${np.grade ? `、評価${np.grade}` : ''}${np.rank ? `、業態内${np.rank}位／${np.rankN}店` : ''}。推奨${Math.round(np.pro * 100)}%・批判${Math.round(np.crit * 100)}%（回答${np.n}件）。`, d: false });
+  const qs = np.qsc.filter(q => q.v != null).map(q => { const a = A(q.k); return { ...q, a: a && a.v != null ? a.v : null, gap: a && a.v != null ? q.v - a.v : null, ai: a ? a.items : [] }; });
+  if (!qs.length) return L;
+  L.push({ t: `・QSCs：${qs.map(q => `${q.label}（${q.mean}）${f1(q.v)}${q.gap != null ? `（平均${sd(q.gap)}）` : ''}`).join('、')}。`, d: false });
+  // 業態平均より低い順に、内訳の項目で平均との差が大きいもの
+  const low = qs.filter(q => q.gap != null && q.gap < -0.5).sort((a, b) => a.gap - b.gap);
+  low.forEach((q, i) => {
+    const its = q.items.map(it => { const a = q.ai.find(x => x.label === it.label); return { ...it, gap: a ? it.v - a.v : null }; }).filter(it => it.gap != null && it.gap < -0.5).sort((a, b) => a.gap - b.gap).slice(0, 3);
+    if (its.length) L.push({ t: `・QSCsの内訳・${q.label} ${q.mean}：業態平均より${f1(-q.gap)}点低い。特に低い項目は ${its.map(it => `${it.label}${f1(it.v)}（平均${sd(it.gap)}${it.d != null ? `・先月${sd(it.d)}` : ''}）`).join('、')}。`, d: i >= 2 });
+  });
+  const hi = qs.filter(q => q.gap != null && q.gap >= 0.5).sort((a, b) => b.gap - a.gap);
+  if (hi.length) L.push({ t: `・QSCsで業態平均より高い：${hi.map(q => `${q.label}（${q.mean}）${sd(q.gap)}`).join('、')}。`, d: true });
+  // 先月より下がったもの（1点以上）と、その中で下がった項目
+  const down = qs.filter(q => q.d != null && q.d <= -1).sort((a, b) => a.d - b.d);
+  if (down.length) L.push({ t: `・QSCsの先月差：${down.map(q => { const its = q.items.filter(it => it.d != null && it.d <= -1).sort((a, b) => a.d - b.d).slice(0, 2); return `${q.label}（${q.mean}）${sd(q.d)}${its.length ? `（${its.map(it => `${it.label}${sd(it.d)}`).join('・')}）` : ''}`; }).join('、')}。`, d: false });
+  return L;
+}
+
 /** 店のNPSの推移（古い順。最大 n か月）：[{ym, nps, n, q, avg, avgQ}] */
 function npsSeries(H, code, n) {
   const byYm = {};
@@ -1849,4 +1883,4 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
