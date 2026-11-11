@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
-const APP_VERSION = '5b32478';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = 'c5c4657';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -238,6 +238,78 @@ function checkSetup() {
   Logger.log('共通のファイル：' + common.length + '件' + (common.length ? '（' + common.map(f => f.name).join('、') + '）' : ''));
   Logger.log('標準比の店舗設定：' + Object.keys(cfg.stdSettings).length + '店');
 }
+
+/* ===== NPSの自動コピー：NPSのフォルダの最新の「月次サマリ」を「共通」へ ===== */
+// NPSのフォルダ（毎月「261102_Monthly_焼肉」のような月のフォルダができ、前の月は「アーカイブ」へ移る）。
+// 変えるときはスクリプト プロパティ NPS_SOURCE_ID に入れる
+const NPS_SOURCE_DEFAULT = '12xXm7FyXTYbwpwNu-8PQpqczLdtkQUvk';
+const NPS_PREFIX = 'NPS_';
+/** 月のフォルダ（名前の先頭が6桁の日付）ごとの月次サマリ（新しい順。アーカイブの中も見る） */
+function npsMonthFiles_(n) {
+  const src = DriveApp.getFolderById(PropertiesService.getScriptProperties().getProperty('NPS_SOURCE_ID') || NPS_SOURCE_DEFAULT);
+  const months = [];
+  const scan = folder => { const it = folder.getFolders(); while (it.hasNext()) { const f = it.next(), m = f.getName().match(/^(\d{6})_/); if (m) months.push({ key: m[1], folder: f }); else if (/アーカイブ|archive/i.test(f.getName())) scan(f); } };
+  scan(src);
+  months.sort((a, b) => b.key.localeCompare(a.key));
+  const out = [];
+  for (const mo of months) {
+    if (out.length >= (n || 1)) break;
+    const it = mo.folder.getFiles(); let best = null;
+    while (it.hasNext()) { const f = it.next(), name = f.getName(), mime = f.getMimeType();
+      const sheet = /\.xlsx?$/i.test(name) || mime === MimeType.GOOGLE_SHEETS || mime === MimeType.MICROSOFT_EXCEL;
+      if (!sheet) continue;
+      if (!best || /サマリ/.test(name)) best = f; }
+    if (best) out.push({ key: mo.key, folder: mo.folder.getName(), file: best });
+  }
+  return out;
+}
+function commonFolder_() { const t = folderTree_(); if (!t.common) throw new Error('「共通」フォルダがありません'); return DriveApp.getFolderById(t.common); }
+/** 「共通」にある前のNPSのコピーを「共通/過去」へ移す */
+function moveOldNps_(common, keepIds) {
+  const it = common.getFiles(); let past = null, n = 0;
+  while (it.hasNext()) { const f = it.next(); if (f.getName().indexOf(NPS_PREFIX) !== 0 || (keepIds || []).indexOf(f.getId()) >= 0) continue;
+    if (!past) { const p = common.getFoldersByName(ARCHIVE_NAME); past = p.hasNext() ? p.next() : common.createFolder(ARCHIVE_NAME); }
+    f.moveTo(past); n++; }
+  return n;
+}
+/** 最新の月次サマリが新しくなっていたら「共通」へコピーする（同じものならなにもしない）。毎朝のトリガーからも呼ばれる */
+function copyLatestNps() {
+  const list = npsMonthFiles_(1);
+  if (!list.length) { Logger.log('NPSのフォルダに月次サマリが見つかりません'); return; }
+  const src = list[0].file, key = src.getId() + '@' + src.getLastUpdated().getTime();
+  const props = PropertiesService.getScriptProperties(), common = commonFolder_();
+  const name = NPS_PREFIX + src.getName();
+  if (props.getProperty('nps_copied') === key && common.getFilesByName(name).hasNext()) { Logger.log('NPSは最新です（' + list[0].folder + '）'); return; }
+  const copy = src.makeCopy(name, common);
+  const moved = moveOldNps_(common, [copy.getId()]);
+  props.setProperty('nps_copied', key);
+  Logger.log('NPSをコピーしました：' + list[0].folder + ' の ' + src.getName() + ' → 共通/' + name + (moved ? '（前のNPS ' + moved + '件を 共通/過去 へ）' : ''));
+}
+/**
+ * 過去のNPSをまとめて取り込む（最初に1回）：直近 n か月の月次サマリを「共通」へコピーする。
+ * そのあとウェブアプリを「すべてのエリア」で1回開くと、各エリアの「履歴データ」に月ごとのNPSが積み上がる。
+ * 最後に copyLatestNps を実行すると、最新の月以外は「共通/過去」へ片付く（読み込みが速くなる）
+ */
+function backfillNps() {
+  const n = 6, list = npsMonthFiles_(n), common = commonFolder_();
+  moveOldNps_(common, []);
+  list.forEach(x => { x.file.makeCopy(NPS_PREFIX + x.file.getName(), common); Logger.log('コピー：' + x.folder + ' の ' + x.file.getName()); });
+  PropertiesService.getScriptProperties().deleteProperty('nps_copied');
+  Logger.log(list.length + 'か月分を「共通」へコピーしました。ウェブアプリを「すべてのエリア」で1回開いてから、copyLatestNps を実行してください。');
+}
+/** NPSの自動コピーを毎朝7時台に動かす（1回だけ実行）。止めるときは uninstallNpsCopy */
+function installNpsCopy() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'npsCopy_').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('npsCopy_').timeBased().everyDays(1).atHour(7).inTimezone('Asia/Tokyo').create();
+  copyLatestNps();
+  Logger.log('毎朝7時台にNPSの最新の月次サマリを確認して、新しければ「共通」へコピーする設定をしました。');
+}
+function uninstallNpsCopy() {
+  const ts = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'npsCopy_');
+  ts.forEach(t => ScriptApp.deleteTrigger(t));
+  Logger.log('NPSの自動コピーを止めました（' + ts.length + '件）。');
+}
+function npsCopy_() { copyLatestNps(); }
 
 /* ===== 月初の自動整理：古いファイルを各エリアの「過去」フォルダへ移す ===== */
 const ARCHIVE_NAME = '過去';

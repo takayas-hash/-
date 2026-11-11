@@ -633,12 +633,12 @@ function extractNps(XLSX, wb) {
 }
 /**
  * NPSのファイルの年月。期間は「10/1（木）～10/31（土）」のように年がないので、基準の月（売上集計表の最新の月：年*12+月-1）から決める。
- * 基準の月より2か月以上あとになる月は前の年とみなす
+ * 基準の月より後になる月は前の年とみなす
  */
 function npsYm(period, refK) {
   const m = String(period || '').match(/(\d{1,2})\s*\/\s*\d{1,2}/); if (!m || refK == null) return null;
   const mo = +m[1]; let y = Math.floor(refK / 12);
-  if (y * 12 + mo - 1 > refK + 1) y--;
+  if (y * 12 + mo - 1 > refK) y--; // NPSが売上集計表より先の月になることはないので、それより後なら前の年
   return `${y}-${String(mo).padStart(2, '0')}`;
 }
 /** NPSの履歴に残す分（対象の店だけ。1店あたり数十バイト）：NPS・回答数・推奨・批判・QSC5つ、と業態平均 */
@@ -2721,7 +2721,7 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
       const curKs = new Set([...savedCur, ...got.filter(g => g.cur).map(kOf), ...rawKs.filter(k => !isPrevRaw(k))]);
       const touched = [];
       const M = k => { touched.push(k); return (ST.months[k] = ST.months[k] ? { ...ST.months[k] } : {}); };
-      const loadedCur = [];
+      const loadedCur = [], npsGot = [];
       for (const g of got) {
         const k = kOf(g);
         if (g.cur) { const m = M(k); m.cur = { name: g.name, rows: g.cur, file: g.file }; m.prev = g.prev.length ? { name: g.name + '（前年シート）', rows: g.prev, file: g.file, sheet: 'prev' } : (m.prev || null); loadedCur.push(k); }
@@ -2735,7 +2735,7 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
         else if (g.hourly) { if (curKs.has(k)) M(k).hourly = { name: g.name, rows: g.hourly, file: g.file }; }
         // 時給データ・標準比マスタは全部の月で共通（新しいファイルで差し替え）
         // 店舗情報（経営企業名・担当AM）も全部の月で共通
-        else if (g.nps) { if (!(opt.fresh && ST.nps && (ST.nps.mtime || 0) >= (g.mtime || 0))) ST.nps = { name: g.name, data: g.nps, file: g.file, mtime: g.mtime }; }
+        else if (g.nps) npsGot.push({ name: g.name, data: g.nps, file: g.file, mtime: g.mtime }); // 月を決めてから、いちばん新しい月を使う（下）
         else if (g.master) { if (!(opt.fresh && ST.master && (ST.master.mtime || 0) >= (g.mtime || 0))) ST.master = { name: g.name, rows: g.master, file: g.file, mtime: g.mtime }; }
         else if (g.wage) { if (!(opt.fresh && ST.wage)) ST.wage = { name: g.name, rows: g.wage, file: g.file }; }
         else if (g.std) { if (g.std.kind === 'lane') { if (!(opt.fresh && ST.stdLane)) ST.stdLane = { name: g.name, data: g.std, file: g.file }; } else if (!(opt.fresh && ST.stdBook)) ST.stdBook = { name: g.name, data: g.std, file: g.file }; }
@@ -2766,13 +2766,20 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
       }
       // NPS：月ごとに履歴へ（ウェブアプリはエリアごと＝そのエリアの売上集計表の店だけ。ブラウザ版は表示中の店）
       add.nps = [];
-      if (ST.nps) {
+      if (npsGot.length) {
+        // 今回読んだNPS（過去の月をまとめて入れた場合も）はすべて履歴へ。表示に使うのはいちばん新しい月
         const refK = Math.max(...Object.keys(ST.months).map(Number).filter(k => ST.months[k].cur));
-        const ym = npsYm(ST.nps.data.period, refK); ST.nps.data.ym = ym;
+        npsGot.forEach(x => { x.data.ym = npsYm(x.data.period, refK); });
+        npsGot.sort((a, b) => (a.data.ym || '') < (b.data.ym || '') ? 1 : -1);
+        if (!ST.nps || (npsGot[0].data.ym || '') >= (ST.nps.data.ym || '')) ST.nps = npsGot[0];
+        N.nps = ST.nps;
         const byArea = {}; gotRaw.filter(g => (g.raw || g.cur) && g.area).forEach(g => { (byArea[g.area] = byArea[g.area] || new Set()); (g.raw || g.cur).forEach(r => byArea[g.area].add(r.code)); });
         const areasN = Object.keys(byArea);
-        if (areasN.length) areasN.forEach(a => { const x = npsSnapshot(ST.nps.data, byArea[a], ym); if (x) { x.area = a; add.nps.push(x); } });
-        else { const codes = new Set(N.cur.rows.map(r => r.code)); const x = npsSnapshot(ST.nps.data, codes, ym); if (x) add.nps.push(x); }
+        npsGot.forEach(n => {
+          if (areasN.length) areasN.forEach(a => { const x = npsSnapshot(n.data, byArea[a], n.data.ym); if (x) { x.area = a; add.nps.push(x); } });
+          else { const codes = new Set(N.cur.rows.map(r => r.code)); const x = npsSnapshot(n.data, codes, n.data.ym); if (x) add.nps.push(x); }
+        });
+        if (npsGot.length > 1) notes.push(`NPS${npsGot.length}か月分を履歴に積み上げました`);
       }
       if (add.tc.length || add.wage.length || add.nps.length) { HIST = mergeHistory(HIST, add); saveHist(add); }
       if (add.tc.length > 1) notes.push(`タイムカード${add.tc.length}か月分を採用・定着の履歴に積み上げました`);
@@ -4138,7 +4145,7 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '5b32478'; // 版（build.py が書き込む）
+  const APP_VERSION = 'c5c4657'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない

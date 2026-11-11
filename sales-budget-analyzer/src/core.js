@@ -155,12 +155,12 @@ function extractNps(XLSX, wb) {
 }
 /**
  * NPSのファイルの年月。期間は「10/1（木）～10/31（土）」のように年がないので、基準の月（売上集計表の最新の月：年*12+月-1）から決める。
- * 基準の月より2か月以上あとになる月は前の年とみなす
+ * 基準の月より後になる月は前の年とみなす
  */
 function npsYm(period, refK) {
   const m = String(period || '').match(/(\d{1,2})\s*\/\s*\d{1,2}/); if (!m || refK == null) return null;
   const mo = +m[1]; let y = Math.floor(refK / 12);
-  if (y * 12 + mo - 1 > refK + 1) y--;
+  if (y * 12 + mo - 1 > refK) y--; // NPSが売上集計表より先の月になることはないので、それより後なら前の年
   return `${y}-${String(mo).padStart(2, '0')}`;
 }
 /** NPSの履歴に残す分（対象の店だけ。1店あたり数十バイト）：NPS・回答数・推奨・批判・QSC5つ、と業態平均 */
