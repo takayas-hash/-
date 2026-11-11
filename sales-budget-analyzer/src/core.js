@@ -91,6 +91,60 @@ function headerIndex(aoa, must, lim) {
   for (let i = 0; i < Math.min(aoa.length, lim || 10); i++) { const r = aoa[i]; if (r && must.every(m => r.includes(m))) return i; }
   return -1;
 }
+/* ===== NPS（お客様アンケート）：業態ごとのシート。見出し行に code・NPS・推奨・批判。後半は「先月差」 ===== */
+const NPS_QSC = [['Q', '料理'], ['S1', '入店・案内'], ['S2', '接客'], ['C', '清潔さ'], ['sp', '提供']];
+function npsHeader(aoa) {
+  for (let i = 0; i < Math.min(aoa.length, 12); i++) { const r = (aoa[i] || []).map(x => String(x == null ? '' : x).trim()); if (r.includes('code') && r.includes('NPS') && r.includes('推奨') && r.includes('批判')) return i; }
+  return -1;
+}
+function isNpsBook(XLSX, wb) { return wb.SheetNames.some(n => npsHeader(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, sheetRows: 12 })) >= 0); }
+function extractNps(XLSX, wb) {
+  const out = { period: '', stores: {}, brands: {} };
+  const pctv = v => typeof v === 'number' ? (Math.abs(v) <= 1.0001 ? v * 100 : v) : null; // 0.43 と 43 のどちらの書き方でも点に
+  const numv = v => typeof v === 'number' ? v : null;
+  wb.SheetNames.forEach(sn => {
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
+    const hr = npsHeader(aoa); if (hr < 0) return;
+    const H = aoa[hr].map(x => String(x == null ? '' : x).trim()), G = (aoa[hr - 1] || []).map(x => x == null ? '' : String(x).trim());
+    if (!out.period) { const pr = (aoa[0] || []).find(x => typeof x === 'string' && /\d+\/\d+/.test(x)); if (pr) out.period = pr.trim(); }
+    // 「先月差」より右は先月との差
+    let diffFrom = H.length; for (let r = 0; r < hr; r++) (aoa[r] || []).forEach((x, c) => { if (String(x || '').trim() === '先月差' && c < diffFrom) diffFrom = c; });
+    const idx = (name, nth) => { let k = 0; for (let c = 0; c < H.length; c++) if (H[c] === name && (k++ === (nth || 0))) return c; return -1; };
+    const idxIn = (name, cur) => { for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (H[c] === name) return c; return -1; };
+    // 平均の行：見出しの上で、回答数の列に数値がある行
+    const nCol = idx('回答数'); let avgRow = null; for (let r = 0; r < hr; r++) if (aoa[r] && typeof aoa[r][nCol] === 'number') avgRow = aoa[r];
+    // 時間帯：最初の4つ＝土日祝、次の4つ＝平日（今月）。先月差の側も同じ順
+    const bandCols = cur => { const cs = []; const names = ['ランチ', 'アイドル', 'ディナー', 'ALL']; for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (names.includes(H[c])) cs.push(c); return cs.slice(0, 8); };
+    const bc = bandCols(true), bd = bandCols(false);
+    const qsc = cur => NPS_QSC.map(([k, label]) => {
+      const tot = idxIn(k, cur), items = [];
+      for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (new RegExp('^' + (k === 'sp' ? 's(p)?' : k) + '_\\d+$').test(H[c]) && G[c]) items.push({ c, label: G[c] });
+      return { k, label, tot, items };
+    });
+    const qc = qsc(true), qd = qsc(false);
+    const rec = (r, isAvg) => {
+      const g = c => c >= 0 ? r[c] : null;
+      const bands = cs => cs.length >= 8 ? { hd: cs.slice(0, 4).map(c => pctv(g(c))), wd: cs.slice(4, 8).map(c => pctv(g(c))) } : null;
+      return {
+        n: numv(g(nCol)), nps: pctv(g(idx('NPS'))), crit: numv(g(idx('批判'))), neu: numv(g(idx('中立'))), pro: numv(g(idx('推奨'))),
+        bands: bands(bc), bandsDiff: isAvg ? null : bands(bd),
+        qsc: qc.map((q, i) => ({ k: q.k, label: q.label, v: numv(g(q.tot)), d: isAvg ? null : numv(g(qd[i].tot)),
+          items: q.items.map(it => { const di = qd[i].items.find(x => x.label === it.label); return { label: it.label, v: numv(g(it.c)), d: isAvg || !di ? null : numv(g(di.c)) }; }).filter(x => x.v != null) })),
+        repeat: numv(g(idx('リピート率'))),
+      };
+    };
+    const ranked = aoa.slice(hr + 1).filter(r => r && typeof r[0] === 'number' && typeof r[idx('業態ランキング')] === 'number').length;
+    if (avgRow) out.brands[sn] = rec(avgRow, true);
+    aoa.slice(hr + 1).forEach(r => {
+      if (!r || r[0] == null || !/^\d+$/.test(String(r[0]).trim())) return;
+      const g = c => c >= 0 ? r[c] : null;
+      const x = rec(r, false);
+      Object.assign(x, { code: String(r[0]).trim(), name: String(g(idx('店舗名')) || ''), brand: sn, am: g(idx('AM')) || '', grade: g(idx('総合評価')), rank: numv(g(idx('業態ランキング'))), rankN: ranked, areaRank: numv(g(idx('エリアランキング'))) });
+      if (x.nps != null) out.stores[x.code] = x;
+    });
+  });
+  return out;
+}
 /* ===== 店舗情報（経営企業名・担当AM・ブロック）。見出しが「[10488] 経営企業名（表示）」のような形でも読む ===== */
 function masterHeader(aoa) {
   for (let i = 0; i < Math.min(aoa.length, 10); i++) {
@@ -1770,4 +1824,4 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };

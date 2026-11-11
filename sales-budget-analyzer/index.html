@@ -191,6 +191,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .rp-page .kpi .v { font-size: 19pt; } .rp-page .kpi .label { font-size: 10.5pt; } .rp-page .kpi .small { font-size: 10.5pt; }
 .rp-p h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 3mm; } .rp-p h3 span { font-size: 9.5pt; font-weight: 400; color: #5d6068; }
 .rp-cd { width: 100%; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 2.5mm; align-items: center; } .rp-cd > div { display: flex; flex-direction: column; gap: 2mm; } .rp-page .rp-cd .stk { grid-template-columns: 5.5em minmax(0, 1fr) 4.8em; font-size: 10pt; } .rp-page .rp-cd .lg { font-size: 9.5pt; gap: .5mm 2.5mm; }
+.np { width: 100%; display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 4mm; align-items: center; }
+.np-l, .np-r { display: flex; flex-direction: column; gap: 1.2mm; min-width: 0; }
+.np-big { display: flex; align-items: center; gap: 3mm; font-size: 10pt; color: #5d6068; line-height: 1.25; } .np-big > b { font-size: 28pt; line-height: 1; } .np-big div b { font-size: 13pt; color: #1d1f24; }
+.np-sub { font-size: 10.5pt; color: #5d6068; } .np-sub b { color: #1d1f24; }
+.np-big b.neg, .np .neg { color: #b42323; } .np-big b.pos, .np .pos { color: #1d5fae; }
+.np-seg { display: flex; height: 8mm; border-radius: 1.5mm; overflow: hidden; } .np-seg span { display: grid; place-items: center; color: #fff; font-size: 10pt; font-weight: 700; white-space: nowrap; }
+.np-cap { font-size: 9.5pt; color: #5d6068; margin-top: .8mm; }
+.np-t { width: 100%; border-collapse: collapse; table-layout: fixed; } .rp-page .np-t th, .rp-page .np-t td { font-size: 11pt; padding: .5mm .5mm; text-align: center; border-bottom: 1px solid #dddcd6; }
+.rp-page .np-t td { font-weight: 700; font-size: 12.5pt; line-height: 1.2; } .np-t small { display: block; font-size: 9pt; font-weight: 400; }
+.rp-v:has(> .qs) { align-items: flex-start; } .qs { width: 100%; display: flex; flex-direction: column; gap: 1mm; } .rp-page .qs svg { width: 100%; height: auto; } .qs .np-cap { font-size: 10.5pt; color: #1d1f24; }
 .cs-g { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, .85fr) minmax(0, 1.15fr); gap: 3mm 5mm; }
 .cs-l { display: flex; flex-direction: column; gap: 2.5mm; min-height: 0; }
 .cs-sec { border: 1px solid #dddcd6; border-radius: 2mm; padding: 1.8mm 3mm 2mm; min-height: 0; overflow: hidden; }
@@ -544,6 +554,60 @@ function extractRows(XLSX, ws) {
 function headerIndex(aoa, must, lim) {
   for (let i = 0; i < Math.min(aoa.length, lim || 10); i++) { const r = aoa[i]; if (r && must.every(m => r.includes(m))) return i; }
   return -1;
+}
+/* ===== NPS（お客様アンケート）：業態ごとのシート。見出し行に code・NPS・推奨・批判。後半は「先月差」 ===== */
+const NPS_QSC = [['Q', '料理'], ['S1', '入店・案内'], ['S2', '接客'], ['C', '清潔さ'], ['sp', '提供']];
+function npsHeader(aoa) {
+  for (let i = 0; i < Math.min(aoa.length, 12); i++) { const r = (aoa[i] || []).map(x => String(x == null ? '' : x).trim()); if (r.includes('code') && r.includes('NPS') && r.includes('推奨') && r.includes('批判')) return i; }
+  return -1;
+}
+function isNpsBook(XLSX, wb) { return wb.SheetNames.some(n => npsHeader(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, sheetRows: 12 })) >= 0); }
+function extractNps(XLSX, wb) {
+  const out = { period: '', stores: {}, brands: {} };
+  const pctv = v => typeof v === 'number' ? (Math.abs(v) <= 1.0001 ? v * 100 : v) : null; // 0.43 と 43 のどちらの書き方でも点に
+  const numv = v => typeof v === 'number' ? v : null;
+  wb.SheetNames.forEach(sn => {
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
+    const hr = npsHeader(aoa); if (hr < 0) return;
+    const H = aoa[hr].map(x => String(x == null ? '' : x).trim()), G = (aoa[hr - 1] || []).map(x => x == null ? '' : String(x).trim());
+    if (!out.period) { const pr = (aoa[0] || []).find(x => typeof x === 'string' && /\d+\/\d+/.test(x)); if (pr) out.period = pr.trim(); }
+    // 「先月差」より右は先月との差
+    let diffFrom = H.length; for (let r = 0; r < hr; r++) (aoa[r] || []).forEach((x, c) => { if (String(x || '').trim() === '先月差' && c < diffFrom) diffFrom = c; });
+    const idx = (name, nth) => { let k = 0; for (let c = 0; c < H.length; c++) if (H[c] === name && (k++ === (nth || 0))) return c; return -1; };
+    const idxIn = (name, cur) => { for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (H[c] === name) return c; return -1; };
+    // 平均の行：見出しの上で、回答数の列に数値がある行
+    const nCol = idx('回答数'); let avgRow = null; for (let r = 0; r < hr; r++) if (aoa[r] && typeof aoa[r][nCol] === 'number') avgRow = aoa[r];
+    // 時間帯：最初の4つ＝土日祝、次の4つ＝平日（今月）。先月差の側も同じ順
+    const bandCols = cur => { const cs = []; const names = ['ランチ', 'アイドル', 'ディナー', 'ALL']; for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (names.includes(H[c])) cs.push(c); return cs.slice(0, 8); };
+    const bc = bandCols(true), bd = bandCols(false);
+    const qsc = cur => NPS_QSC.map(([k, label]) => {
+      const tot = idxIn(k, cur), items = [];
+      for (let c = cur ? 0 : diffFrom; c < (cur ? diffFrom : H.length); c++) if (new RegExp('^' + (k === 'sp' ? 's(p)?' : k) + '_\\d+$').test(H[c]) && G[c]) items.push({ c, label: G[c] });
+      return { k, label, tot, items };
+    });
+    const qc = qsc(true), qd = qsc(false);
+    const rec = (r, isAvg) => {
+      const g = c => c >= 0 ? r[c] : null;
+      const bands = cs => cs.length >= 8 ? { hd: cs.slice(0, 4).map(c => pctv(g(c))), wd: cs.slice(4, 8).map(c => pctv(g(c))) } : null;
+      return {
+        n: numv(g(nCol)), nps: pctv(g(idx('NPS'))), crit: numv(g(idx('批判'))), neu: numv(g(idx('中立'))), pro: numv(g(idx('推奨'))),
+        bands: bands(bc), bandsDiff: isAvg ? null : bands(bd),
+        qsc: qc.map((q, i) => ({ k: q.k, label: q.label, v: numv(g(q.tot)), d: isAvg ? null : numv(g(qd[i].tot)),
+          items: q.items.map(it => { const di = qd[i].items.find(x => x.label === it.label); return { label: it.label, v: numv(g(it.c)), d: isAvg || !di ? null : numv(g(di.c)) }; }).filter(x => x.v != null) })),
+        repeat: numv(g(idx('リピート率'))),
+      };
+    };
+    const ranked = aoa.slice(hr + 1).filter(r => r && typeof r[0] === 'number' && typeof r[idx('業態ランキング')] === 'number').length;
+    if (avgRow) out.brands[sn] = rec(avgRow, true);
+    aoa.slice(hr + 1).forEach(r => {
+      if (!r || r[0] == null || !/^\d+$/.test(String(r[0]).trim())) return;
+      const g = c => c >= 0 ? r[c] : null;
+      const x = rec(r, false);
+      Object.assign(x, { code: String(r[0]).trim(), name: String(g(idx('店舗名')) || ''), brand: sn, am: g(idx('AM')) || '', grade: g(idx('総合評価')), rank: numv(g(idx('業態ランキング'))), rankN: ranked, areaRank: numv(g(idx('エリアランキング'))) });
+      if (x.nps != null) out.stores[x.code] = x;
+    });
+  });
+  return out;
 }
 /* ===== 店舗情報（経営企業名・担当AM・ブロック）。見出しが「[10488] 経営企業名（表示）」のような形でも読む ===== */
 function masterHeader(aoa) {
@@ -2224,7 +2288,7 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
 
 </script>
 <script>
@@ -2301,6 +2365,8 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     }
     // 標準比マスタ（見込君）
     if (isStdBook(wb)) return { name: f.name, std: extractStd(XLSX, wb) };
+    // NPS（お客様アンケート）
+    if (isNpsBook(XLSX, wb)) return { name: f.name, nps: extractNps(XLSX, wb) };
     // 原価管理表：店舗ごとのシートをまとめて読む
     const invs = wb.SheetNames.filter(n => isInventorySheet(XLSX, wb.Sheets[n])).map(n => extractInventory(XLSX, wb.Sheets[n])).filter(Boolean);
     if (invs.length) return { name: f.name, inv: invs };
@@ -2378,7 +2444,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   let STORE = null; // 保存データ {months:{月:{cur, prev, menu…}}, wage, stdBook, stdLane, active}
   const kYM = k => `${Math.floor(k / 12)}年${k % 12 + 1}月`;
   /** 表示する月のデータ（時給・標準比マスタは全部の月で共通） */
-  const viewOf = (ST, k) => ({ ...ST.months[k], master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane, savedAt: ST.savedAt, v: ST.v, k });
+  const viewOf = (ST, k) => ({ ...ST.months[k], nps: ST.nps, master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane, savedAt: ST.savedAt, v: ST.v, k });
   /** 以前の形式（1か月分だけ）の保存データを月ごとの形に直す */
   function toStore(v) {
     if (!v) return null;
@@ -2386,16 +2452,16 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     if (!v.cur) return null;
     const k = mKey(v.cur.rows), m = {};
     ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (v[x]) m[x] = v[x]; });
-    return { months: { [k]: m }, master: v.master, wage: v.wage, stdBook: v.stdBook, stdLane: v.stdLane, savedAt: v.savedAt, v: v.v, active: k };
+    return { months: { [k]: m }, nps: v.nps, master: v.master, wage: v.wage, stdBook: v.stdBook, stdLane: v.stdLane, savedAt: v.savedAt, v: v.v, active: k };
   }
   async function reparseStore(ST) {
     const out = { ...ST, months: {} };
     for (const k of Object.keys(ST.months)) {
       const m = ST.months[k];
-      const N = await reparse({ ...m, master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane });
+      const N = await reparse({ ...m, nps: ST.nps, master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane });
       if (!N) return null;
       const keep = {}; ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (N[x]) keep[x] = N[x]; });
-      out.months[k] = keep; out.master = N.master; out.wage = N.wage; out.stdBook = N.stdBook; out.stdLane = N.stdLane;
+      out.months[k] = keep; out.nps = N.nps; out.master = N.master; out.wage = N.wage; out.stdBook = N.stdBook; out.stdLane = N.stdLane;
     }
     out.v = DATA_VERSION;
     return out;
@@ -2405,7 +2471,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   const DATA_VERSION = 3;
   async function reparse(v) {
     const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage', 'master'];
-    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : []), ...(v.stdLane ? [v.stdLane] : [])];
+    const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : []), ...(v.stdLane ? [v.stdLane] : []), ...(v.nps ? [v.nps] : [])];
     if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
     const cache = new Map();
     const parse = async f => { if (!cache.has(f.raw)) cache.set(f.raw, await readOneInner(new File([f.raw], f.name))); return cache.get(f.raw); };
@@ -2419,6 +2485,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     delete N.usage;
     if (v.stdBook) { const g = await parse(v.stdBook.file); if (g.std) N.stdBook = { ...v.stdBook, data: g.std }; }
     if (v.stdLane) { const g = await parse(v.stdLane.file); if (g.std) N.stdLane = { ...v.stdLane, data: g.std }; }
+    if (v.nps) { const g = await parse(v.nps.file); if (g.nps) N.nps = { ...v.nps, data: g.nps }; }
     if (v.invFiles) { N.invFiles = []; for (const x of v.invFiles) { const g = await parse(x.file); const keep = new Set(x.rows.map(r => r.code)); N.invFiles.push({ ...x, rows: (g.inv || []).filter(r => keep.has(r.code)) }); } }
     N.v = DATA_VERSION;
     return N;
@@ -2439,6 +2506,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
       + (S.stdLane ? `<li><span class="label">標準比マスタ（特急レーン店）</span> ${esc(S.stdLane.name)} <span class="muted">レーン店${Object.values(S.stdLane.data.info).filter(x => x.perCust != null && /特急|レーン/.test(x.flag || '')).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（特急レーン店）</span> なし</li>')
       + (HIST && Object.keys(HIST.tc).length ? `<li><span class="label">採用・定着の履歴</span> タイムカード ${[...new Set(Object.values(HIST.tc).map(x => x.ym))].sort().map(ymTxt).join('・')}<span class="muted">／時給データ ${[...new Set(Object.values(HIST.wage).map(x => x.ym))].sort().map(ymTxt).join('・') || 'なし'}</span></li>` : '')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
+      + (S.nps ? `<li><span class="label">NPS</span> ${esc(S.nps.name)} <span class="muted">${esc(S.nps.data.period)}・${Object.keys(S.nps.data.stores).length}店</span></li>` : '<li class="muted"><span class="label">NPS（訪問資料に使う）</span> なし</li>')
       + (S.master ? `<li><span class="label">店舗情報</span> ${esc(S.master.name)} <span class="muted">${S.master.rows.length}店・FC企業${new Set(S.master.rows.filter(r => r.company).map(r => r.company)).size}社</span></li>` : '<li class="muted"><span class="label">店舗情報（FC企業別に使う）</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
@@ -2593,6 +2661,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
         else if (g.hourly) { if (curKs.has(k)) M(k).hourly = { name: g.name, rows: g.hourly, file: g.file }; }
         // 時給データ・標準比マスタは全部の月で共通（新しいファイルで差し替え）
         // 店舗情報（経営企業名・担当AM）も全部の月で共通
+        else if (g.nps) { if (!(opt.fresh && ST.nps && (ST.nps.mtime || 0) >= (g.mtime || 0))) ST.nps = { name: g.name, data: g.nps, file: g.file, mtime: g.mtime }; }
         else if (g.master) { if (!(opt.fresh && ST.master && (ST.master.mtime || 0) >= (g.mtime || 0))) ST.master = { name: g.name, rows: g.master, file: g.file, mtime: g.mtime }; }
         else if (g.wage) { if (!(opt.fresh && ST.wage)) ST.wage = { name: g.name, rows: g.wage, file: g.file }; }
         else if (g.std) { if (g.std.kind === 'lane') { if (!(opt.fresh && ST.stdLane)) ST.stdLane = { name: g.name, data: g.std, file: g.file }; } else if (!(opt.fresh && ST.stdBook)) ST.stdBook = { name: g.name, data: g.std, file: g.file }; }
@@ -3018,10 +3087,39 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     });
     return g + '</svg>';
   }
+  /** NPS：大きな数字、推奨・中立・批判の帯、時間帯別（先月差つき） */
+  function rpNps(np, avg) {
+    const f1 = v => v == null ? '－' : v.toFixed(1), sd = v => v == null ? '' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : '▲'}${Math.abs(v).toFixed(1)}</span>`;
+    const seg = (v, c, t) => v ? `<span style="width:${(v * 100).toFixed(1)}%;background:${c}">${v >= 0.12 ? `${t} ${Math.round(v * 100)}%` : ''}</span>` : '';
+    const band = (lbl, arr, d) => arr ? `<tr><th>${lbl}</th>${[0, 1, 2].map(i => `<td>${f1(arr[i])}${d ? `<small>${sd(d[i])}</small>` : ''}</td>`).join('')}</tr>` : '';
+    return `<div class="np"><div class="np-l"><div class="np-big"><b class="${avg && np.nps < avg.nps ? 'neg' : 'pos'}">${f1(np.nps)}</b><div>${avg ? `業態平均<br><b>${f1(avg.nps)}</b>` : ''}</div></div>
+      <div class="np-sub">${np.grade ? `評価 <b>${esc(String(np.grade))}</b>` : ''}${np.rank ? `　業態内 ${np.rank}位／${np.rankN}店` : ''}</div>
+      <div class="np-seg">${seg(np.pro, '#2a78d6', '推奨')}${seg(np.neu, '#b9b8b1', '中立')}${seg(np.crit, '#d03b3b', '批判')}</div><div class="np-cap">NPS＝推奨の割合−批判の割合</div></div>
+      ${np.bands ? `<div class="np-r"><table class="np-t"><thead><tr><th></th><th>ランチ</th><th>アイドル</th><th>ディナー</th></tr></thead><tbody>${band('土日祝', np.bands.hd, np.bandsDiff && np.bandsDiff.hd)}${band('平日', np.bands.wd, np.bandsDiff && np.bandsDiff.wd)}</tbody></table><div class="np-cap">時間帯別のNPS（小さい数字＝先月差）</div></div>` : ''}</div>`;
+  }
+  /** QSC：5つの評価の横棒（80〜100点の目盛り）、業態平均の線、先月差。下に点数の低い項目 */
+  function rpQsc(np, avg) {
+    const rows = np.qsc.filter(q => q.v != null); if (!rows.length) return '';
+    const W = 600, L = 112, BW = 300, rh = 23, T = 2, lo = Math.min(80, ...rows.map(q => q.v)) , hi = 100;
+    const xs = v => L + (Math.max(lo, v) - lo) / (hi - lo) * BW;
+    const H = T + rows.length * rh + 4;
+    let g = svgOpen(W, H, 'QSCの評価');
+    rows.forEach((q, i) => {
+      const cy = T + i * rh + rh / 2, a = avg && avg.qsc.find(x => x.k === q.k);
+      g += `<text x="${L - 8}" y="${cy + 6}" text-anchor="end" font-size="17" font-weight="700" fill="${RPC.ink}">${q.label}</text>`;
+      g += `<rect x="${L}" y="${cy - 8}" width="${BW}" height="16" rx="3" fill="#f0efec"/><rect x="${L}" y="${cy - 8}" width="${(xs(q.v) - L).toFixed(1)}" height="16" rx="3" fill="${a && a.v != null && q.v < a.v ? RPC.neg : RPC.pos}"/>`;
+      if (a && a.v != null) g += `<line x1="${xs(a.v).toFixed(1)}" x2="${xs(a.v).toFixed(1)}" y1="${cy - 12}" y2="${cy + 12}" stroke="${RPC.avg}" stroke-width="3"/>`;
+      g += `<text x="${L + BW + 8}" y="${cy + 6}" font-size="17" font-weight="700" fill="${RPC.ink}">${q.v.toFixed(1)}</text>`;
+      if (q.d != null) g += `<text x="${L + BW + 60}" y="${cy + 6}" font-size="14" fill="${q.d >= 0 ? RPC.pos : RPC.neg}">先月${q.d >= 0 ? '+' : '▲'}${Math.abs(q.d).toFixed(1)}</text>`;
+    });
+    g += '</svg>';
+    const low = rows.flatMap(q => q.items.map(it => ({ ...it, cat: q.label }))).sort((x, y) => x.v - y.v).slice(0, 2);
+    return `<div class="qs">${g}${low.length ? `<div class="np-cap">点数の低い項目：${low.map(x => `<b>${esc(x.label)}</b> ${x.v.toFixed(1)}${x.d != null ? `（先月${x.d >= 0 ? '+' : '▲'}${Math.abs(x.d).toFixed(1)}）` : ''}`).join('、')}</div>` : ''}</div>`;
+  }
   /** 結論（文字はここだけ）：最大3行 */
   function salesConcl(s) {
     const L = [];
-    L.push({ c: s.diff >= 0 ? 'ok' : 'ng', t: `予算比 <b>${pct(s.rate)}</b>（${sman(s.diff)}）${s.yoy ? `／前年比 <b>${pct(s.yoy)}</b>` : ''}` });
+    L.push({ c: s.diff >= 0 ? 'ok' : 'ng', t: `予算比 <b>${pct(s.rate)}</b>（${sman(s.diff)}）${s.yoy ? `／売上前年比 <b>${pct(s.yoy)}</b>` : ''}` });
     const big = Math.abs(s.custEff) >= Math.abs(s.upEff) ? ['客数', s.custEff, `客数予算比 ${pct(s.custRate)}`] : ['客単価', s.upEff, `客単価 ${yen(s.up)}`];
     L.push({ c: big[1] >= 0 ? 'ok' : 'ng', t: `${s.diff >= 0 ? '上振れ' : '未達'}の主な要因は<b>${big[0]}</b>（${sman(big[1])}・${big[2]}）` });
     if (s.fc) L.push({ c: s.fc.landDiff >= 0 ? 'ok' : 'ng', t: `このままの着地見込み <b>${man(s.fc.landing)}</b>（月予算比 ${pct(s.fc.landRate)}）` });
@@ -3029,8 +3127,8 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
       const cells = []; DAYTYPES.forEach((dt, ti) => BANDS.forEach((b, bi) => { const c = s.grid[ti][bi]; if (c.yoyDay != null && c.pSales > 0) cells.push({ n: `${dt}の${b.name}`, v: c.yoyDay, w: c.pSales }); }));
       const big2 = cells.filter(c => c.w >= sum(cells, x => x.w) * 0.04);
       const lo = [...big2].sort((a, b) => a.v - b.v)[0], hi = [...big2].sort((a, b) => b.v - a.v)[0];
-      if (lo && lo.v < 0.97) L.push({ c: 'ng', t: `前年をいちばん下回ったのは<b>${lo.n}</b>（前年比 ${pct(lo.v)}）` });
-      else if (hi) L.push({ c: 'ok', t: `いちばん伸びたのは<b>${hi.n}</b>（前年比 ${pct(hi.v)}）` });
+      if (lo && lo.v < 0.97) L.push({ c: 'ng', t: `売上が前年をいちばん下回ったのは<b>${lo.n}</b>（売上前年比 ${pct(lo.v)}）` });
+      else if (hi) L.push({ c: 'ok', t: `売上がいちばん伸びたのは<b>${hi.n}</b>（売上前年比 ${pct(hi.v)}）` });
     }
     return L;
   }
@@ -3053,14 +3151,16 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
       <div class="rp-body fixed"><div class="rp-in">${body}</div></div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 2</span></div></section>`;
     const kp = (l, v, sub, c) => `<div class="kpi"><div class="label">${l}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
     // 1ページ目：売上
-    const k1 = kp('売上', man(s.sales), `予算 ${man(s.budget)}`) + kp('予算比', pct(s.rate), sman(s.diff), cls(s.diff)) + (s.yoy ? kp('前年比', pct(s.yoy), `前年 ${man(s.pSales)}`, s.yoy >= 1 ? 'pos' : 'neg') : '')
-      + kp('客数', `${Math.round(s.cust).toLocaleString('ja-JP')}人`, s.custYoy ? `前年比 ${pct(s.custYoy)}` : `予算比 ${pct(s.custRate)}`) + kp('客単価', yen(s.up), s.pUp ? `前年 ${yen(s.pUp)}` : '')
+    const k1 = kp('売上', man(s.sales), `予算 ${man(s.budget)}`) + kp('予算比', pct(s.rate), sman(s.diff), cls(s.diff)) + (s.yoy ? kp('売上前年比', pct(s.yoy), `前年 ${man(s.pSales)}`, s.yoy >= 1 ? 'pos' : 'neg') : '')
+      + kp('客数', `${Math.round(s.cust).toLocaleString('ja-JP')}人`, s.custYoy ? `客数前年比 ${pct(s.custYoy)}` : `客数予算比 ${pct(s.custRate)}`) + kp('客単価', yen(s.up), s.pUp ? `客単価前年比 ${pct(s.up / s.pUp)}（前年 ${yen(s.pUp)}）` : '')
       + (s.fc ? kp('着地見込み', man(s.fc.landing), `予算比 ${pct(s.fc.landRate)}`, cls(s.fc.landDiff)) : '');
     const ty = s.byType.filter(t => t.days);
-    const typeChart = rpBars(ty.map(t => t.key), [{ name: '予算比', color: v => v >= 1 ? RPC.pos : RPC.neg, vals: ty.map(t => t.rate) }].concat(s.hasPrev ? [{ name: '前年比（1日あたり）', color: RPC.cmp, vals: ty.map(t => t.pAvg ? t.avg / t.pAvg : null) }] : []), v => Math.round(v * 100) + '%', { ref: 1, label: '曜日区分別' });
+    const typeChart = rpBars(ty.map(t => t.key), [{ name: '売上予算比', color: v => v >= 1 ? RPC.pos : RPC.neg, vals: ty.map(t => t.rate) }].concat(s.hasPrev ? [{ name: '売上前年比（1日あたり）', color: RPC.cmp, vals: ty.map(t => t.pAvg ? t.avg / t.pAvg : null) }] : []), v => Math.round(v * 100) + '%', { ref: 1, label: '曜日区分別' });
     const grid = ps => { ps = ps.filter(Boolean); return ps.length ? `<div class="rp-g n${ps.length}">${ps.join('')}</div>` : ''; };
-    const p1 = concl(salesConcl(s)) + `<div class="kpis">${k1}</div>` + grid([panel('予算差の要因', rpWaterfall(s)), panel('日別の予算比', rpDaily(s), '100%より上＝予算達成'),
-      panel('曜日区分別', typeChart), panel('時間帯別の前年比（1日あたり）', rpHeat(s), '青＝前年超え・赤＝前年割れ')]);
+    const NP = S && S.nps ? S.nps.data : null, np = NP && NP.stores[s.code], npA = np && NP.brands[np.brand];
+    const p1 = concl(salesConcl(s)) + `<div class="kpis">${k1}</div>` + grid([panel('曜日区分別の売上', typeChart),
+      panel('時間帯別の売上前年比（1日あたり）', rpHeat(s), '青＝前年超え・赤＝前年割れ'),
+      np ? panel('NPS（お客様の推奨度）', rpNps(np, npA), `${esc(NP.period)}・回答${np.n}件`) : '', np ? panel('QSCの評価（100点満点）', rpQsc(np, npA), 'オレンジの線＝業態平均') : '']);
     // 2ページ目：原価
     const A = R.area, many = R.stores.length > 1, I = s.inv, p2f = v => (v * 100).toFixed(2) + '%';
     const k2 = (I ? kp('値引前原価率', pct2(I.preRate)) + kp('理論原価率', pct2(I.theory)) + kp('原価率理論差', pt2(I.gap), sman(I.gapAmt), I.gap > 0.01 ? 'neg' : '')
@@ -3166,12 +3266,16 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     // 1. 結果（確定した月。なければ途中の月）
     const r = c0 || c1, rl = c0 ? L0 : L1;
     const ng = r.stores.filter(x => x.diff < 0).sort((a, b) => a.diff - b.diff);
-    const res = [li(`売上 <b>${man(r.sales)}</b>／予算比 <b>${pct(r.rate)}</b>（${sman(r.diff)}）${r.yoy ? `／前年比 <b>${pct(r.yoy)}</b>` : ''}`, r.diff >= 0 ? 'ok' : 'ng'),
+    const res = [li(`売上 <b>${man(r.sales)}</b>／予算比 <b>${pct(r.rate)}</b>（${sman(r.diff)}）${r.yoy ? `／売上前年比 <b>${pct(r.yoy)}</b>` : ''}`, r.diff >= 0 ? 'ok' : 'ng'),
       li(`予算達成 <b>${r.okN}店／${r.stores.length}店</b>${ng.length ? `　未達：${ng.slice(0, 3).map(x => `${nm(x)} ${pct(x.rate)}`).join('、')}${ng.length > 3 ? ` ほか${ng.length - 3}店` : ''}` : ''}`, ng.length ? 'ng' : 'ok')];
     const big = Math.abs(r.custEff) >= Math.abs(r.upEff) ? ['客数', r.custEff, `客数予算比 ${pct(r.custRate)}`] : ['客単価', r.upEff, `客単価 ${yen(r.up)}`];
     res.push(li(`予算差の主な要因は<b>${big[0]}</b>（${sman(big[1])}・${big[2]}）`, big[1] >= 0 ? 'ok' : 'ng'));
     const gap = r.inv ? r.inv.gap : r.gapRate;
     if (gap != null) res.push(li(`原価率理論差 <b>${pt(gap)}</b>${r.inv ? '' : '（概算）'}`, gap > 0.01 ? 'ng' : 'ok'));
+    // NPS：店ごと（業態平均より低い店を先に）
+    const NPd = S && S.nps ? S.nps.data : null, nps = NPd ? r.stores.map(x => ({ x, n: NPd.stores[x.code] })).filter(y => y.n) : [];
+    if (nps.length) { const av = NPd.brands[nps[0].n.brand]; nps.sort((a, b) => a.n.nps - b.n.nps);
+      res.push(li(`NPS（${esc(NPd.period.replace(/（.）/g, ''))}）：${nps.map(y => `${nm(y.x)} <b>${y.n.nps.toFixed(1)}</b>`).join('、')}${av ? `（業態平均 ${av.nps.toFixed(1)}）` : ''}`, av && nps.some(y => y.n.nps < av.nps) ? 'ng' : 'ok')); }
     // 2. 課題と当月途中の進捗
     let items = [];
     if (c0 && c1) items = followUp(c0, c1);
@@ -3195,7 +3299,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     if (c1) series.push({ name: L1, color: v => v >= 1 ? RPC.pos : RPC.neg, vals: codes.map(c => st1[c] ? st1[c].rate : null) });
     const chart = rpBars(cats, series, v => Math.round(v * 100) + '%', { ref: 1, label: '店舗別の予算比' });
     const kp = (l, v, sub, c) => `<div class="kpi"><div class="label">${l}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
-    const kpis = (c0 ? kp(`${L0} 売上`, man(c0.sales), `予算 ${man(c0.budget)}`) + kp(`${L0} 予算比`, pct(c0.rate), sman(c0.diff), cls(c0.diff)) + (c0.yoy ? kp(`${L0} 前年比`, pct(c0.yoy), '', c0.yoy >= 1 ? 'pos' : 'neg') : '') + kp(`${L0} 達成店`, `${c0.okN}／${c0.stores.length}店`) : '')
+    const kpis = (c0 ? kp(`${L0} 売上`, man(c0.sales), `予算 ${man(c0.budget)}`) + kp(`${L0} 予算比`, pct(c0.rate), sman(c0.diff), cls(c0.diff)) + (c0.yoy ? kp(`${L0} 売上前年比`, pct(c0.yoy), '', c0.yoy >= 1 ? 'pos' : 'neg') : '') + kp(`${L0} 達成店`, `${c0.okN}／${c0.stores.length}店`) : '')
       + (c1 ? kp(`${L1} 予算比`, pct(c1.rate), sman(c1.diff), cls(c1.diff)) + (c1.fc ? kp(`${L1} 着地見込み`, man(c1.fc.landing), `予算比 ${pct(c1.fc.landRate)}`, cls(c1.fc.landDiff)) : '') : '');
     const per = [c0 ? `${L0}の結果` : '', c1 ? `${L1}（〜${c1.stores[0] ? R1.lastDate.getMonth() + 1 + '/' + R1.lastDate.getDate() : ''}）の進捗` : ''].filter(Boolean).join('・');
     const ams = [...new Set(r.stores.map(x => x.am).filter(Boolean))].join('・');
@@ -3902,7 +4006,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '1044bac'; // 版（build.py が書き込む）
+  const APP_VERSION = 'b719998'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
