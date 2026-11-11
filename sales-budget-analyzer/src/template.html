@@ -733,7 +733,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function runSaved() {
     syncMonthSel();
     const curRows = planRows(S.cur.rows);
-    run(curRows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: PLAN ? [] : S.pays ? S.pays.rows : [], pPays: PLAN ? [] : S.pPays ? S.pPays.rows : [], menu: PLAN ? [] : S.menu ? S.menu.rows : [], pMenu: PLAN ? [] : S.pMenu ? S.pMenu.rows : [], planMode: !!PLAN, tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], master: S.master ? S.master.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: PLAN ? null : HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(curRows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: PLAN ? [] : S.pays ? S.pays.rows : [], pPays: PLAN ? [] : S.pPays ? S.pPays.rows : [], menu: PLAN ? [] : S.menu ? S.menu.rows : [], pMenu: PLAN ? [] : S.pMenu ? S.pMenu.rows : [], planMode: !!PLAN, tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], master: S.master ? S.master.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: PLAN ? null : HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows), prevInv: STORE && STORE.months[S.k - 1] ? (STORE.months[S.k - 1].invFiles || []).flatMap(x => x.rows) : [] });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -1914,7 +1914,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       + kpi('理論原価率', I ? pct2(I.theory) : pct(s.costRate), [R.area.benchCostRate != null && R.stores.length > 1 ? `平均 ${pct(R.area.benchCostRate)}` : '', s.pCostRate != null ? `前年 ${pct(s.pCostRate)}` : ''].filter(Boolean).join('・'))
       + (I ? kpi('原価率理論差', pt2(I.gap), sman(I.gapAmt)) + kpi('ロス込理論差', pt2(I.gapExLoss), `ロス率 ${p2(I.lossPre)}`)
         : kpi('仕入率', pct(s.buyRate), s.pBuyRate != null ? `前年 ${pct(s.pBuyRate)}` : '') + kpi('理論差（概算）', ptx(s.gapRate), `うちロス ${ptx(s.lossRate || 0)}`))
-      + (I ? '' : kpi('ロス率', p2(s.lossRate), s.loss ? `ロス額 ${man(s.loss)}` : ''));
+      + (I ? '' : kpi('ロス率', p2(s.lossRate), s.loss ? `ロス額 ${man(s.loss)}` : ''))
+      + (s.stock ? kpi('今の理論在庫', man(s.stock.now), `月初 ${man(s.stock.open)}・${sman(s.stock.delta)}`, s.stock.open && Math.abs(s.stock.delta / s.stock.open) >= 0.1 ? 'neg' : '') + (s.stock.remainBuy != null && s.stock.remDays > 0 ? kpi('残りの仕入の目安', man(Math.max(0, s.stock.remainBuy)), `残り${s.stock.remDays}日・1日${man(Math.max(0, s.stock.remainBuy) / s.stock.remDays)}`) : '') : '');
     setCmt('storeComment', commentText(s.costLines, detail));
     // ロス
     $('lossBox').hidden = s.lossRate == null;

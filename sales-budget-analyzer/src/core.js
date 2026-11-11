@@ -1298,6 +1298,21 @@ function analyze(curRows, prevRows, extra) {
   // メニュー別：店舗ごとの1人あたり指標と、対象店平均（ベンチマーク）
   // 原価管理表（正式な原価率理論差）
   stores.forEach(s => { s.inv = inv.find(r => r.code === s.code) || null; });
+  // 当月の在庫の動き：月初在庫＝前月の棚卸分析表の当月棚卸高。当月の棚卸がまだない（月の途中など）ときだけ
+  const prevInv = (extra.prevInv || []).filter(r => pick.has(r.code));
+  const stockOf = (x, open) => {
+    if (open == null || x.inv || !(x.buy || x.cost)) return null;
+    const use = x.cost || 0, loss = x.loss || 0, now = open + (x.buy || 0) - use - loss;
+    const out = { open, buy: x.buy || 0, use, loss, now, delta: now - open };
+    if (x.fc && x.sales) { // 月末までの見込み：着地売上（値引前）×理論原価率・ロス率
+      const landPre = x.fc.landing * ((x.preSales || x.sales) / x.sales), rate = x.costRate || 0, lr = x.lossRate || 0;
+      out.landPre = landPre; out.monthUse = landPre * rate; out.monthLoss = landPre * lr;
+      out.remainBuy = out.monthUse + out.monthLoss - out.buy; out.remDays = x.fc.remDays;
+    }
+    return out;
+  };
+  stores.forEach(s => { const p = prevInv.find(r => r.code === s.code); s.stock = p ? stockOf(s, p.close) : null; });
+  { const ws = stores.filter(s => s.stock); if (ws.length) { const T = k => sum(ws, s => s.stock[k] || 0); area.stock = { open: T('open'), buy: T('buy'), use: T('use'), loss: T('loss'), now: T('now'), delta: T('delta'), n: ws.length, remainBuy: ws.every(s => s.stock.remainBuy != null) ? T('remainBuy') : null, remDays: ws[0].stock.remDays }; } }
   const withInv = stores.filter(s => s.inv);
   if (withInv.length) {
     const T = (f) => sum(withInv, s => f(s.inv));
@@ -1723,7 +1738,23 @@ function costComment(s, ctx) {
   L.push({ t: `【原価】${head.join('／')}`, d: false });
   for (const x of costLines(s, ctx)) L.push(x);
   for (const x of lossLines(s, ctx)) L.push(x);
+  for (const x of stockLines(s.stock, ctx)) L.push(x);
   for (const x of (s.inv ? invLines(s, ctx) : gapLines(s, ctx))) L.push(x);
+  return L;
+}
+/** 当月の在庫の動き（月初在庫＝前月の棚卸）と、月末の在庫を月初と同じにするための残りの仕入の目安 */
+function stockLines(st, ctx) {
+  if (!st) return [];
+  const d = ctx.lastDate ? `${ctx.lastDate.getMonth() + 1}/${ctx.lastDate.getDate()}` : '';
+  const L = [{ t: `・在庫：月初在庫${man(st.open)}（前月の棚卸）＋当月の仕入${man(st.buy)}−理論の使用額${man(st.use)}−ロス${man(st.loss)}＝今の理論在庫${man(st.now)}${d ? `（${d}時点）` : ''}。`, d: false }];
+  const rate = st.open ? st.delta / st.open : 0;
+  if (st.delta > 0 && rate >= 0.1) L.push({ t: `　月初より${man(st.delta)}多い（${pct(rate)}増）。仕入が使用を上回っているので、発注量を確認（月末に在庫が多いまま締めると、その分は翌月の原価に回る）。`, d: false });
+  else if (st.delta < 0 && rate <= -0.1) L.push({ t: `　月初より${man(-st.delta)}少ない（${pct(-rate)}減）。在庫を使っている状態。月末までに必要な分の仕入を確保。`, d: false });
+  else L.push({ t: `　月初とほぼ同じ水準（${sman(st.delta)}）。`, d: true });
+  if (st.remainBuy != null && st.remDays > 0) {
+    if (st.remainBuy > 0) L.push({ t: `・残りの仕入の目安：月末の在庫を月初と同じ${man(st.open)}で締めるには、残り${st.remDays}日の仕入は${man(st.remainBuy)}まで（1日${man(st.remainBuy / st.remDays)}）。月の理論の使用額${man(st.monthUse)}＋ロス${man(st.monthLoss)}（着地見込みの売上から計算）。`, d: false });
+    else L.push({ t: `・残りの仕入の目安：月の理論の使用額＋ロス（${man(st.monthUse + st.monthLoss)}）をすでに${man(-st.remainBuy)}上回る仕入。残り${st.remDays}日は在庫を使い、仕入を最小限に。`, d: false });
+  }
   return L;
 }
 const shortItem = n => n.replace(/\s+/g, ' ').trim();
@@ -1776,6 +1807,7 @@ function areaCostComment(a, stores, ctx) {
   const L = [];
   const P = L.push.bind(L);
   L.push = t => P({ t, d: false });
+  if (a.stock) { const up = stores.filter(x => x.stock && x.stock.open && x.stock.delta / x.stock.open >= 0.1).sort((x, y) => y.stock.delta - x.stock.delta); L.push(`・在庫（${a.stock.n}店・月初在庫＝前月の棚卸）：月初${man(a.stock.open)}→今の理論在庫${man(a.stock.now)}（${sman(a.stock.delta)}）。${up.length ? `月初より10%以上増えている店：${up.slice(0, 3).map(x => `${x.name}${sman(x.stock.delta)}`).join('、')}。` : ''}${a.stock.remainBuy != null && a.stock.remDays > 0 ? `月末を月初の在庫で締める残りの仕入の目安は${man(Math.max(0, a.stock.remainBuy))}（残り${a.stock.remDays}日）。` : ''}`); }
   // ブロック長向け：営業部ごとの原価指標
   if (ctx.multiArea) {
     const by = {};
