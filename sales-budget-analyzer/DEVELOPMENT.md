@@ -117,7 +117,7 @@
 6.5 ~~月初の自動整理~~（Code.gs の archiveOldFiles／installMonthlyArchive。毎月1日5時、最終更新が前月1日より前のファイルを「エリア/過去/YYYY-MM」へ。設定した人の権限で動く。モックのDriveで動作確認）
 7. ~~FC店の訪問資料（PDF）~~（実装済み：template の capture／reportPages／openReport）
    - 画面の店舗詳細を売上・原価タブで描画して、その表・グラフ（innerHTML）を A4 のページ枠に入れる。印刷は body.printing と @media print で資料だけを出す
-   - ページからあふれる分は .rp-body に zoom をかけて縮小（下限55%）。Playwright の page.pdf でサンプルFC店が4ページになることを確認
+   - 2026/11/11 利用者の依頼で「A4横・1店舗2ページ（売上・原価）、文字は結論だけ、表とグラフで見せる」に作り直し。図は資料用に描き直し（rpWaterfall／rpDaily／rpBars／rpHeat／rpCompare）、結論は salesConcl／costConcl。.rp-body.fixed のページは zoom をかけず、図が枠に合わせて伸び縮みする（rp-g の n1〜n4 で並べ方を変える）。Playwright の page.pdf で、10月のFC店（前年・ABCあり）と11月の実データ5店（10ページ）を確認
 8. 次の候補：毎朝の自動チェック（トリガー）で残業60h超・予算未達をメール通知、扶養内パートの年収見込みアラート
 - 勤怠・時給は個人情報。ブラウザ内だけで処理する今の形は保つ。共有ドライブやウェブアプリに載せる場合は扱いを社内で確認する
 - 人の分析は「人」タブとして売上・原価と並べる想定
