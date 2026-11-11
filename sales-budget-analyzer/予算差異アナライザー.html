@@ -201,6 +201,13 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .np-t { width: 100%; border-collapse: collapse; table-layout: fixed; } .rp-page .np-t th, .rp-page .np-t td { font-size: 11pt; padding: .5mm .5mm; text-align: center; border-bottom: 1px solid #dddcd6; }
 .rp-page .np-t td { font-weight: 700; font-size: 12.5pt; line-height: 1.2; } .np-t small { display: block; font-size: 9pt; font-weight: 400; }
 .rp-v:has(> .qs) { align-items: flex-start; } .qs { width: 100%; display: flex; flex-direction: column; gap: 1mm; } .rp-page .qs svg { width: 100%; height: auto; } .qs .np-cap { font-size: 10.5pt; color: #1d1f24; }
+.np-scr { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
+.np-card { background: #fff; color: #1d1f24; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; color-scheme: light; }
+.np-card .label { color: #5d6068; margin-bottom: 8px; }
+.np-scr .np-t th, .np-scr .np-t td { font-size: .85rem; padding: 3px 4px; text-align: center; border-bottom: 1px solid #dddcd6; } .np-scr .np-t td { font-weight: 700; font-size: .95rem; }
+.np-scr .np-seg { height: 26px; } .np-scr .np-seg span { font-size: .75rem; } .np-scr .np-cap { font-size: .78rem; } .np-scr .np-big > b { font-size: 2.4rem; } .np-scr .np-big { font-size: .8rem; } .np-scr .np-sub { font-size: .82rem; }
+.np-scr .qs svg { width: 100%; height: auto; } .np-scr .qs .np-cap { font-size: .85rem; }
+@media (max-width: 560px) { .np-scr .np { grid-template-columns: minmax(0, 1fr); } }
 .cs-g { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, .85fr) minmax(0, 1.15fr); gap: 3mm 5mm; }
 .cs-l { display: flex; flex-direction: column; gap: 2.5mm; min-height: 0; }
 .cs-sec { border: 1px solid #dddcd6; border-radius: 2mm; padding: 1.8mm 3mm 2mm; min-height: 0; overflow: hidden; }
@@ -341,6 +348,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       <textarea class="comment" id="storeComment" aria-label="店舗コメント" spellcheck="false" hidden></textarea>
     </div>
     <div class="stack" data-tab="sales">
+    <div id="npsBox" hidden>
+      <h3>NPS・QSC（お客様アンケート）<span class="small muted" id="npsPeriod" style="font-weight:400;margin-left:8px"></span></h3>
+      <div class="np-scr"><div class="np-card"><div class="label">NPS（お客様の推奨度）</div><div id="npsMain"></div></div><div class="np-card"><div class="label">QSCの評価（100点満点・オレンジの線＝業態平均）</div><div id="npsQsc"></div></div></div>
+    </div>
     <div id="fuBox" hidden>
       <h3 id="fuTitle">前月の課題のその後</h3>
       <p class="small muted" style="margin:2px 0 8px">前の月に予算未達だった曜日区分・時間帯などが、次の月にどうなっているか。改善中＝+2pt以上、悪化＝▲2pt以上（ロス率は下がると改善）。</p>
@@ -2867,9 +2878,13 @@ if (typeof module !== 'undefined') module.exports = { isNpsBook, extractNps, NPS
     $('sKpis').innerHTML = kpi('売上', man(s.sales), `予算 ${man(s.budget)}`) + kpi('予算比', pct(s.rate), `差額 ${sman(s.diff)}`, cls(s.diff))
       + kpi('客数要因', sman(s.custEff), `客数 ${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`, cls(s.custEff))
       + kpi('単価要因', sman(s.upEff), `客単価 ${yen(s.up)}（予算${syen(s.up - s.bUp)}）`, cls(s.upEff))
-      + kpi('前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし')
+      + kpi('売上前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし')
       + fcKpis(s.fc);
     setCmt('storeComment', commentText(s.lines, detail));
+    // NPS（共通に置いたNPSのファイルから。資料と同じ図）
+    const NPd = S && S.nps ? S.nps.data : null, npS = NPd && NPd.stores[s.code];
+    $('npsBox').hidden = !npS;
+    if (npS) { const av = NPd.brands[npS.brand]; $('npsPeriod').textContent = `${NPd.period}・回答${npS.n}件・${npS.brand}`; $('npsMain').innerHTML = rpNps(npS, av); $('npsQsc').innerHTML = rpQsc(npS, av); }
     const fu = R.follow && R.follow.stores[s.code];
     $('fuBox').hidden = !(fu && fu.length);
     if (fu && fu.length) {
@@ -3263,6 +3278,21 @@ if (typeof module !== 'undefined') module.exports = { isNpsBook, extractNps, NPS
     try { return analyze(V.cur.rows, V.prev ? V.prev.rows : [], { menu: V.menu ? V.menu.rows : [], pMenu: V.pMenu ? V.pMenu.rows : [], pays: V.pays ? V.pays.rows : [], pPays: V.pPays ? V.pPays.rows : [], inv: (V.invFiles || []).flatMap(x => x.rows), master: V.master ? V.master.rows : [], scope: 'fc', area: lastEff ? lastEff.area : '' }); } catch (e) { console.warn(e); return null; }
   }
   /** 課題（followUp の項目）から、次にやることの下書き */
+  /** QSCの5つの評価ごとの、次にやることの言い方 */
+  const QSC_ACT = { Q: '盛り付け基準・補充のタイミングを確認', S1: 'あいさつ・待ち時間の案内を徹底', S2: '笑顔・声かけを朝礼でロールプレイ', C: '清掃チェックの時間帯を見直す', sp: '提供時間・ピーク時の配置を見直す' };
+  /** NPS：先月より大きく下がったQSC（▲1.5点以上）を、評価ごとに店をまとめて1つ（最大2つ） */
+  function npsActions(stores) {
+    const NPd = S && S.nps ? S.nps.data : null; if (!NPd) return [];
+    const by = {};
+    stores.forEach(x => { const n = NPd.stores[x.code]; if (!n) return; n.qsc.forEach(q => { if (q.d != null && q.d <= -1.5) {
+      const it = q.items.filter(i => i.d != null).sort((a, b) => a.d - b.d).slice(0, 2).map(i => i.label);
+      (by[q.k] = by[q.k] || { label: q.label, k: q.k, list: [], sum: 0 }).list.push({ nm: x.name.replace(/^焼肉きんぐ/, ''), d: q.d, it }); by[q.k].sum += q.d; } }); });
+    return Object.values(by).sort((a, b) => a.sum - b.sum).slice(0, 1).map(g => {
+      g.list.sort((a, b) => a.d - b.d);
+      const items = [...new Set(g.list.flatMap(x => x.it))].slice(0, 3);
+      return `NPS・${g.label}が先月より低下（${g.list.map(x => `${x.nm}▲${Math.abs(x.d).toFixed(1)}`).join('・')}${items.length ? `：${items.slice(0, 2).join('・')}` : ''}）→${QSC_ACT[g.k] || '低い項目を店長と確認'}`;
+    });
+  }
   function actionsFor(c0, items, storesNg) {
     const A = [], open = items.filter(x => x.st === 'worse' || x.st === 'flat' || x.st === 'none');
     const band = /ランチ|アイドル|ディナー|レイト|ピーク|×/;
@@ -3272,6 +3302,7 @@ if (typeof module !== 'undefined') module.exports = { isNpsBook, extractNps, NPS
     if (bds.length) A.push(`${bds.slice(0, 2).join('・')}の来店を増やす：時間帯を絞った販促・店頭の案内で、その時間の客数を前年並みに戻す`);
     if (lbls.includes('客数予算比') && !dts.length) A.push('新規・再来店の集客：チラシ・アプリ会員への配信を計画的に（配信日と客数の変化を記録）');
     if (lbls.includes('ロス率')) A.push('ロスの多い曜日の仕込み量・発注量を見直す');
+    if (c0) npsActions(c0.stores).forEach(t => A.push(t));
     if (c0 && c0.upEff < 0 && Math.abs(c0.upEff) >= Math.abs(c0.custEff) * 0.5) A.push('客単価アップ：入店時のコース説明でプレミアムコース・飲み放題をおすすめする（声かけの徹底）');
     const gapSt = c0 ? c0.stores.filter(s => (s.inv ? s.inv.gap : s.gapRate) > 0.01).sort((a, b) => (b.inv ? b.inv.gap : b.gapRate) - (a.inv ? a.inv.gap : a.gapRate)) : [];
     if (gapSt.length) A.push(`原価率理論差の大きい店（${gapSt.slice(0, 2).map(s => s.name.replace(/^焼肉きんぐ/, '')).join('・')}）の盛り付け基準・棚卸の確認`);
@@ -4031,7 +4062,7 @@ if (typeof module !== 'undefined') module.exports = { isNpsBook, extractNps, NPS
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'b719998'; // 版（build.py が書き込む）
+  const APP_VERSION = '50645d1'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
