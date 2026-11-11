@@ -4175,7 +4175,7 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '8091601'; // 版（build.py が書き込む）
+  const APP_VERSION = '2b7f011'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない

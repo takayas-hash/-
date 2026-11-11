@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
-const APP_VERSION = '8091601';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = '2b7f011';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -217,7 +217,7 @@ function setupFolders() {
     });
   });
   refreshFolders();
-  Logger.log('完了。エリアのフォルダはAMに「編集者」、ブロックのフォルダはブロック長に「閲覧者」で共有してください（ルートは共有しなくてよい）。「共通」は時給データがあるためAM以上だけに共有してください。');
+  Logger.log('完了。エリアのフォルダはAMに「編集者」、ブロックのフォルダはブロック長に「閲覧者」で共有してください（ルートは共有しなくてよい）。「共通」は社内全員を閲覧者にしてよい（時給データは全社に配布済みの資料）。');
 }
 
 /** 設定の確認：フォルダが見えるか、各フォルダのファイル数、店舗設定の数をログに出す */
