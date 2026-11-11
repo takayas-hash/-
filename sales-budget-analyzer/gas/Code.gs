@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
-const APP_VERSION = '183da1f';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = 'f559be8';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -167,13 +167,15 @@ function saveStdSetting(code, v) {
 function getHistory(areaIds) {
   const out = { tc: [], wage: [], nps: [] };
   (areaIds || []).forEach(id => {
+    // 「履歴データ」が2つ以上できてしまっていても、すべて読む
     const it = DriveApp.getFolderById(id).getFoldersByName(HISTORY_NAME);
-    if (!it.hasNext()) return;
+    while (it.hasNext()) {
     const files = it.next().getFiles();
     while (files.hasNext()) {
       const f = files.next(), m = f.getName().match(/^(tc|wage|nps)_(\d{4}-\d{2})\.json$/);
       if (!m) continue;
       try { const x = JSON.parse(f.getBlob().getDataAsString('UTF-8')); x.area = id; out[m[1]].push(JSON.stringify(x)); } catch (e) { /* 壊れたファイルは無視 */ }
+    }
     }
   });
   return out;
@@ -181,13 +183,18 @@ function getHistory(areaIds) {
 /** 履歴を保存（同じ月は上書き）。エリアのフォルダの編集権限がない人は保存できない（表示はできる） */
 function saveHistory(areaId, kind, ym, json) {
   if (!/^(tc|wage|nps)$/.test(kind) || !/^\d{4}-\d{2}$/.test(ym)) throw new Error('保存する内容が不正です');
-  const area = DriveApp.getFolderById(areaId);
-  const it = area.getFoldersByName(HISTORY_NAME);
-  const folder = it.hasNext() ? it.next() : area.createFolder(HISTORY_NAME);
-  const name = kind + '_' + ym + '.json';
-  const old = folder.getFilesByName(name);
-  if (old.hasNext()) old.next().setContent(json);
-  else folder.createFile(name, json, MimeType.PLAIN_TEXT);
+  // 同時に保存すると「履歴データ」が2つできることがあるので、1人ずつ順番に保存する
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const area = DriveApp.getFolderById(areaId);
+    const it = area.getFoldersByName(HISTORY_NAME);
+    const folder = it.hasNext() ? it.next() : area.createFolder(HISTORY_NAME);
+    const name = kind + '_' + ym + '.json';
+    // 同じ名前のファイルは、ほかの「履歴データ」にあるものも含めて上書き（なければ1つ目に作る）
+    let done = false; const all = area.getFoldersByName(HISTORY_NAME);
+    while (all.hasNext()) { const fo = all.next(), old = fo.getFilesByName(name); while (old.hasNext()) { old.next().setContent(json); done = true; } }
+    if (!done) folder.createFile(name, json, MimeType.PLAIN_TEXT);
+  } finally { lock.releaseLock(); }
   return true;
 }
 

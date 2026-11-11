@@ -565,6 +565,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       if (k === 'hourly') return { name: f.name, hourly: extractHourly(XLSX, ws) };
       if (k === 'payment') return { name: f.name, pays: extractPayments(XLSX, ws) };
       if (k === 'menu') return { name: f.name, menu: extractMenu(XLSX, ws) };
+      if (k === 'menuDaily') return { name: f.name, menu: extractMenuDaily(XLSX, ws) }; // 日別販売実績表（当月の途中のメニュー別）
       if (k === 'usage') return { name: f.name, usage: true }; // 食材別の理論差データは使わない
       if (k === 'timecard') return { name: f.name, tc: extractTimecard(XLSX, ws) };
       if (k === 'schedule') return { name: f.name, ws: extractSchedule(XLSX, ws) };
@@ -1934,7 +1935,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (m && A) {
       const one = R.stores.length <= 1;
       const sub = (a, p, f) => [one ? '' : `平均 ${f(a)}`, p != null ? `前年 ${f(p)}` : ''].filter(Boolean).join('・');
-      const f1 = v => v.toFixed(1) + '皿', fg = v => Math.round(v).toLocaleString('ja-JP') + 'g', f2 = v => v.toFixed(2) + '皿';
+      const f1 = v => v.toFixed(1) + '皿', fg = v => v ? Math.round(v).toLocaleString('ja-JP') + 'g' : '－', f2 = v => v.toFixed(2) + '皿';
       $('costKpis').innerHTML = kpi('原価率', pct(s.costRate), sub(R.area.benchCostRate, s.pCostRate, pct))
         + kpi('1人あたり原価', yen(m.costPP), sub(A.costPP, PM && PM.costPP, yen))
         + kpi('食べ放題フード', f1(m.foodQty), sub(A.foodQty, PM && PM.foodQty, f1))

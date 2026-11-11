@@ -239,6 +239,7 @@ function sheetKind(XLSX, ws) {
   if (headerIndex(aoa, ['店舗コード', '時刻', '売上当年']) >= 0) return 'hourly';
   if (headerIndex(aoa, ['店舗コード', '受取内訳', '金額']) >= 0) return 'payment';
   if (headerIndex(aoa, ['店舗コード', 'メニュー名', '予定原価', '販売数']) >= 0) return 'menu';
+  if (headerIndex(aoa, ['店舗コード', 'メニュー名', '予定原価', '営業日別販売数']) >= 0) return 'menuDaily';
   if (headerIndex(aoa, ['店舗コード', '品目名', '実使用量(金額)', '理論使用量(金額)']) >= 0) return 'usage';
   return null;
 }
@@ -322,6 +323,28 @@ function extractMenu(XLSX, ws) {
       unitCost: num(r[C.cost]), qty: num(r[C.qty]), sales: C.sales >= 0 ? num(r[C.sales]) : 0, g: C.g >= 0 ? num(r[C.g]) : 0, cust: C.cust >= 0 ? num(r[C.cust]) : 0 });
   }
   return out;
+}
+/**
+ * 日別販売実績表（メニューごとの日別の販売数）→ メニュー別と同じ形に月の途中まで合計する。
+ * 客数・かしょく重量の列はないので、客数はあとで売上集計表から入れる（cust: 0）
+ */
+function extractMenuDaily(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const hr = headerIndex(aoa, ['店舗コード', 'メニュー名', '予定原価', '営業日別販売数']); const H = aoa[hr];
+  const c = n => H.indexOf(n);
+  const C = { date: c('営業日'), code: c('店舗コード'), cat: c('メニュー中分類名称'), name: c('メニュー名'), price: c('売価'), cost: c('予定原価'), qty: c('営業日別販売数') };
+  const by = {};
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || r[C.code] == null) continue;
+    const date = toDate(r[C.date]); if (!date) continue;
+    const code = String(r[C.code]).trim(), cat = String(r[C.cat] || ''), name = String(r[C.name] || ''), k = code + '\u0000' + cat + '\u0000' + name;
+    const x = (by[k] = by[k] || { code, cat, grp: menuGroup(cat), name, unitCost: num(r[C.cost]), price: num(r[C.price]), qty: 0, sales: 0, g: 0, cust: 0, date, from: date, daily: true });
+    const q = num(r[C.qty]); x.qty += q; x.sales += q * num(r[C.price]);
+    if (date > x.date) x.date = date; if (date < x.from) x.from = date;
+  }
+  const rows = Object.values(by), last = rows.length ? new Date(Math.max(...rows.map(r => +r.date))) : null, first = rows.length ? new Date(Math.min(...rows.map(r => +r.from))) : null;
+  rows.forEach(r => { r.date = last; r.from = first; });
+  return rows;
 }
 const courseType = n => String(n).replace(/[\s　]*[（(]?(大人|シニア|小学生|幼児)[）)]?[\s　]*$/, '').trim();
 /** 店舗（または複数店）のメニュー行 → 1人あたり指標 */
@@ -1330,6 +1353,11 @@ function analyze(curRows, prevRows, extra) {
   area.benchGapRate = withGap.length ? (sum(withGap, s => s.buy) - sum(withGap, s => s.cost)) / sum(withGap, s => s.preSales) : null;
   const withLoss = stores.filter(s => s.lossRate != null);
   area.benchLossRate = withLoss.length ? sum(withLoss, s => s.loss) / sum(withLoss, s => s.preSales) : null;
+  // 日別販売実績表から作ったメニュー別には客数がないので、同じ店・同じ期間の売上集計表の客数を入れる
+  [menu, pMenu].forEach((ms, j) => { if (!ms.some(r => r.daily)) return; const rows = j ? prev : cur;
+    const end = new Date(Math.max(...ms.map(r => +r.date))), from = new Date(Math.min(...ms.map(r => +r.from)));
+    const custOf = {}; rows.forEach(r => { if (r.date >= from && r.date <= end) custOf[r.code] = (custOf[r.code] || 0) + (r.cust || 0); });
+    ms.forEach(r => { if (r.daily && !r.cust) r.cust = custOf[r.code] || 0; }); });
   if (menu.length) {
     stores.forEach(s => { s.menu = menuAgg(menu.filter(r => r.code === s.code)); s.pMenuAgg = menuAgg(pMenu.filter(r => r.code === s.code)); });
     area.menu = menuAgg(menu); area.pMenuAgg = menuAgg(pMenu);
@@ -1597,7 +1625,7 @@ function costLines(s, ctx) {
     Object.values(P.items).forEach(p => { if (!m.items[p.name]) qtyEff -= p.qtyPP * (p.qty ? p.cost / p.qty : 0); });
     out.push({ t: `　1人あたり原価の前年差${syen(m.costPP - P.costPP)}の内訳：量（皿数・杯数）で${syen(qtyEff)}、原価単価（原価改定など）で${syen(priceEff)}。`, d: false });
   }
-  out.push({ t: `　食べ放題フード：1人${m.foodQty.toFixed(1)}皿${vs(m.foodQty, A.foodQty, P && P.foodQty, '皿', 1)}・${Math.round(m.foodG).toLocaleString('ja-JP')}g${vs(m.foodG, A.foodG, P && P.foodG, 'g', 0)}。うち精肉${m.meatQty.toFixed(2)}皿・${Math.round(m.meatG)}g${vs(m.meatQty, A.meatQty, P && P.meatQty, '皿', 2)}。ドリンク${m.drinkQty.toFixed(1)}杯/人。`, d: false });
+  out.push({ t: `　食べ放題フード：1人${m.foodQty.toFixed(1)}皿${vs(m.foodQty, A.foodQty, P && P.foodQty, '皿', 1)}${m.foodG ? `・${Math.round(m.foodG).toLocaleString('ja-JP')}g${vs(m.foodG, A.foodG, P && P.foodG, 'g', 0)}` : ''}。うち精肉${m.meatQty.toFixed(2)}皿${m.meatG ? `・${Math.round(m.meatG)}g` : ''}${vs(m.meatQty, A.meatQty, P && P.meatQty, '皿', 2)}。ドリンク${m.drinkQty.toFixed(1)}杯/人。`, d: false });
   // 分類別：平均より1人あたり原価が高い分類
   if (bench) {
     const diffs = m.cats.map(c => { const a = A.cats.find(x => x.cat === c.cat); return a ? { ...c, dCost: c.costPP - a.costPP, dQty: c.qtyPP - a.qtyPP } : null; }).filter(Boolean)
@@ -1915,4 +1943,4 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
