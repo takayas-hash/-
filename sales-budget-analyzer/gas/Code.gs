@@ -1,11 +1,14 @@
 /**
  * 予算差異アナライザー（Apps Script ウェブアプリ）
  *
- * 共有ドライブの「予算差異アナライザー」フォルダの下に、
- *   エリアごとのフォルダ（例：髙谷エリア）… 売上集計表・タイムカード・勤務スケジュールなど
- *   「共通」フォルダ                    … 時給データ・標準比マスタ（見込君）
- * を置く。ウェブアプリは「アクセスしているユーザー」として動くため、
- * 各自がドライブで見られるフォルダのデータだけが表示される。
+ * 「予算差異アナライザー」フォルダ（マイドライブ・共有ドライブどちらでも可）の下に、
+ *   「共通」フォルダ                      … 時給データ・標準比マスタ（見込君）・店舗情報
+ *   ブロックのフォルダ（例：西一ブロック）
+ *     └ エリアのフォルダ（例：髙谷エリア） … 売上集計表・タイムカード・勤務スケジュールなど
+ * を置く（ブロックを作らず、ルートの直下にエリアのフォルダを置いてもよい）。
+ * ウェブアプリは「アクセスしているユーザー」として動くため、各自がドライブで見られるフォルダのデータだけが表示される。
+ * ルートを全員に共有しなくてよいように、フォルダの一覧（ブロック・エリアのID）はスクリプト プロパティに覚えておき、
+ * 各自は一覧のうち自分が開けるエリアだけを使う。一覧はルートを開ける人（管理者）がウェブアプリを開くたびに更新される。
  *
  * 初回だけ：プロジェクトの設定 → スクリプト プロパティ に
  *   ROOT_FOLDER_ID ＝ 「予算差異アナライザー」フォルダのID（URLの folders/ の後ろ）
@@ -15,6 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
+const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('index')
@@ -29,35 +33,70 @@ function rootFolder_() {
   return DriveApp.getFolderById(id);
 }
 
-/** 画面の初期表示に使う：見られるエリアのフォルダ、共通フォルダ、店舗設定 */
-function getConfig() {
-  let root;
-  try { root = rootFolder_(); } catch (e) { return { areas: [], error: e.message, stdSettings: getStdSettings_() }; }
-  const areas = [];
-  let common = null;
-  let user = '';
-  try { user = Session.getActiveUser().getEmail(); } catch (e) { /* 取得できなくても続ける */ }
-  const me = String(user).toLowerCase();
+/**
+ * ルートの下のフォルダの一覧。直下のフォルダのうち、中に（過去・履歴データ以外の）フォルダがあるものはブロック、ないものはエリア
+ */
+function buildTree_(root) {
+  const skip = n => n === COMMON_NAME || n === HISTORY_NAME || SKIP_NAMES.indexOf(n) >= 0;
+  const tree = { common: null, areas: [], at: new Date().toISOString() };
   const it = root.getFolders();
   while (it.hasNext()) {
     const f = it.next(), name = f.getName();
-    if (name === COMMON_NAME) { common = f.getId(); continue; }
-    if (SKIP_NAMES.indexOf(name) >= 0) continue;
+    if (name === COMMON_NAME) { tree.common = f.getId(); continue; }
+    if (skip(name)) continue;
+    const subs = []; const si = f.getFolders();
+    while (si.hasNext()) { const g = si.next(); if (!skip(g.getName())) subs.push(g); }
+    if (subs.length) subs.forEach(g => tree.areas.push({ id: g.getId(), name: g.getName(), block: name }));
+    else tree.areas.push({ id: f.getId(), name: name, block: '' });
+  }
+  tree.areas.sort((x, y) => (x.block + '\u0000' + x.name).localeCompare(y.block + '\u0000' + y.name, 'ja'));
+  return tree;
+}
+/** フォルダの一覧：ルートを開ける人はその場で作り直して覚える。開けない人は覚えてある一覧を使う */
+function folderTree_() {
+  const props = PropertiesService.getScriptProperties();
+  try {
+    const tree = buildTree_(rootFolder_());
+    props.setProperty(TREE_KEY, JSON.stringify(tree));
+    return tree;
+  } catch (e) {
+    const saved = props.getProperty(TREE_KEY);
+    if (saved) return JSON.parse(saved);
+    throw new Error('フォルダの一覧がまだありません。管理者（ルートのフォルダを開ける人）が一度ウェブアプリを開くか、エディタで refreshFolders を実行してください');
+  }
+}
+/** エディタで実行：フォルダの一覧を作り直す（ブロック・エリアのフォルダを足したり名前を変えたりしたとき） */
+function refreshFolders() {
+  const t = buildTree_(rootFolder_());
+  PropertiesService.getScriptProperties().setProperty(TREE_KEY, JSON.stringify(t));
+  Logger.log('フォルダの一覧を更新しました：共通 ' + (t.common ? 'あり' : 'なし') + '、エリア ' + t.areas.length + '件\n' + t.areas.map(a => (a.block ? a.block + ' / ' : '') + a.name).join('\n'));
+}
+const canOpen_ = id => { try { return DriveApp.getFolderById(id).getName() != null; } catch (e) { return false; } };
+
+/** 画面の初期表示に使う：見られるエリアのフォルダ（ブロックつき）、共通フォルダ、店舗設定 */
+function getConfig() {
+  let tree;
+  try { tree = folderTree_(); } catch (e) { return { areas: [], error: e.message, stdSettings: getStdSettings_(), actions: getActions_() }; }
+  let user = '';
+  try { user = Session.getActiveUser().getEmail(); } catch (e) { /* 取得できなくても続ける */ }
+  const me = String(user).toLowerCase();
+  const areas = [];
+  tree.areas.forEach(a => {
+    let f; try { f = DriveApp.getFolderById(a.id); f.getName(); } catch (e) { return; } // 開けないエリアは出さない
     // 自分が直接「編集者」になっているエリア＝自分のエリア（最初に選ぶ）
     let mine = false;
-    if (me) { try { mine = f.getEditors().some(u => String(u.getEmail()).toLowerCase() === me) || String(f.getOwner() && f.getOwner().getEmail()).toLowerCase() === me; } catch (e) { /* 共有ドライブなどで取れないときは false */ } }
-    areas.push({ id: f.getId(), name: name, mine: mine });
-  }
-  areas.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    if (me) { try { mine = f.getEditors().some(u => String(u.getEmail()).toLowerCase() === me) || String(f.getOwner() && f.getOwner().getEmail()).toLowerCase() === me; } catch (e) { /* 取れないときは false */ } }
+    areas.push({ id: a.id, name: a.name, block: a.block || '', mine: mine });
+  });
+  const common = tree.common && canOpen_(tree.common) ? tree.common : null;
   return { areas: areas, common: common, user: user, stdSettings: getStdSettings_(), actions: getActions_() };
 }
 
 /** エリアのフォルダ（複数可）と共通フォルダのファイル一覧。新しい順 */
 function listFiles(areaIds) {
-  const root = rootFolder_();
+  const tree = folderTree_();
   const folders = (areaIds || []).map(id => DriveApp.getFolderById(id));
-  const c = root.getFoldersByName(COMMON_NAME);
-  if (c.hasNext()) folders.push(c.next());
+  if (tree.common && canOpen_(tree.common)) folders.push(DriveApp.getFolderById(tree.common));
   const out = [];
   folders.forEach(folder => {
     const files = [];
@@ -66,7 +105,7 @@ function listFiles(areaIds) {
       const f = it.next(), name = f.getName(), mime = f.getMimeType();
       if (/^~\$/.test(name)) continue; // Excelの一時ファイル
       if (!/\.(csv|txt|xlsx|xlsm|xls)$/i.test(name) && mime !== MimeType.GOOGLE_SHEETS) continue;
-      files.push({ id: f.getId(), name: name, folder: folder.getName(), folderId: folder.getId(), common: folder.getName() === COMMON_NAME, updated: f.getLastUpdated().getTime(), size: f.getSize() });
+      files.push({ id: f.getId(), name: name, folder: folder.getName(), folderId: folder.getId(), common: folder.getId() === tree.common, updated: f.getLastUpdated().getTime(), size: f.getSize() });
     }
     files.sort((a, b) => b.updated - a.updated);
     files.slice(0, MAX_FILES_PER_FOLDER).forEach(x => out.push(x));
@@ -152,17 +191,26 @@ function saveHistory(areaId, kind, ym, json) {
 }
 
 /* ===== 初期設定・確認（エディタで1回だけ実行する） ===== */
-// 作るエリアのフォルダ名（必要に応じて書き換えてから setupFolders を実行）
-const AREA_FOLDERS = ['髙谷エリア'];
+// 作るブロックとエリアのフォルダ名（必要に応じて書き換えてから setupFolders を実行）。ブロックを作らないときは { '': ['髙谷エリア'] }
+const BLOCK_FOLDERS = { '西一ブロック': ['河野エリア', '金エリア', '松山エリア', '菅エリア', '名越エリア', '髙谷エリア'] };
 
-/** ROOT_FOLDER_ID のフォルダの下に「共通」「過去」とエリアのフォルダを作る（すでにあるものは作らない） */
+/**
+ * ROOT_FOLDER_ID のフォルダの下に「共通」と、ブロック／エリアのフォルダを作る（すでにあるものは作らない）。
+ * ルートの直下にあるエリアのフォルダは、同じ名前のエリアがブロックの下に指定されていれば、そのブロックへ移す（中身ごと）
+ */
 function setupFolders() {
   const root = rootFolder_();
-  [COMMON_NAME, '過去'].concat(AREA_FOLDERS).forEach(name => {
-    if (root.getFoldersByName(name).hasNext()) { Logger.log('あり：' + name); return; }
-    root.createFolder(name); Logger.log('作成：' + name);
+  const get = (parent, name) => { const i = parent.getFoldersByName(name); if (i.hasNext()) { Logger.log('あり：' + name); return i.next(); } Logger.log('作成：' + name); return parent.createFolder(name); };
+  get(root, COMMON_NAME);
+  Object.keys(BLOCK_FOLDERS).forEach(block => {
+    const parent = block ? get(root, block) : root;
+    BLOCK_FOLDERS[block].forEach(area => {
+      if (block) { const old = root.getFoldersByName(area); if (old.hasNext() && !parent.getFoldersByName(area).hasNext()) { old.next().moveTo(parent); Logger.log('移動：' + area + ' → ' + block); return; } }
+      get(parent, area);
+    });
   });
-  Logger.log('完了。各エリアのフォルダをAMに「編集者」、ブロック長に「閲覧者」以上で共有してください。「共通」は時給データがあるためAM以上だけに共有してください。');
+  refreshFolders();
+  Logger.log('完了。エリアのフォルダはAMに「編集者」、ブロックのフォルダはブロック長に「閲覧者」で共有してください（ルートは共有しなくてよい）。「共通」は時給データがあるためAM以上だけに共有してください。');
 }
 
 /** 設定の確認：フォルダが見えるか、各フォルダのファイル数、店舗設定の数をログに出す */
@@ -170,13 +218,14 @@ function checkSetup() {
   let root;
   try { root = rootFolder_(); } catch (e) { Logger.log('NG：' + e.message); return; }
   Logger.log('OK：ルートフォルダ「' + root.getName() + '」');
+  refreshFolders();
   const cfg = getConfig();
   Logger.log('実行ユーザー：' + (cfg.user || '（取得できません）'));
   Logger.log('共通フォルダ：' + (cfg.common ? 'あり' : 'なし（「共通」という名前のフォルダを作ってください）'));
   if (!cfg.areas.length) Logger.log('NG：エリアのフォルダがありません');
   cfg.areas.forEach(a => {
     const files = listFiles([a.id]).filter(f => !f.common);
-    Logger.log('エリア「' + a.name + '」：ファイル ' + files.length + '件' + (files.length ? '（' + files.slice(0, 5).map(f => f.name).join('、') + (files.length > 5 ? ' ほか' : '') + '）' : ''));
+    Logger.log((a.block ? a.block + ' / ' : '') + 'エリア「' + a.name + '」：ファイル ' + files.length + '件' + (files.length ? '（' + files.slice(0, 5).map(f => f.name).join('、') + (files.length > 5 ? ' ほか' : '') + '）' : ''));
   });
   const common = cfg.common ? listFiles([]).filter(f => f.common) : [];
   Logger.log('共通のファイル：' + common.length + '件' + (common.length ? '（' + common.map(f => f.name).join('、') + '）' : ''));
@@ -192,13 +241,12 @@ const ARCHIVE_NAME = '過去';
  * dryRun=true なら移さずに、移す予定のファイルを返す（ログにも出す）。お知らせのメールは送らない（結果は実行ログで確認）。
  */
 function archiveOldFiles(dryRun) {
-  const root = rootFolder_(), now = new Date();
+  const tree = buildTree_(rootFolder_()), now = new Date();
+  PropertiesService.getScriptProperties().setProperty(TREE_KEY, JSON.stringify(tree)); // ついでに一覧も新しくする
   const limit = new Date(now.getFullYear(), now.getMonth() - 1, 1); // 前月1日
   const moved = [];
-  const it = root.getFolders();
-  while (it.hasNext()) {
-    const area = it.next(), name = area.getName();
-    if (name === COMMON_NAME || SKIP_NAMES.indexOf(name) >= 0) continue;
+  tree.areas.forEach(a => {
+    const area = DriveApp.getFolderById(a.id), name = (a.block ? a.block + '／' : '') + a.name;
     let archive = null;
     const files = area.getFiles();
     while (files.hasNext()) {
@@ -211,7 +259,7 @@ function archiveOldFiles(dryRun) {
       const m = archive.getFoldersByName(ym), dest = m.hasNext() ? m.next() : archive.createFolder(ym);
       f.moveTo(dest);
     }
-  }
+  });
   Logger.log((dryRun ? '【移す予定】' : '【移しました】') + moved.length + '件\n' + moved.join('\n'));
   return moved;
 }

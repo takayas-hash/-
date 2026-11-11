@@ -3906,17 +3906,25 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
       stdMem = cfg.stdSettings || {}; actMem = cfg.actions || {};
       if (!cfg.areas.length) { setStatus(cfg.error || '見られるエリアのフォルダがありません。フォルダの共有設定を確認してください。', true); return; }
       const sel = $('driveArea');
-      sel.innerHTML = (cfg.areas.length > 1 ? `<option value="*">すべてのエリア（${cfg.areas.length}）</option>` : '') + cfg.areas.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
-      // 最初に選ぶエリア：前回選んだエリア → 自分が編集者のエリア（1つだけのとき）→ エリアが1つならそれ。決まらなければ自動では読まない
+      DRIVE_AREAS = cfg.areas;
+      // ブロックごとにまとめる。ブロックに2つ以上エリアがあれば「ブロックのすべて」も選べる
+      const blocks = [...new Set(cfg.areas.map(a => a.block || ''))];
+      const opt = a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`;
+      sel.innerHTML = (cfg.areas.length > 1 && blocks.length > 1 ? `<option value="*">すべてのエリア（${cfg.areas.length}）</option>` : cfg.areas.length > 1 && !blocks[0] ? `<option value="*">すべてのエリア（${cfg.areas.length}）</option>` : '')
+        + blocks.map(b => { const as = cfg.areas.filter(a => (a.block || '') === b); if (!b) return as.map(opt).join('');
+          return `<optgroup label="${esc(b)}">${as.length > 1 ? `<option value="b:${esc(b)}">${esc(b)}のすべて（${as.length}エリア）</option>` : ''}${as.map(opt).join('')}</optgroup>`; }).join('');
+      // 最初に選ぶ：前回選んだもの → 自分が編集者のエリア（1つだけのとき）→ エリアが1つならそれ → ブロックが1つならそのブロックのすべて。決まらなければ自動では読まない
       const keep = pref.get('driveArea', ''), mine = cfg.areas.filter(a => a.mine);
-      let first = [...sel.options].some(o => o.value === keep) ? keep : mine.length === 1 ? mine[0].id : cfg.areas.length === 1 ? cfg.areas[0].id : '';
+      const named = blocks.filter(Boolean);
+      let first = [...sel.options].some(o => o.value === keep) ? keep : mine.length === 1 ? mine[0].id : cfg.areas.length === 1 ? cfg.areas[0].id : named.length === 1 && blocks.length === 1 ? `b:${named[0]}` : '';
       if (first) sel.value = first;
       else { sel.insertAdjacentHTML('afterbegin', '<option value="" disabled>エリアを選んでください</option>'); sel.value = ''; }
-      $('driveInfo').textContent = `${cfg.user ? cfg.user + ' として表示。' : ''}見られるエリア：${cfg.areas.map(a => a.name + (a.mine ? '（編集者）' : '')).join('、')}。${cfg.common ? '' : '※共通フォルダが見つかりません（時給データ・標準比マスタなしで分析します）。'}`;
+      $('driveInfo').textContent = `${cfg.user ? cfg.user + ' として表示。' : ''}見られるエリア：${blocks.map(b => (b ? b + '：' : '') + cfg.areas.filter(a => (a.block || '') === b).map(a => a.name + (a.mine ? '（編集者）' : '')).join('・')).join('／')}。${cfg.common ? '' : '※共通フォルダが見つかりません（時給データ・標準比マスタなしで分析します）。'}`;
       setStatus(first ? '' : 'エリアを選んでください。選ぶと読み込みます。');
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
+  let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
   async function loadDrive() {
@@ -3924,7 +3932,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     if (!v) { setStatus('エリアを選んでください。', true); return; }
     pref.set('driveArea', v);
     const seq = ++driveSeq, stale = () => seq !== driveSeq;
-    const ids = v === '*' ? [...$('driveArea').options].map(o => o.value).filter(x => x !== '*') : [v];
+    const ids = v === '*' ? DRIVE_AREAS.map(a => a.id) : v.startsWith('b:') ? DRIVE_AREAS.filter(a => (a.block || '') === v.slice(2)).map(a => a.id) : [v];
     const label = $('driveArea').selectedOptions[0].textContent;
     $('driveLoad').disabled = true;
     try {
