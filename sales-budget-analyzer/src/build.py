@@ -14,6 +14,15 @@ here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(here)
 t = open(os.path.join(here, 'template.html'), encoding='utf-8').read()
 c = open(os.path.join(here, 'core.js'), encoding='utf-8').read()
+# 版：ソース（template・core・Code.gs）の中身から作る短い記号。Code.gs にも同じ版を書き込み、画面で食い違いを知らせる
+import hashlib, re
+gs_path = os.path.join(root, 'gas', 'Code.gs')
+gs = open(gs_path, encoding='utf-8').read()
+VER_RE = re.compile(r"const APP_VERSION = '[^']*';")
+ver = hashlib.sha1((t + c + VER_RE.sub('', gs)).encode('utf-8')).hexdigest()[:7]
+gs2 = VER_RE.sub(f"const APP_VERSION = '{ver}';", gs)
+if gs2 != gs: open(gs_path, 'w', encoding='utf-8').write(gs2)
+t = t.replace('/*VER*/', ver)
 page = t.replace('/*CORE*/', c)
 os.makedirs(os.path.join(root, 'dist'), exist_ok=True)
 open(os.path.join(root, 'dist', 'app.html'), 'w', encoding='utf-8').write(page)
@@ -32,4 +41,4 @@ if len(sys.argv) > 1:
     one = doc.replace(tag, '<!-- SheetJS Community Edition 0.18.5 (Apache-2.0) を埋め込み。インターネットに接続していなくても動きます -->\n<script>\n' + lib + '\n</script>')
     open(os.path.join(root, '予算差異アナライザー.html'), 'w', encoding='utf-8').write(one)
 
-print('built')
+print('built 版', ver)

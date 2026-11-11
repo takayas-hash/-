@@ -3895,10 +3895,14 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
       if (first) sel.value = first;
       else { sel.insertAdjacentHTML('afterbegin', '<option value="" disabled>エリアを選んでください</option>'); sel.value = ''; }
       $('driveInfo').textContent = `${cfg.user ? cfg.user + ' として表示。' : ''}見られるエリア：${blocks.map(b => (b ? b + '：' : '') + cfg.areas.filter(a => (a.block || '') === b).map(a => a.name + (a.mine ? '（編集者）' : '')).join('・')).join('／')}。${cfg.common ? '' : '※共通フォルダが見つかりません（時給データ・標準比マスタなしで分析します）。'}`;
+      $('driveInfo').textContent += `　版 ${APP_VERSION}`;
+      // Code.gs と index.html の版が違う（片方だけ貼り替えた・デプロイし忘れ）ときは知らせる
+      if (cfg.version !== APP_VERSION) $('driveInfo').insertAdjacentHTML('beforeend', `<div style="color:var(--neg-ink);font-weight:700;margin-top:4px">Code.gs（版 ${esc(cfg.version || '古い版')}）と index.html（版 ${APP_VERSION}）が違います。両方を貼り替えて「新バージョン」でデプロイしてください。</div>`);
       setStatus(first ? '' : 'エリアを選んでください。選ぶと読み込みます。');
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
+  const APP_VERSION = '1044bac'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない

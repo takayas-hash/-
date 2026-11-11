@@ -18,6 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
+const APP_VERSION = '1044bac';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -76,7 +77,7 @@ const canOpen_ = id => { try { return DriveApp.getFolderById(id).getName() != nu
 /** 画面の初期表示に使う：見られるエリアのフォルダ（ブロックつき）、共通フォルダ、店舗設定 */
 function getConfig() {
   let tree;
-  try { tree = folderTree_(); } catch (e) { return { areas: [], error: e.message, stdSettings: getStdSettings_(), actions: getActions_() }; }
+  try { tree = folderTree_(); } catch (e) { return { areas: [], error: e.message, stdSettings: getStdSettings_(), actions: getActions_(), version: APP_VERSION }; }
   let user = '';
   try { user = Session.getActiveUser().getEmail(); } catch (e) { /* 取得できなくても続ける */ }
   const me = String(user).toLowerCase();
@@ -89,7 +90,7 @@ function getConfig() {
     areas.push({ id: a.id, name: a.name, block: a.block || '', mine: mine });
   });
   const common = tree.common && canOpen_(tree.common) ? tree.common : null;
-  return { areas: areas, common: common, user: user, stdSettings: getStdSettings_(), actions: getActions_() };
+  return { areas: areas, common: common, user: user, stdSettings: getStdSettings_(), actions: getActions_(), version: APP_VERSION };
 }
 
 /** エリアのフォルダ（複数可）と共通フォルダのファイル一覧。新しい順 */
