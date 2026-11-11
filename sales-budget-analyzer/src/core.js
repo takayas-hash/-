@@ -231,10 +231,14 @@ function menuAgg(rows) {
   const courses = {};
   rows.filter(r => r.grp === 'course' && !/飲み放題|ドリンク|アルコール/.test(r.name)).forEach(r => { const k = courseType(r.name); courses[k] = (courses[k] || 0) + r.qty; });
   const courseTotal = Object.values(courses).reduce((a, b) => a + b, 0);
-  // 飲み放題比率＝飲み放題の注文数÷コースの注文数（どちらも大人・子どもを含む人数）。ソフトドリンク（Ｌソフト含む）とアルコール（生ビールなど）に分ける
+  // 飲み放題比率＝注文数÷すべてのコースの注文数（大人・子どもを含む人数）。3つに分ける
+  //   ソフトドリンク＝通常のソフトドリンク飲み放題、ランチソフト＝Ｌソフトドリンク飲み放題（ランチ限定）、アルコール＝生ビール飲み放題など
+  //   ※Ｌソフトはランチコース以外（ランチ時間のきんぐコースなど）でも出るため、ランチコースの人数では割らない
   const dr = rows.filter(r => r.grp === 'course' && /飲み放題/.test(r.name));
-  const soft = sum(dr.filter(r => /ソフト/.test(r.name)), r => r.qty), alc = sum(dr.filter(r => !/ソフト/.test(r.name)), r => r.qty);
-  const dk = courseTotal && dr.length ? { soft, alc, base: courseTotal, softRate: soft / courseTotal, alcRate: alc / courseTotal, rate: (soft + alc) / courseTotal } : null;
+  const isL = r => /^[\s　]*[ＬL]/.test(r.name);
+  const soft = sum(dr.filter(r => /ソフト/.test(r.name) && !isL(r)), r => r.qty), lsoft = sum(dr.filter(r => /ソフト/.test(r.name) && isL(r)), r => r.qty), alc = sum(dr.filter(r => !/ソフト/.test(r.name)), r => r.qty);
+  const dk = courseTotal && dr.length ? { soft, lsoft, alc, base: courseTotal,
+    softRate: soft / courseTotal, lunchRate: lsoft / courseTotal, alcRate: alc / courseTotal, rate: (soft + lsoft + alc) / courseTotal } : null;
   return {
     cust, cost: sum(rows, r => r.qty * r.unitCost), costPP: pp(r => r.qty * r.unitCost), menuSales: sum(rows, r => r.sales),
     foodQty: sum(food, r => r.qty) / cust, foodG: sum(food, r => r.qty * r.g) / cust, foodCost: sum(food, r => r.qty * r.unitCost) / cust,
@@ -1487,8 +1491,8 @@ function costLines(s, ctx) {
   }
   if (m.drink) {
     const dcmp = (k) => [bench && A.drink ? `平均${pct(A.drink[k])}` : '', P && P.drink ? `前年${pct(P.drink[k])}` : ''].filter(Boolean).join('・');
-    const t1 = dcmp('softRate'), t2 = dcmp('alcRate');
-    out.push({ t: `・飲み放題比率（コースの人数あたり）：ソフトドリンク${pct(m.drink.softRate)}${t1 ? `（${t1}）` : ''}、アルコール${pct(m.drink.alcRate)}${t2 ? `（${t2}）` : ''}。`, d: false });
+    const part = (n, k, note) => m.drink[k] == null ? '' : `${n}${pct(m.drink[k])}${note}${dcmp(k) ? `（${dcmp(k)}）` : ''}`;
+    out.push({ t: `・飲み放題比率（コースの人数あたり）：${[part('ソフトドリンク', 'softRate', ''), part('ランチソフト', 'lunchRate', ''), part('アルコール', 'alcRate', '')].filter(Boolean).join('、')}。`, d: false });
   }
   return out;
 }
@@ -1699,7 +1703,7 @@ function areaCostComment(a, stores, ctx) {
   if (a.menu && a.menu.courses.length >= 2 && stores.length > 1) {
     const prem = stores.filter(x => x.menu).map(x => ({ x, p: sum(x.menu.courses.filter(c => /プレミアム/.test(c.name)), c => c.share) })).sort((u, v) => v.p - u.p);
     const drk = stores.filter(x => x.menu && x.menu.drink).sort((u, v) => v.menu.drink.alcRate - u.menu.drink.alcRate);
-    if (a.menu.drink && drk.length > 1) L.push(`・飲み放題比率：ソフトドリンク${pct(a.menu.drink.softRate)}・アルコール${pct(a.menu.drink.alcRate)}（対象店計）。アルコールの高い店 ${drk.slice(0, 2).map(x => `${x.name}${pct(x.menu.drink.alcRate)}`).join('、')}／低い店 ${drk.slice(-2).reverse().map(x => `${x.name}${pct(x.menu.drink.alcRate)}`).join('、')}。`);
+    if (a.menu.drink && drk.length > 1) L.push(`・飲み放題比率：ソフトドリンク${pct(a.menu.drink.softRate)}${a.menu.drink.lunchRate != null ? `・ランチソフト${pct(a.menu.drink.lunchRate)}` : ''}・アルコール${pct(a.menu.drink.alcRate)}（対象店計）。アルコールの高い店 ${drk.slice(0, 2).map(x => `${x.name}${pct(x.menu.drink.alcRate)}`).join('、')}／低い店 ${drk.slice(-2).reverse().map(x => `${x.name}${pct(x.menu.drink.alcRate)}`).join('、')}。`);
     if (prem.length && prem[0].p > 0) L.push(`・コース構成：プレミアム比率の高い店 ${prem.slice(0, 3).map(u => `${u.x.name}${pct(u.p)}`).join('、')}／低い店 ${prem.slice(-2).reverse().map(u => `${u.x.name}${pct(u.p)}`).join('、')}。`);
   }
   if (!L.length) L.push('原価のデータがありません。');

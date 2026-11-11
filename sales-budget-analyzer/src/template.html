@@ -186,8 +186,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .rp-page .kpis { flex: none; }
 .rp-page .kpi .v { font-size: 19pt; } .rp-page .kpi .label { font-size: 10.5pt; } .rp-page .kpi .small { font-size: 10.5pt; }
 .rp-p h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 3mm; } .rp-p h3 span { font-size: 9.5pt; font-weight: 400; color: #5d6068; }
-.rp-cd { width: 100%; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 3mm; align-items: center; } .rp-cd > div { display: flex; flex-direction: column; gap: 2mm; } .rp-page .rp-cd .stk { grid-template-columns: 5.5em minmax(0, 1fr) 4.8em; font-size: 10pt; } .rp-page .rp-cd .lg { font-size: 9.5pt; gap: .5mm 2.5mm; }
-.rp-dr { width: 100%; border-collapse: collapse; } .rp-page .rp-dr th, .rp-page .rp-dr td { font-size: 11pt; padding: .8mm 1mm; text-align: center; border-bottom: 1px solid #dddcd6; } .rp-page .rp-dr tbody th { text-align: left; } .rp-page .rp-dr td.me { font-weight: 700; font-size: 13pt; color: #1d5fae; }
+.rp-cd { width: 100%; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 2.5mm; align-items: center; } .rp-cd > div { display: flex; flex-direction: column; gap: 2mm; } .rp-page .rp-cd .stk { grid-template-columns: 5.5em minmax(0, 1fr) 4.8em; font-size: 10pt; } .rp-page .rp-cd .lg { font-size: 9.5pt; gap: .5mm 2.5mm; }
+.rp-dr { width: 100%; border-collapse: collapse; table-layout: fixed; } .rp-dr col.h { width: 38%; } .rp-page .rp-dr th, .rp-page .rp-dr td { font-size: 10.5pt; padding: .8mm .5mm; white-space: nowrap; text-align: center; border-bottom: 1px solid #dddcd6; } .rp-page .rp-dr tbody th { text-align: left; } .rp-page .rp-dr td.me { font-weight: 700; font-size: 12pt; color: #1d5fae; }
 .rp-heat { width: 100%; border-collapse: separate; border-spacing: 1mm; table-layout: fixed; }
 .rp-page .rp-heat th { font-size: 11pt; padding: 0 .5mm; text-align: center; font-weight: 700; line-height: 1.2; } .rp-heat th div { font-size: 8.5pt; font-weight: 400; color: #5d6068; }
 .rp-page .rp-heat tbody th { text-align: left; } .rp-page .rp-heat td { text-align: center; font-size: 14pt; font-weight: 700; padding: 0 .5mm; border-radius: 1mm; line-height: 1.2; }
@@ -1273,8 +1273,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (s.menu && A.menu) { const cs = s.menu.cats.slice(0, 6); catChart = rpBars(cs.map(c => (c.cat || 'その他').slice(0, 5)), [{ name: '当店', color: RPC.pos, vals: cs.map(c => c.costPP) }].concat(many ? [{ name: '平均', color: RPC.avg, vals: cs.map(c => { const a = A.menu.cats.find(x => x.cat === c.cat); return a ? a.costPP : null; }) }] : []).concat(s.pMenuAgg ? [{ name: '前年', color: RPC.cmp, vals: cs.map(c => { const a = s.pMenuAgg.cats.find(x => x.cat === c.cat); return a ? a.costPP : null; }) }] : []), v => Math.round(v) + '円', { label: '食べ放題の分類別 1人あたり原価' }); }
     // コース構成の帯グラフ＋飲み放題比率（ソフトドリンク・アルコール）の小さな表
     const drRows = [['当店', s.menu && s.menu.drink, true], ['前年', s.pMenuAgg && s.pMenuAgg.drink], ['平均', many && A.menu && A.menu.drink]].filter(r => r[1]);
-    const drTbl = drRows.length ? `<table class="rp-dr"><thead><tr><th>飲み放題</th>${drRows.map(r => `<th>${r[0]}</th>`).join('')}</tr></thead><tbody>`
-      + [['ソフト', 'softRate'], ['アルコール', 'alcRate']].map(([n, k]) => `<tr><th>${n}</th>${drRows.map(r => `<td${r[2] ? ' class="me"' : ''}>${pct(r[1][k])}</td>`).join('')}</tr>`).join('') + '</tbody></table>' : '';
+    const drTbl = drRows.length ? `<table class="rp-dr"><colgroup><col class="h"></colgroup><thead><tr><th>飲み放題</th>${drRows.map(r => `<th>${r[0]}</th>`).join('')}</tr></thead><tbody>`
+      + [['ソフト', 'softRate'], ['ランチソフト', 'lunchRate'], ['アルコール', 'alcRate']].filter(([, k]) => drRows.some(r => r[1][k] != null)).map(([n, k]) => `<tr><th>${n}</th>${drRows.map(r => `<td${r[2] ? ' class="me"' : ''}>${pct(r[1][k])}</td>`).join('')}</tr>`).join('') + '</tbody></table>' : '';
     const course = S2.course ? (() => { const t = document.createElement('div'); t.innerHTML = S2.course; t.querySelectorAll('.tbl').forEach(e => e.remove()); t.querySelectorAll('.lg span').forEach(e => { if (/右端/.test(e.textContent)) e.remove(); }); t.querySelectorAll('.stk .v').forEach(e => { e.innerHTML = e.innerHTML.replace(/<br>.*$/, ''); }); return drTbl ? `<div class="rp-cd"><div>${t.innerHTML}</div>${drTbl}</div>` : t.innerHTML; })() : '';
     const panels2 = [panel('当店と平均・前年の比較', rpCompare(cmpRows)), panel('原価率の推移（原価管理表）', invSvg), panel('曜日別のロス額', lossChart), panel('食べ放題の分類別 1人あたり原価', catChart), panel('コース構成・飲み放題比率', course)].filter(Boolean).slice(0, 4);
     const p2 = concl(costConcl(s)) + `<div class="kpis">${k2}</div>` + (panels2.length ? grid(panels2) : '<div class="rp-none">原価のデータがありません。売上集計表の原価・廃棄額、メニュー別（ABC分析）、原価管理表を読み込むと表示します。</div>');
@@ -1735,10 +1735,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const prem = sum(courses.filter(c => /プレミアム/.test(c.name)), c => c.share);
     return `<div class="lbl ${me ? 'me' : ''}" title="${esc(label)}">${esc(label)}</div><div class="bar100">`
       + segs.map(g => `<span style="width:${(g.share * 100).toFixed(2)}%;background:${g.color}" data-tip="${esc(`${label}|${g.name} ${pct(g.share)}`)}">${g.share >= 0.15 ? pct(g.share) : ''}</span>`).join('')
-      + `</div><div class="v">プ ${pct(prem)}${drink ? `<br><span title="飲み放題比率（ソフトドリンク＋アルコール）">飲 ${pct(drink.rate)}</span>` : ''}</div>`;
+      + `</div><div class="v">プ ${pct(prem)}${drink ? `<br><span title="飲み放題比率（ソフト・ランチソフト・アルコールの合計÷全コース）">飲 ${pct(drink.rate)}</span>` : ''}</div>`;
   }
   function legendHtml(map) {
-    return Object.keys(map).map(n => `<span><i style="background:${map[n]}"></i>${esc(n)}</span>`).join('') + '<span><i style="background:var(--c0)"></i>その他</span><span>右端の「プ」＝プレミアムコース比率、「飲」＝飲み放題比率（ソフトドリンク＋アルコール。コースの人数あたり）</span>';
+    return Object.keys(map).map(n => `<span><i style="background:${map[n]}"></i>${esc(n)}</span>`).join('') + '<span><i style="background:var(--c0)"></i>その他</span><span>右端の「プ」＝プレミアムコース比率、「飲」＝飲み放題比率（ソフト・ランチソフト・アルコールの合計÷全コース）</span>';
   }
   function renderCourseAll() {
     const box = $('courseAllBox'); const map = courseColors();
@@ -1783,8 +1783,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const names = [...Object.keys(map), 'その他'];
     const shareOf = (courses, n) => n === 'その他' ? sum(courses.filter(c => !map[c.name]), c => c.share) : (courses.find(c => c.name === n) || { share: 0 }).share;
     const hasDr = rows.some(r => r[3]);
-    $('courseTbl').innerHTML = `<thead><tr><th></th>${names.map(n => `<th class="n">${esc(n)}</th>`).join('')}${hasDr ? '<th class="n">飲み放題（ソフト）</th><th class="n">飲み放題（アルコール）</th>' : ''}</tr></thead><tbody>`
-      + rows.map(r => `<tr><td>${esc(r[0])}</td>${names.map(n => `<td class="n">${pct(shareOf(r[1], n))}</td>`).join('')}${hasDr ? `<td class="n">${r[3] ? pct(r[3].softRate) : '－'}</td><td class="n">${r[3] ? pct(r[3].alcRate) : '－'}</td>` : ''}</tr>`).join('') + '</tbody>';
+    $('courseTbl').innerHTML = `<thead><tr><th></th>${names.map(n => `<th class="n">${esc(n)}</th>`).join('')}${hasDr ? '<th class="n">飲み放題 ソフト</th><th class="n">ランチソフト</th><th class="n">アルコール</th>' : ''}</tr></thead><tbody>`
+      + rows.map(r => `<tr><td>${esc(r[0])}</td>${names.map(n => `<td class="n">${pct(shareOf(r[1], n))}</td>`).join('')}${hasDr ? ['softRate', 'lunchRate', 'alcRate'].map(k => `<td class="n">${r[3] && r[3][k] != null ? pct(r[3][k]) : '－'}</td>`).join('') : ''}</tr>`).join('') + '</tbody>';
   }
   $('yQty').addEventListener('click', () => { yMetric = 'qty'; renderStore(); });
   $('yG').addEventListener('click', () => { yMetric = 'g'; renderStore(); });
