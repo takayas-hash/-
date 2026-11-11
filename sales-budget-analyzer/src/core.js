@@ -40,7 +40,7 @@ function extractRows(XLSX, ws) {
   if (hr < 0) throw new Error('「店舗コード」「営業日」の見出し行が見つかりません');
   const H = aoa[hr];
   const col = name => H.indexOf(name);
-  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分', area: '営業部', cost: '原価', loss: '廃棄額', buy: '仕入高',
+  const need = { code: '店舗コード', name: '店舗名', date: '営業日', wd: '曜日', dt: '区分', weather: '天気', sales: '純売上高(合計)', cust: '客数(合計)', groups: '組数(合計)', kubun: '店舗区分', budget: '売上月次予算', custBudget: '客数月次予算', disc: '税抜値引(合計)', fc: 'FC区分', area: '営業部', cost: '原価', loss: '廃棄額', buy: '仕入高',
     salesFc: '売上日別予測', custFc: '客数日別予測', staffAct: '社員労働時間(分)', paAct: 'P/A労働時間(分)', staffPlan: '社員労働時間日別予測(分)', paPlan: 'P/A労働時間日別予測(分)' };
   const C = {};
   for (const [k, n] of Object.entries(need)) C[k] = col(n);
@@ -71,7 +71,7 @@ function extractRows(XLSX, ws) {
       sales: num(r[C.sales]), cust: num(r[C.cust]), groups: C.groups >= 0 ? num(r[C.groups]) : 0,
       budget: num(r[C.budget]), custBudget: C.custBudget >= 0 ? num(r[C.custBudget]) : 0,
       disc: C.disc >= 0 ? num(r[C.disc]) : 0,
-      fc: C.fc >= 0 ? String(r[C.fc] || '') : '',
+      fc: C.fc >= 0 ? String(r[C.fc] || '') : '', kubun: C.kubun >= 0 ? String(r[C.kubun] || '').trim() : '',
       area: C.area >= 0 ? String(r[C.area] || '').trim() : '',
       cost: C.cost >= 0 ? num(r[C.cost]) : 0,
       loss: C.loss >= 0 ? num(r[C.loss]) : 0,
@@ -91,6 +91,57 @@ function headerIndex(aoa, must, lim) {
   for (let i = 0; i < Math.min(aoa.length, lim || 10); i++) { const r = aoa[i]; if (r && must.every(m => r.includes(m))) return i; }
   return -1;
 }
+/* ===== 業績速報（日報）：日別・着地見込・累計。店ごとと、直営既存店・直営全店・FC全店・全体の合計 ===== */
+/**
+ * cur・prev：売上集計表の行（当年・前年）、stores：analyze の店（std・fc つき）、day：日報の日
+ * 日別の前年は同じ曜日（364日前）、累計・着地の前年は同じ日付の範囲（ほかの分析と同じ）
+ */
+function perfReport(cur, prev, stores, day) {
+  const t = +day, y = day.getFullYear(), m = day.getMonth(), N = new Date(y, m + 1, 0).getDate();
+  const dPrev = +new Date(y, m, day.getDate() - 364);
+  const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const H = v => v / 60;
+  const base = s => {
+    const rs = cur.filter(r => r.code === s.code && r.date.getMonth() === m), ps = prev.filter(r => r.code === s.code);
+    const d = rs.find(r => +r.date === t) || null, pd = prev.find(r => r.code === s.code && +r.date === dPrev) || null;
+    const cum = rs.filter(r => +r.date <= t), pcum = ps.filter(r => r.date.getDate() <= day.getDate());
+    const sd = s.std && s.std.days ? s.std.days[day.getDate() - 1] : null;
+    const stdDays = s.std && s.std.days ? s.std.days.filter(x => x.date.getDate() <= day.getDate() && x.done && x.stdA) : [];
+    const S = (a, k) => sum(a, r => r[k] || 0);
+    const r0 = { code: s.code, name: s.name, fc: /^FC/i.test(s.fcKind || ''), kubun: (rs[0] || {}).kubun || '' };
+    // 日別
+    // 〜Base：予測・計画・前年・標準のある店の分だけ（合計の行で、ない店が混ざって比がおかしくならないように）
+    r0.day = d ? { budget: d.budget, salesFc: d.salesFc, sales: d.sales, cust: d.cust, custFc: d.custFc, groups: d.groups, disc: d.disc, pSales: pd ? pd.sales : null, pCust: pd ? pd.cust : null,
+      plan: d.minPlan ? H(d.minPlan) : 0, act: d.minAct ? H(d.minAct) : 0, std: sd && sd.stdA ? sd.stdA : 0, loss: d.loss,
+      salesFcBase: d.salesFc ? d.sales : 0, custFcBase: d.custFc ? d.cust : 0, actPlanBase: d.minPlan ? H(d.minAct || 0) : 0, actStdBase: sd && sd.stdA ? H(d.minAct || 0) : 0,
+      salesPBase: pd ? d.sales : 0, custPBase: pd ? d.cust : 0 } : null;
+    // 累計（月初〜その日）
+    r0.cum = { budget: S(cum, 'budget'), salesFc: S(cum, 'salesFc'), sales: S(cum, 'sales'), cust: S(cum, 'cust'), custFc: S(cum, 'custFc'), disc: S(cum, 'disc'), loss: S(cum, 'loss'),
+      pSales: pcum.length ? S(pcum, 'sales') : null, pCust: pcum.length ? S(pcum, 'cust') : null, salesPBase: pcum.length ? S(cum, 'sales') : 0, custPBase: pcum.length ? S(cum, 'cust') : 0,
+      custFcBase: sum(cum.filter(r => r.custFc), r => r.cust), custFcSum: S(cum.filter(r => r.custFc), 'custFc'),
+      plan: H(S(cum, 'minPlan')), act: sum(stdDays, x => x.actH || 0), std: sum(stdDays, x => x.stdA || 0), planDone: sum(stdDays, x => x.planH || 0),
+      wdAct: sum(stdDays.filter(x => x.type === 1), x => x.actH || 0), wdStd: sum(stdDays.filter(x => x.type === 1), x => x.stdA || 0),
+      weAct: sum(stdDays.filter(x => x.type === 2), x => x.actH || 0), weStd: sum(stdDays.filter(x => x.type === 2), x => x.stdA || 0),
+      budgetStd: s.std ? s.std.budgetRate : null };
+    // 着地見込（月）：着地＝その日までの実績＋残りの日の見込み（ほかの画面と同じ着地見込み）。月の予測・予算・前年は月の合計
+    const fcRest = s.fc ? sum(s.fc.days.filter(x => x.date.getDate() > day.getDate()), x => x.fc) : 0;
+    const custRest = s.fc ? sum(s.fc.days.filter(x => x.date.getDate() > day.getDate()), x => x.custFc || 0) : 0;
+    r0.land = { budget: S(rs, 'budget'), salesFc: S(rs, 'salesFc'), custFc: S(rs, 'custFc'), landing: r0.cum.sales + fcRest, landCust: r0.cum.cust + custRest,
+      pSales: ps.length ? S(ps, 'sales') : null, pCust: ps.length ? S(ps, 'cust') : null, cumBudget: r0.cum.budget, cumSales: r0.cum.sales, cumP: r0.cum.pSales, cust: r0.cum.cust,
+      landPBase: ps.length ? r0.cum.sales + fcRest : 0, custPBase: ps.length ? r0.cum.cust + custRest : 0, cumPBase: pcum.length ? r0.cum.sales : 0,
+      landFcBase: S(rs, 'salesFc') ? r0.cum.sales + fcRest : 0, custFcBase: S(rs, 'custFc') ? r0.cum.cust + custRest : 0 };
+    return r0;
+  };
+  const rows = stores.map(base).filter(r => r.day || r.cum.sales);
+  const add = (list, k) => { const o = {}; list.forEach(r => { const x = r[k]; if (!x) return; Object.keys(x).forEach(f => { if (typeof x[f] === 'number') o[f] = (o[f] || 0) + x[f]; else if (x[f] == null && !(f in o)) o[f] = null; }); }); return o; };
+  const group = (name, list) => list.length ? { name, total: true, n: list.length, day: add(list, 'day'), cum: { ...add(list, 'cum'), budgetStd: null }, land: add(list, 'land') } : null;
+  const isDir = r => !r.fc, kizon = r => /既存/.test(r.kubun);
+  const groups = [group('直営既存店', rows.filter(r => isDir(r) && kizon(r))), group('直営全店', rows.filter(isDir)), group('FC全店', rows.filter(r => r.fc)), group('エリア全体', rows)].filter(Boolean);
+  // 直営既存店と直営全店が同じなら1つに
+  if (groups[0] && groups[1] && groups[0].n === groups[1].n && groups[0].name === '直営既存店') groups.splice(0, 1);
+  return { day, days: N, rows: [...rows.filter(isDir), ...rows.filter(r => r.fc)], groups };
+}
+
 /* ===== NPS（お客様アンケート）：業態ごとのシート。見出し行に code・NPS・推奨・批判。後半は「先月差」 ===== */
 // QSCs：Q平均・S平均・C平均・sp平均の4つ。[キー, 表示, 意味, 列の見出し, 内訳の列（Q_1・Q1_1、S1_1・S2_1、C_1、sp_1・s_8）]
 const NPS_QSC = [['Q', 'Q', '品質', 'Q平均', /^Q\d*_\d+$/], ['S', 'S', 'サービス', 'S平均', /^S\d_\d+$/], ['C', 'C', 'クレンリネス', 'C平均', /^C_\d+$/], ['s', 's', 'スピード', 'sp平均', /^sp?_\d+$/]];
@@ -1943,4 +1994,4 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
