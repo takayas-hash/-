@@ -316,7 +316,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <button type="button" role="tab" id="tabLabor" aria-selected="false">人（労働時間・雑給）</button>
     <button type="button" role="tab" id="tabTenure" aria-selected="false">採用・定着</button>
     <button type="button" role="tab" id="tabCompany" aria-selected="false">FC企業別</button>
-    <button type="button" role="tab" id="tabPerf" aria-selected="false">業績速報</button>
+    <button type="button" role="tab" id="tabPerf" aria-selected="false" hidden>業績速報</button>
   </div>
 
   <div class="note" id="planBanner" hidden></div>
@@ -3079,6 +3079,8 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
   function render() {
     const a = R.area;
     $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor'); $('tabTenure').setAttribute('aria-selected', tab === 'tenure'); $('tabCompany').setAttribute('aria-selected', tab === 'company'); $('tabPerf').setAttribute('aria-selected', tab === 'perf');
+    $('tabPerf').hidden = !perfOn();
+    if (tab === 'perf' && !perfOn()) { tab = 'sales'; document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; }); $('tabSales').setAttribute('aria-selected', true); $('tabPerf').setAttribute('aria-selected', false); }
     $('storeCard').hidden = tab === 'company' || tab === 'perf';
     document.querySelector('#storeTbl').closest('section').hidden = tab === 'perf';
     document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; });
@@ -3696,6 +3698,9 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
   addEventListener('afterprint', () => document.body.classList.remove('printing'));
 
   /* ---------- 業績速報（日報）：日別・着地見込・累計 ---------- */
+  // 業績速報を出すエリア（売上集計表の営業部）。ウェブアプリはスクリプト プロパティ PERF_AREAS で変えられる
+  let PERF_AREAS = ['髙谷エリア'];
+  const perfOn = () => !!(last && last[0] && listAreas(last[0]).some(a => PERF_AREAS.includes(a)));
   let PR = null, perfDayK = null; // 全店（直営・FC）での分析。対象の切り替えに関係なく全店で出す
   function perfR() {
     if (PR) return PR;
@@ -4505,7 +4510,7 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
     try {
       setStatus('共有ドライブを確認しています…');
       const cfg = await call('getConfig');
-      stdMem = cfg.stdSettings || {}; actMem = cfg.actions || {};
+      stdMem = cfg.stdSettings || {}; actMem = cfg.actions || {}; if (cfg.perfAreas && cfg.perfAreas.length) PERF_AREAS = cfg.perfAreas;
       if (!cfg.areas.length) { setStatus(cfg.error || '見られるエリアのフォルダがありません。フォルダの共有設定を確認してください。', true); return; }
       const sel = $('driveArea');
       DRIVE_AREAS = cfg.areas;
@@ -4529,7 +4534,7 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '5bfdb4d'; // 版（build.py が書き込む）
+  const APP_VERSION = 'e4180f9'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない

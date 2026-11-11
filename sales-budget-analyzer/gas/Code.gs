@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
-const APP_VERSION = '5bfdb4d';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = 'e4180f9';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -90,7 +90,7 @@ function getConfig() {
     areas.push({ id: a.id, name: a.name, block: a.block || '', mine: mine });
   });
   const common = tree.common && canOpen_(tree.common) ? tree.common : null;
-  return { areas: areas, common: common, user: user, stdSettings: getStdSettings_(), actions: getActions_(), version: APP_VERSION };
+  return { areas: areas, common: common, user: user, stdSettings: getStdSettings_(), actions: getActions_(), version: APP_VERSION, perfAreas: perfAreas_() };
 }
 
 /** エリアのフォルダ（複数可）と共通フォルダのファイル一覧。新しい順 */
@@ -245,6 +245,9 @@ function checkSetup() {
   Logger.log('共通のファイル：' + common.length + '件' + (common.length ? '（' + common.map(f => f.name).join('、') + '）' : ''));
   Logger.log('標準比の店舗設定：' + Object.keys(cfg.stdSettings).length + '店');
 }
+
+/** 業績速報タブを出すエリア（売上集計表の営業部の名前）。スクリプト プロパティ PERF_AREAS に「髙谷エリア,名越エリア」のように書けば増やせる */
+function perfAreas_() { const v = PropertiesService.getScriptProperties().getProperty('PERF_AREAS'); return v ? v.split(/[,、\s]+/).filter(Boolean) : ['髙谷エリア']; }
 
 /* ===== 業績速報を Google Chat へ：PDFをドライブに保存し、Chat には要約とリンクを送る ===== */
 // Webhook のURLは鍵と同じ扱い。コードには書かず、スクリプト プロパティ CHAT_WEBHOOK_URL に入れる
