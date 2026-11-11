@@ -137,9 +137,24 @@ function perfReport(cur, prev, stores, day) {
   const group = (name, list) => list.length ? { name, total: true, n: list.length, day: add(list, 'day'), cum: { ...add(list, 'cum'), budgetStd: null }, land: add(list, 'land') } : null;
   const isDir = r => !r.fc, kizon = r => /既存/.test(r.kubun);
   const groups = [group('直営既存店', rows.filter(r => isDir(r) && kizon(r))), group('直営全店', rows.filter(isDir)), group('FC全店', rows.filter(r => r.fc)), group('エリア全体', rows)].filter(Boolean);
-  // 直営既存店と直営全店が同じなら1つに
-  if (groups[0] && groups[1] && groups[0].n === groups[1].n && groups[0].name === '直営既存店') groups.splice(0, 1);
+  // 同じ店の集まりになる合計は1つに（直営既存店＝直営全店、直営だけのときのエリア全体＝直営全店）
+  for (let i = groups.length - 1; i > 0; i--) if (groups[i].n === groups[i - 1].n) groups.splice(groups[i].name === 'エリア全体' ? i : i - 1, 1);
   return { day, days: N, rows: [...rows.filter(isDir), ...rows.filter(r => r.fc)], groups };
+}
+
+/** 業績速報の店ごとのページ：月初〜月末の日別（まだ来ていない日は予算と店長の予測だけ） */
+function perfStoreDays(cur, prev, s, day) {
+  const y = day.getFullYear(), m = day.getMonth(), N = new Date(y, m + 1, 0).getDate(), out = [];
+  for (let n = 1; n <= N; n++) {
+    const dt = new Date(y, m, n), r = cur.find(x => x.code === s.code && +x.date === +dt) || null;
+    const pd = prev.find(x => x.code === s.code && +x.date === +new Date(y, m, n - 364)) || null;
+    const sd = s.std && s.std.days ? s.std.days[n - 1] : null, done = n <= day.getDate() && r && r.sales > 0;
+    out.push({ date: dt, wd: WEEKDAYS[(dt.getDay() + 6) % 7], dt: r ? r.dt : '', done, future: n > day.getDate(),
+      budget: r ? r.budget : 0, salesFc: r ? r.salesFc : 0, sales: done ? r.sales : null, cust: done ? r.cust : null, custFc: r ? r.custFc : 0, groups: done ? r.groups : null, disc: done ? r.disc : null,
+      pSales: pd ? pd.sales : null, pCust: pd ? pd.cust : null,
+      plan: r && r.minPlan ? r.minPlan / 60 : null, act: done && r.minAct ? r.minAct / 60 : null, std: done && sd && sd.stdA ? sd.stdA : null, loss: done ? r.loss : null });
+  }
+  return out;
 }
 
 /* ===== NPS（お客様アンケート）：業態ごとのシート。見出し行に code・NPS・推奨・批判。後半は「先月差」 ===== */
@@ -1994,4 +2009,4 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport, extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };

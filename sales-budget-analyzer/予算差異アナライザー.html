@@ -232,6 +232,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .pks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; margin-bottom: 3mm; }
 .pk { border: 1px solid #b9b8b1; border-left: 2mm solid #23407a; border-radius: 1.5mm; padding: 1.5mm 3mm; } .pk div { font-size: 10pt; color: #5d6068; } .pk b { display: block; font-size: 20pt; line-height: 1.15; } .pk span { font-size: 10pt; color: #5d6068; }
 .pk.r { border-left-color: #d32f2f; } .pk.r b { color: #b42323; } .pk.y { border-left-color: #e0b400; }
+.perf2 thead th.g4 { background: #8a4b16; } .perf2 td.lr { color: #b42323; font-weight: 800; } .perf2 td.ly { color: #b8650a; font-weight: 700; }
+.pks.six { grid-template-columns: repeat(6, 1fr); } .pks.six .pk b { font-size: 17pt; }
+.perf2.days { font-size: 9.5pt; } .perf2.days th, .perf2.days td { padding: .55mm 1.4mm; } .perf2.days thead th { font-size: 8.5pt; }
+.perf2.days tr.fut td, .perf2.days tr.fut th { color: #8a8984; font-weight: 400; background: #fff; } .perf2.days tr.today th, .perf2.days tr.today td { border-top: 2px solid #1d1f24; border-bottom: 2px solid #1d1f24; }
+.perf2.days tr.sat th { color: #1d5fae; } .perf2.days tr.sun th { color: #b42323; }
 .pnote { font-size: 9pt; color: #5d6068; margin-top: 2mm; }
 .cs-g { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, .85fr) minmax(0, 1.15fr); gap: 3mm 5mm; }
 .cs-l { display: flex; flex-direction: column; gap: 2.5mm; min-height: 0; }
@@ -352,7 +357,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   <section class="card" id="perfCard" data-tab="perf" hidden>
     <div class="row">
       <div><div class="label">業績速報（日報）</div><h2 id="perfTitle"></h2><div class="small muted">日別の前年は同じ曜日（364日前）、累計・着地の前年は同じ日付の範囲。労働時間は社員＋P/A、標準は標準比マスタから。色：予算比などが90%未満＝赤、100%未満＝黄</div></div>
-      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrint">印刷・PDF（見やすい版 2ページ）</button><button type="button" class="btn ghost" id="perfPrintFull">詳細（3ページ）</button></div>
+      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrint">印刷・PDF（見やすい版）</button><button type="button" class="btn ghost" id="perfPrintStore">店舗ごと（1店1ページ）</button><button type="button" class="btn ghost" id="perfPrintFull">詳細（3ページ）</button></div>
     </div>
     <h3>日別</h3><div class="tbl"><table class="perf" id="perfDayTbl"></table></div>
     <h3 style="margin-top:14px">着地見込 <span class="small muted" style="font-weight:400">着地見込＝今日までの実績＋残りの日の見込み（店長の予測。ない日は予算×ここまでの曜日区分別の予算比）</span></h3><div class="tbl"><table class="perf" id="perfLandTbl"></table></div>
@@ -674,9 +679,24 @@ function perfReport(cur, prev, stores, day) {
   const group = (name, list) => list.length ? { name, total: true, n: list.length, day: add(list, 'day'), cum: { ...add(list, 'cum'), budgetStd: null }, land: add(list, 'land') } : null;
   const isDir = r => !r.fc, kizon = r => /既存/.test(r.kubun);
   const groups = [group('直営既存店', rows.filter(r => isDir(r) && kizon(r))), group('直営全店', rows.filter(isDir)), group('FC全店', rows.filter(r => r.fc)), group('エリア全体', rows)].filter(Boolean);
-  // 直営既存店と直営全店が同じなら1つに
-  if (groups[0] && groups[1] && groups[0].n === groups[1].n && groups[0].name === '直営既存店') groups.splice(0, 1);
+  // 同じ店の集まりになる合計は1つに（直営既存店＝直営全店、直営だけのときのエリア全体＝直営全店）
+  for (let i = groups.length - 1; i > 0; i--) if (groups[i].n === groups[i - 1].n) groups.splice(groups[i].name === 'エリア全体' ? i : i - 1, 1);
   return { day, days: N, rows: [...rows.filter(isDir), ...rows.filter(r => r.fc)], groups };
+}
+
+/** 業績速報の店ごとのページ：月初〜月末の日別（まだ来ていない日は予算と店長の予測だけ） */
+function perfStoreDays(cur, prev, s, day) {
+  const y = day.getFullYear(), m = day.getMonth(), N = new Date(y, m + 1, 0).getDate(), out = [];
+  for (let n = 1; n <= N; n++) {
+    const dt = new Date(y, m, n), r = cur.find(x => x.code === s.code && +x.date === +dt) || null;
+    const pd = prev.find(x => x.code === s.code && +x.date === +new Date(y, m, n - 364)) || null;
+    const sd = s.std && s.std.days ? s.std.days[n - 1] : null, done = n <= day.getDate() && r && r.sales > 0;
+    out.push({ date: dt, wd: WEEKDAYS[(dt.getDay() + 6) % 7], dt: r ? r.dt : '', done, future: n > day.getDate(),
+      budget: r ? r.budget : 0, salesFc: r ? r.salesFc : 0, sales: done ? r.sales : null, cust: done ? r.cust : null, custFc: r ? r.custFc : 0, groups: done ? r.groups : null, disc: done ? r.disc : null,
+      pSales: pd ? pd.sales : null, pCust: pd ? pd.cust : null,
+      plan: r && r.minPlan ? r.minPlan / 60 : null, act: done && r.minAct ? r.minAct / 60 : null, std: done && sd && sd.stdA ? sd.stdA : null, loss: done ? r.loss : null });
+  }
+  return out;
 }
 
 /* ===== NPS（お客様アンケート）：業態ごとのシート。見出し行に code・NPS・推奨・批判。後半は「先月差」 ===== */
@@ -2531,7 +2551,7 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport, extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
 
 </script>
 <script>
@@ -3724,12 +3744,14 @@ if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDai
     const days = [...new Set(rows.filter(r => r.sales > 0).map(r => +r.date))].sort((a, b) => b - a);
     if (!days.length) return null;
     if (!days.includes(perfDayK)) perfDayK = days[0];
-    const P = perfReport(rows, last[1] || [], X.stores, new Date(perfDayK));
+    // 業績速報は直営だけ（直営の店に送る資料のため）
+    const P = perfReport(rows, last[1] || [], X.stores.filter(s => !/^FC/i.test(s.fcKind || '')), new Date(perfDayK));
+    P.X = X;
     return { P, days };
   }
   const perfDayTxt = d => `${d.getMonth() + 1}月${d.getDate()}日（${WEEKDAYS[(d.getDay() + 6) % 7]}）`;
   function renderPerf() {
-    $('areaTitle').textContent = '業績速報'; $('kpis').innerHTML = ''; setCmt('areaComment', '店舗ごとの単日・累計・着地見込みの業績です。日付を選んで「印刷・PDF保存」でエリアに送る資料（A4横3ページ）になります。直営・FCの全店を出します（上の「直営のみ／FCのみ」には関係しません）。');
+    $('areaTitle').textContent = '業績速報'; $('kpis').innerHTML = ''; setCmt('areaComment', '直営の店ごとの単日・累計・着地見込みの業績です。日付を選んで「印刷・PDF」ボタンでエリアに送る資料になります（見やすい版1ページ・店舗ごと1店1ページ・詳細3ページ）。上の「直営のみ／FCのみ」には関係しません。');
     if (R.plan) { $('perfTitle').textContent = '予測月は業績速報を出せません'; ['perfDayTbl', 'perfLandTbl', 'perfCumTbl'].forEach(id => { $(id).innerHTML = ''; }); return; }
     const D = perfData(); if (!D) return;
     $('perfDay').innerHTML = D.days.map(k => `<option value="${k}"${k === perfDayK ? ' selected' : ''}>${perfDayTxt(new Date(k))}</option>`).join('');
@@ -3786,25 +3808,50 @@ if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDai
       return `<tr class="${cls || ''}"><th>${esc(r.name)}</th>`
         + `<td class="n">${x.sales != null ? m1(x.sales) : '－'}</td>${pc(x.budget ? x.sales / x.budget : null)}${pc(x.pSales ? x.salesPBase / x.pSales : null)}<td class="n">${x.cust != null ? Math.round(x.cust).toLocaleString('ja-JP') : '－'}</td><td class="n">${x.cust ? Math.round(x.sales / x.cust).toLocaleString('ja-JP') : '－'}</td>${sp(dStd)}`
         + `<td class="n sep">${m1(c.sales)}</td>${pc(c.budget ? c.sales / c.budget : null)}${pc(c.pSales ? c.salesPBase / c.pSales : null)}${pc(c.pCust ? c.custPBase / c.pCust : null)}${sp(cStd, c.budgetStd || 1.03)}<td class="n${c.sales - c.budget < 0 ? ' neg' : ''}">${c.budget ? (c.sales - c.budget < 0 ? '▲' : '+') + m1(Math.abs(c.sales - c.budget)) : '－'}</td>`
-        + `<td class="n sep">${m1(l.landing)}</td>${pc(l.budget ? l.landing / l.budget : null)}</tr>`; };
-    const head = `<thead><tr><th rowspan="2" class="stc">店舗</th><th colspan="6" class="g1">${perfDayTxt(d)}（日別）</th><th colspan="6" class="g2 sep">累計（${d.getMonth() + 1}/1〜${d.getMonth() + 1}/${d.getDate()}）</th><th colspan="2" class="g3 sep">着地見込（月）</th></tr>`
-      + `<tr><th>売上<small>万円</small></th><th>予算比</th><th>売上<br>前年比</th><th>客数</th><th>客単価<small>円</small></th><th>標準比</th><th class="sep">売上<small>万円</small></th><th>予算比</th><th>売上<br>前年比</th><th>客数<br>前年比</th><th>標準比</th><th>予算差<small>万円</small></th><th class="sep">着地<small>万円</small></th><th>予算比</th></tr></thead>`;
+        + `<td class="n sep">${m1(l.landing)}</td>${pc(l.budget ? l.landing / l.budget : null)}`
+        + `<td class="n sep">${x.loss != null ? Math.round(x.loss).toLocaleString('ja-JP') : '－'}</td>${lr(x.sales ? x.loss / x.sales : null)}${lr(c.sales ? c.loss / c.sales : null)}</tr>`; };
+    const lr = v => v == null || !isFinite(v) ? '<td class="n">－</td>' : `<td class="n${v >= 0.01 ? ' lr' : v >= 0.005 ? ' ly' : ''}">${(v * 100).toFixed(2)}%</td>`;
+    const head = `<thead><tr><th rowspan="2" class="stc">店舗</th><th colspan="6" class="g1">${perfDayTxt(d)}（日別）</th><th colspan="6" class="g2 sep">累計（${d.getMonth() + 1}/1〜${d.getMonth() + 1}/${d.getDate()}）</th><th colspan="2" class="g3 sep">着地見込（月）</th><th colspan="3" class="g4 sep">ロス</th></tr>`
+      + `<tr><th>売上<small>万円</small></th><th>予算比</th><th>売上<br>前年比</th><th>客数</th><th>客単価<small>円</small></th><th>標準比</th><th class="sep">売上<small>万円</small></th><th>予算比</th><th>売上<br>前年比</th><th>客数<br>前年比</th><th>標準比</th><th>予算差<small>万円</small></th><th class="sep">着地<small>万円</small></th><th>予算比</th><th class="sep">日別<small>円</small></th><th>日別<br>ロス率</th><th>累計<br>ロス率</th></tr></thead>`;
     const g = n => P.groups.find(x => x.name === n);
     const kpi = r => { if (!r) return ''; const x = r.day || {}, c = r.cum || {}, l = r.land || {}; const box = (lb, v, sub, cl) => `<div class="pk${cl || ''}"><div>${lb}</div><b>${v}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
       return `<div class="pks">${box(`${r.name}・日別 予算比`, x.budget ? (x.sales / x.budget * 100).toFixed(1) + '%' : '－', `売上 ${m1(x.sales)}万円`, pf.c(x.budget ? x.sales / x.budget : null))}${box('累計 予算比', c.budget ? (c.sales / c.budget * 100).toFixed(1) + '%' : '－', `売上 ${m1(c.sales)}万円`, pf.c(c.budget ? c.sales / c.budget : null))}${box('着地見込 予算比', l.budget ? (l.landing / l.budget * 100).toFixed(1) + '%' : '－', `着地 ${m1(l.landing)}万円`, pf.c(l.budget ? l.landing / l.budget : null))}${box('累計 標準比', c.std ? (c.act / c.std * 100).toFixed(1) + '%' : '－', c.budgetStd ? `予算標準比 ${(c.budgetStd * 100).toFixed(1)}%` : '')}</div>`; };
     const page = (n, N, title, rows, tot, extra) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">業績速報</div><h1>${esc(area)}　${perfDayTxt(d)}</h1></div><div style="text-align:right"><h2>${title}</h2></div></div>
       <div class="rp-body"><div class="rp-in">${kpi(tot)}<table class="perf2">${head}<tbody>${rows.map(r => row(r)).join('')}${tot ? row(tot, 'tot') : ''}${extra ? row(extra, 'tot all') : ''}</tbody></table>
-      <div class="pnote">色：予算比・前年比が90%未満＝赤、100%未満＝黄。標準比は予算標準比（なければ103%）を超えると赤字。日別の前年は同じ曜日、累計は同じ日付の範囲。着地見込＝今日までの実績＋残りの日の見込み。</div></div></div>
+      <div class="pnote">色：予算比・前年比が90%未満＝赤、100%未満＝黄。標準比は予算標準比（なければ103%）を超えると赤字。ロス率は1%以上＝赤字、0.5%以上＝橙。日別の前年は同じ曜日、累計は同じ日付の範囲。着地見込＝今日までの実績＋残りの日の見込み。</div></div></div>
       <div class="rp-foot"><span>${made}</span><span>${n} / ${N}</span></div></section>`;
-    const dir = P.rows.filter(r => !r.fc), fc = P.rows.filter(r => r.fc);
-    const pages = [];
-    if (dir.length) pages.push(['直営', dir, g('直営全店'), fc.length ? null : g('エリア全体')]);
-    if (fc.length) pages.push(['FC', fc, g('FC全店'), g('エリア全体')]);
+    const dir = P.rows.filter(r => !r.fc), ex = g('直営既存店');
+    const pages = dir.length ? [['直営', dir, g('直営全店') || P.groups[P.groups.length - 1], ex && ex !== g('直営全店') ? ex : null]] : [];
     return pages.map((x, i) => page(i + 1, pages.length, x[0], x[1], x[2], x[3])).join('');
+  }
+  /** 店舗ごと：1店1ページ。上に数字のカード、下に月初〜月末の日別（まだ来ていない日は予算・予測だけ） */
+  function perfStorePages(P, d, area) {
+    const today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
+    const X = P.X, cur = last[0], prev = last[1] || [];
+    const n0 = v => v == null || !isFinite(v) ? '－' : Math.round(v).toLocaleString('ja-JP');
+    const pc = v => v == null || !isFinite(v) ? '<td class="n">－</td>' : `<td class="n b${pf.c(v)}">${(v * 100).toFixed(1)}%</td>`;
+    const lr = v => v == null || !isFinite(v) ? '<td class="n">－</td>' : `<td class="n${v >= 0.01 ? ' lr' : v >= 0.005 ? ' ly' : ''}">${(v * 100).toFixed(2)}%</td>`;
+    return P.rows.map((r, i) => {
+      const s = X.stores.find(x => x.code === r.code); if (!s) return '';
+      const ds = perfStoreDays(cur, prev, s, d), c = r.cum, l = r.land, x = r.day || {};
+      const box = (lb, v, sub, cl) => `<div class="pk${cl || ''}"><div>${lb}</div><b>${v}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
+      const rt = (a, b) => b ? a / b : null, f1 = v => v == null ? '－' : (v * 100).toFixed(1) + '%';
+      const kp = `<div class="pks six">${box('日別 予算比', f1(rt(x.sales, x.budget)), `売上 ${n0(x.sales)}円`, pf.c(rt(x.sales, x.budget)))}${box('累計 予算比', f1(rt(c.sales, c.budget)), `売上 ${(c.sales / 10000).toFixed(1)}万円`, pf.c(rt(c.sales, c.budget)))}${box('累計 売上前年比', f1(c.pSales ? rt(c.salesPBase, c.pSales) : null), c.pCust ? `客数前年比 ${f1(rt(c.custPBase, c.pCust))}` : '', pf.c(c.pSales ? rt(c.salesPBase, c.pSales) : null))}${box('着地見込 予算比', f1(rt(l.landing, l.budget)), `着地 ${(l.landing / 10000).toFixed(1)}万円`, pf.c(rt(l.landing, l.budget)))}${box('累計 標準比', f1(c.std ? c.act / c.std : null), c.budgetStd ? `予算標準比 ${f1(c.budgetStd)}` : '')}${box('累計 ロス率', c.sales ? (c.loss / c.sales * 100).toFixed(2) + '%' : '－', `ロス ${n0(c.loss)}円`)}</div>`;
+      const head = `<thead><tr><th class="stc">日付</th><th>売上予算</th><th>売上予測</th><th>売上</th><th>予算比</th><th>売上前年<small>同曜日</small></th><th>売上<br>前年比</th><th>客数</th><th>客数予測</th><th>客数<br>前年比</th><th>客単価</th><th>値引率</th><th>計画<small>h</small></th><th>実績<small>h</small></th><th>標準<small>h</small></th><th>標準比</th><th>ロス<small>円</small></th><th>ロス率</th></tr></thead>`;
+      const tr = e => { const cls = e.future ? 'fut' : (+e.date === +d ? 'today' : '') + (e.wd === '土' ? ' sat' : e.wd === '日' ? ' sun' : '');
+        return `<tr class="${cls}"><th>${e.date.getMonth() + 1}/${e.date.getDate()}（${e.wd}）</th><td class="n">${n0(e.budget)}</td><td class="n">${e.salesFc ? n0(e.salesFc) : '－'}</td><td class="n b">${e.done ? n0(e.sales) : ''}</td>${e.done ? pc(rt(e.sales, e.budget)) : '<td></td>'}<td class="n">${n0(e.pSales)}</td>${e.done && e.pSales ? pc(rt(e.sales, e.pSales)) : '<td class="n">' + (e.done ? '－' : '') + '</td>'}<td class="n">${e.done ? n0(e.cust) : ''}</td><td class="n">${e.custFc ? n0(e.custFc) : '－'}</td>${e.done && e.pCust ? pc(rt(e.cust, e.pCust)) : '<td class="n">' + (e.done ? '－' : '') + '</td>'}<td class="n">${e.done && e.cust ? n0(e.sales / e.cust) : ''}</td><td class="n">${e.done ? f1(rt(e.disc, e.sales + e.disc)) : ''}</td>`
+          + `<td class="n">${e.plan ? n0(e.plan) : '－'}</td><td class="n">${e.act ? n0(e.act) : ''}</td><td class="n">${e.std ? n0(e.std) : ''}</td><td class="n${e.std && e.act / e.std > (c.budgetStd || 1.03) ? ' hi' : ''}">${e.std && e.act ? f1(e.act / e.std) : ''}</td><td class="n">${e.done ? n0(e.loss) : ''}</td>${e.done ? lr(rt(e.loss, e.sales)) : '<td></td>'}</tr>`; };
+      const tot = `<tr class="tot"><th>累計</th><td class="n">${n0(c.budget)}</td><td class="n">${c.salesFc ? n0(c.salesFc) : '－'}</td><td class="n b">${n0(c.sales)}</td>${pc(rt(c.sales, c.budget))}<td class="n">${n0(c.pSales)}</td>${pc(c.pSales ? rt(c.salesPBase, c.pSales) : null)}<td class="n">${n0(c.cust)}</td><td class="n">${c.custFcSum ? n0(c.custFcSum) : '－'}</td>${pc(c.pCust ? rt(c.custPBase, c.pCust) : null)}<td class="n">${c.cust ? n0(c.sales / c.cust) : '－'}</td><td class="n">${f1(rt(c.disc, c.sales + c.disc))}</td><td class="n">${c.planDone ? n0(c.planDone) : '－'}</td><td class="n">${n0(c.act)}</td><td class="n">${n0(c.std)}</td><td class="n${c.std && c.act / c.std > (c.budgetStd || 1.03) ? ' hi' : ''}">${c.std ? f1(c.act / c.std) : '－'}</td><td class="n">${n0(c.loss)}</td>${lr(rt(c.loss, c.sales))}</tr>`;
+      return `<section class="rp-page"><div class="rp-head"><div><div class="muted">業績速報　${esc(area)}</div><h1>${esc(r.name)}</h1></div><div style="text-align:right"><h2>${perfDayTxt(d)}時点</h2></div></div>
+        <div class="rp-body"><div class="rp-in">${kp}<table class="perf2 days">${head}<tbody>${ds.map(tr).join('')}${tot}</tbody></table>
+        <div class="pnote">太字の行＝${perfDayTxt(d)}。薄い行＝まだ来ていない日（予算・店長の予測・計画だけ）。前年は同じ曜日（364日前）。色は見やすい版と同じ。</div></div></div>
+        <div class="rp-foot"><span>${made}</span><span>${i + 1} / ${P.rows.length}</span></div></section>`;
+    }).join('');
   }
   function openPerfReport(full) {
     const D = perfData(); if (!D) return;
     const d = new Date(perfDayK), area = listAreas(last[0]).join('・') || 'エリア';
+    if (full === 'store') { $('rep').innerHTML = perfStorePages(D.P, d, area); $('repTitle').textContent = `業績速報：${perfDayTxt(d)}（店舗ごと ${D.P.rows.length}ページ）`; $('repChat').hidden = !GAS; repPerf = { P: D.P, d, area }; $('repWrap').hidden = false; document.body.style.overflow = 'hidden'; requestAnimationFrame(fitPages); return; }
     if (full) return openPerfFull(D);
     $('rep').innerHTML = perfSummaryPages(D.P, d, area);
     $('repTitle').textContent = `業績速報：${perfDayTxt(d)}（見やすい版）`;
@@ -3814,6 +3861,7 @@ if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDai
   }
   $('perfPrint').addEventListener('click', () => openPerfReport(false));
   $('perfPrintFull').addEventListener('click', () => openPerfReport(true));
+  $('perfPrintStore').addEventListener('click', () => openPerfReport('store'));
   function openPerfFull(D) {
     const T = perfTables(D.P), d = new Date(perfDayK), today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
     const page = (n, title, tbl) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">業績速報</div><h1>${esc(listAreas(last[0]).join('・') || 'エリア')}　${perfDayTxt(d)}</h1></div><div style="text-align:right"><h2>${title}</h2></div></div><div class="rp-body"><div class="rp-in"><div class="tbl"><table class="perf">${tbl}</table></div></div></div><div class="rp-foot"><span>${made}　色：90%未満＝赤、100%未満＝黄</span><span>${n} / 3</span></div></section>`;
@@ -4479,7 +4527,7 @@ if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDai
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'fb1c43f'; // 版（build.py が書き込む）
+  const APP_VERSION = '10dc91e'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
