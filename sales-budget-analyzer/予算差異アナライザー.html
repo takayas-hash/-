@@ -201,6 +201,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .cs-sec li::before { content: ''; position: absolute; left: 0; top: .55em; width: 2mm; height: 2mm; border-radius: 50%; background: #a3a29c; }
 .cs-sec li.ng::before { background: #d03b3b; } .cs-sec li.ok::before { background: #2a78d6; }
 .cs-sec li.act::before { content: '▶'; width: auto; height: auto; background: none; color: #23407a; top: 0; font-size: 10pt; }
+.cs-sec ul[contenteditable]:focus { outline: 2px solid #23407a; outline-offset: 1mm; }
+.cs-sec ul[data-act] > :not(li) { padding-left: 4mm; font-size: 12pt; }
+.cs-tag { margin-left: auto; font-size: 9pt; font-weight: 400; color: #5d6068; border: 1px solid #dddcd6; border-radius: 99px; padding: 0 2mm; }
+.cs-reset { font-size: 9pt; border: 1px solid #23407a; color: #23407a; background: #fff; border-radius: 1.5mm; padding: .3mm 2mm; cursor: pointer; }
+.cs-hint { font-size: 8.5pt; color: #5d6068; margin-top: 1mm; }
 .cs-sec li.fu { padding-left: 0; } .cs-sec li.fu::before { display: none; }
 .cs-sec li b { font-size: 13pt; } .cs-sec li:focus { outline: 2px solid #23407a; }
 .st { display: inline-block; min-width: 4.2em; text-align: center; font-size: 10pt; font-weight: 700; border-radius: 99px; padding: 0 2mm; margin-right: 2mm; color: #fff; background: #5d6068; }
@@ -218,6 +223,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   body.printing > *:not(#repWrap) { display: none !important; }
   body.printing #repWrap { position: static; padding: 0; background: none; overflow: visible; }
   body.printing #repBar { display: none; }
+  .no-print { display: none !important; }
   .rp-page { margin: 0; box-shadow: none; break-after: page; page-break-after: always; }
   .cm-head, .cm-sec { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
@@ -2376,6 +2382,13 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   /* ---------- Apps Script（ウェブアプリ）として動いているとき ---------- */
   const GAS = typeof google !== 'undefined' && google.script && google.script.run;
   const call = (fn, ...a) => new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...a));
+  let actMem = {}; // 手で直したアクションポイント（ウェブアプリは全員で共有、ブラウザ版はこのブラウザ）
+  const actGet = key => (GAS ? actMem : pref.get('actions', {}))[key] || null;
+  function actSet(key, lines) {
+    const v = lines ? { lines, at: new Date().toISOString() } : null;
+    if (GAS) { if (v) actMem[key] = v; else delete actMem[key]; call('saveAction', key, lines).catch(e => setStatus('アクションポイントを保存できませんでした：' + (e.message || e), true)); }
+    else { const all = pref.get('actions', {}); if (v) all[key] = v; else delete all[key]; pref.set('actions', all); }
+  }
   let stdMem = null; // ウェブアプリでは店舗設定をサーバーに保存し、全員で共有する
   const stdSettingsAll = () => GAS ? (stdMem || {}) : pref.get('stdSettings', {});
   function saveStdSetting(code, v, all) {
@@ -3117,7 +3130,24 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     const n = $('repShrink'); if (n) n.textContent = small.length ? `※内容が多いため縮小したページ：${small.join('、')}。` : '';
   }
   // コメントを書き換えたら、ページの大きさを合わせ直す
-  $('rep').addEventListener('input', () => { clearTimeout(fitPages.t); fitPages.t = setTimeout(fitPages, 400); });
+  $('rep').addEventListener('input', e => {
+    clearTimeout(fitPages.t); fitPages.t = setTimeout(fitPages, 400);
+    const ul = e.target.closest && e.target.closest('[data-act]'); if (!ul) return;
+    clearTimeout(ul._t); ul._t = setTimeout(() => {
+      // 1行＝1項目。改行で行を足したときは li になっていないこともあるので、文字の行で分ける
+      const lines = ul.innerText.split('\n').map(t => t.trim()).filter(Boolean);
+      const key = ul.dataset.act; actSet(key, lines.length ? lines : null);
+      const tag = $('rep').querySelector(`[data-act-tag="${CSS.escape(key)}"]`), btn = $('rep').querySelector(`[data-act-reset="${CSS.escape(key)}"]`);
+      if (tag) tag.textContent = lines.length ? '手入力（保存済み）' : '自動の下書き'; if (btn) btn.hidden = !lines.length;
+    }, 600);
+  });
+  $('rep').addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-act-reset]'); if (!b) return;
+    const key = b.dataset.actReset, gen = JSON.parse(b.dataset.gen || '[]');
+    actSet(key, null);
+    const ul = $('rep').querySelector(`[data-act="${CSS.escape(key)}"]`); if (ul) ul.innerHTML = gen.map(t => `<li class="act">${esc(t)}</li>`).join('');
+    const tag = $('rep').querySelector(`[data-act-tag="${CSS.escape(key)}"]`); if (tag) tag.textContent = '自動の下書き'; b.hidden = true;
+  });
   /* ---------- FC企業の総評ページ（企業ごとの最初の1ページ）：結果／課題と当月途中の進捗／アクションポイント ---------- */
   /** 確定した月（結果）と、その次の途中の月（進捗）。どちらかしかなければその月だけ */
   function reportMonths() {
@@ -3178,7 +3208,10 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     items.filter(x => x.label !== '予算比').slice(0, 4).forEach(x => { const [t, cl] = ST[x.st]; prog.push(`<li class="fu"${ed}><span class="st ${cl}">${t}</span>${esc(x.label.replace(/（前年比）$/, '（前年比）'))} ${x.st === 'none' ? f(x)(x.r0) : `${f(x)(x.r0)} → <b>${f(x)(x.r1)}</b>`}</li>`); });
     if (c0 && c1) { const ng1 = c1.stores.filter(x => x.diff < 0).sort((a, b) => a.rate - b.rate); if (ng1.length) prog.push(li(`${L1}に未達の店：${ng1.slice(0, 3).map(x => `${nm(x)} ${pct(x.rate)}`).join('、')}${ng1.length > 3 ? ` ほか${ng1.length - 3}店` : ''}`, 'ng')); }
     // 3. アクションポイント
-    const act = actionsFor(r, items, (c1 || r).stores.filter(x => x.diff < 0).sort((a, b) => a.diff - b.diff)).map(t => li(t, 'act'));
+    const gen = actionsFor(r, items, (c1 || r).stores.filter(x => x.diff < 0).sort((a, b) => a.diff - b.diff));
+    const akey = `${name}|${k0 != null ? k0 : k1}`, saved = actGet(akey);
+    const actLines = saved && saved.lines && saved.lines.length ? saved.lines : gen;
+    const actHtml = actLines.map(t => `<li class="act">${esc(t)}</li>`).join('');
     // 右：店舗別の予算比（結果の月と途中の月）
     const codes = r.stores.map(x => x.code), st1 = c1 ? Object.fromEntries(c1.stores.map(x => [x.code, x])) : {}, st0 = c0 ? Object.fromEntries(c0.stores.map(x => [x.code, x])) : {};
     const cats = r.stores.map(x => nm(x).slice(0, 5));
@@ -3192,20 +3225,36 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     const per = [c0 ? `${L0}の結果` : '', c1 ? `${L1}（〜${c1.stores[0] ? R1.lastDate.getMonth() + 1 + '/' + R1.lastDate.getDate() : ''}）の進捗` : ''].filter(Boolean).join('・');
     const ams = [...new Set(r.stores.map(x => x.am).filter(Boolean))].join('・');
     const sec = (n, title, body) => `<div class="cs-sec"><h3><span class="cs-n">${n}</span>${title}</h3><ul>${body.join('')}</ul></div>`;
+    const actSec = `<div class="cs-sec"><h3><span class="cs-n">3</span>アクションポイント<span class="cs-tag no-print" data-act-tag="${esc(akey)}">${saved ? '手入力（保存済み）' : '自動の下書き'}</span><button type="button" class="cs-reset no-print" data-act-reset="${esc(akey)}" data-gen="${esc(JSON.stringify(gen))}"${saved ? '' : ' hidden'}>自動の下書きに戻す</button></h3><ul contenteditable="true" data-act="${esc(akey)}">${actHtml}</ul><div class="cs-hint no-print">クリックして書き換え・Enterで行を追加。書き換えると自動で保存され、次に資料を作るときもこの内容になります</div></div>`;
     return `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料　総評</div><h1>${esc(name)}</h1></div><div style="text-align:right"><h2>総評（FC${r.stores.length}店）</h2><div class="muted">${esc(per)}</div></div></div>
       <div class="rp-body fixed"><div class="rp-in"><div class="kpis">${kpis}</div><div class="cs-g">${sec(1, `結果（${rl}）`, res)}<div class="rp-p"><h3>店舗別の予算比<span>${series.length > 1 ? `グレー＝${L0}　色付き＝${L1}` : '100%より上＝達成'}</span></h3><div class="rp-v">${chart}</div></div>
-      ${sec(2, c1 && c0 ? `課題と${L1}の進捗` : '課題', prog.length ? prog : [li('大きな課題はありません')])}${sec(3, 'アクションポイント', act)}</div></div></div>
+      ${sec(2, c1 && c0 ? `課題と${L1}の進捗` : '課題', prog.length ? prog : [li('大きな課題はありません')])}${actSec}</div></div></div>
       <div class="rp-foot"><span>${made}${ams ? `　担当AM ${esc(ams)}` : ''}</span><span>総評</span></div></section>`;
   }
   /** codes：店舗コード。companies：先頭に総評を入れる企業（その企業の店はまとめて後ろに並べる） */
+  /** 個店のページは前月（確定した月）で作る。表示中が途中の月なら、作る間だけ確定した月に切り替える */
+  function withClosedMonth(fn) {
+    const { k0 } = reportMonths();
+    if (k0 == null || k0 === S.k) return fn(false);
+    const keep = { S, active: STORE.active, cur, curCo };
+    S = viewOf(STORE, k0); STORE.active = k0; runSaved();
+    try { return fn(true); }
+    finally { S = keep.S; STORE.active = keep.active; runSaved(); cur = keep.cur; curCo = keep.curCo; }
+  }
   function openReport(codes, companies) {
     if (!codes.length) return;
-    let parts = [], nCo = 0;
+    let parts = [], nCo = 0, nStore = 0;
+    withClosedMonth(() => {
+    codes = codes.filter(c => R.stores.some(s => s.code === c)); // 確定した月にない店は外す
     if (companies && companies.length && R.companies) {
       const done = new Set();
       companies.forEach(name => { const c = R.companies.find(x => x.name === name); if (!c) return; const pg = companyPage(name); if (pg) { parts.push(pg); nCo++; } c.codes.filter(x => codes.includes(x)).forEach(x => { parts.push(reportPages(capture(x))); done.add(x); }); });
       codes.filter(x => !done.has(x)).forEach(x => parts.push(reportPages(capture(x))));
     } else parts = codes.map(c => reportPages(capture(c)));
+    nStore = codes.length;
+    });
+    codes = codes.slice(0, nStore);
+    if (!parts.length) { setStatus('訪問資料を作れる店舗がありません。', true); return; }
     render(); // 画面を元に戻す
     $('rep').innerHTML = parts.join('');
     $('repTitle').textContent = codes.length > 1 || nCo ? `訪問資料（${nCo ? `総評${nCo}ページ＋` : ''}${codes.length}店舗・${nCo + codes.length * 2}ページ）` : `訪問資料：${R.stores.find(x => x.code === codes[0]).name}（2ページ）`;
@@ -3854,7 +3903,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     try {
       setStatus('共有ドライブを確認しています…');
       const cfg = await call('getConfig');
-      stdMem = cfg.stdSettings || {};
+      stdMem = cfg.stdSettings || {}; actMem = cfg.actions || {};
       if (!cfg.areas.length) { setStatus(cfg.error || '見られるエリアのフォルダがありません。フォルダの共有設定を確認してください。', true); return; }
       const sel = $('driveArea');
       sel.innerHTML = (cfg.areas.length > 1 ? `<option value="*">すべてのエリア（${cfg.areas.length}）</option>` : '') + cfg.areas.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');

@@ -49,7 +49,7 @@ function getConfig() {
     areas.push({ id: f.getId(), name: name, mine: mine });
   }
   areas.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-  return { areas: areas, common: common, user: user, stdSettings: getStdSettings_() };
+  return { areas: areas, common: common, user: user, stdSettings: getStdSettings_(), actions: getActions_() };
 }
 
 /** エリアのフォルダ（複数可）と共通フォルダのファイル一覧。新しい順 */
@@ -86,6 +86,23 @@ function getFile(id) {
     blob = f.getBlob();
   }
   return { name: name, b64: Utilities.base64Encode(blob.getBytes()) };
+}
+
+/* ===== 訪問資料の総評：手で直したアクションポイント（企業×月ごと。全員で共有） ===== */
+function getActions_() {
+  const all = PropertiesService.getScriptProperties().getProperties(), out = {};
+  Object.keys(all).forEach(k => { if (k.indexOf('act_') === 0) { try { out[k.slice(4)] = JSON.parse(all[k]); } catch (e) { /* 壊れた値は無視 */ } } });
+  return out;
+}
+/** key＝「企業名|月」。lines＝文の配列（null で自動の下書きに戻す） */
+function saveAction(key, lines) {
+  key = String(key || '');
+  if (!key || key.length > 200) throw new Error('キーが不正です');
+  const props = PropertiesService.getScriptProperties();
+  if (!lines) { props.deleteProperty('act_' + key); return true; }
+  const keep = (lines || []).map(t => String(t).slice(0, 400)).filter(t => t.trim()).slice(0, 10);
+  props.setProperty('act_' + key, JSON.stringify({ lines: keep, by: Session.getActiveUser().getEmail() || '', at: new Date().toISOString() }));
+  return true;
 }
 
 /* ===== 標準比の店舗設定（ランチ営業・T8台数など）。全員で共有する ===== */
