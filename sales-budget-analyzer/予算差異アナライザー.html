@@ -191,6 +191,20 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .rp-page .kpi .v { font-size: 19pt; } .rp-page .kpi .label { font-size: 10.5pt; } .rp-page .kpi .small { font-size: 10.5pt; }
 .rp-p h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 3mm; } .rp-p h3 span { font-size: 9.5pt; font-weight: 400; color: #5d6068; }
 .rp-cd { width: 100%; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 2.5mm; align-items: center; } .rp-cd > div { display: flex; flex-direction: column; gap: 2mm; } .rp-page .rp-cd .stk { grid-template-columns: 5.5em minmax(0, 1fr) 4.8em; font-size: 10pt; } .rp-page .rp-cd .lg { font-size: 9.5pt; gap: .5mm 2.5mm; }
+.cs-g { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, .85fr) minmax(0, 1.15fr); gap: 3mm 5mm; }
+.cs-l { display: flex; flex-direction: column; gap: 2.5mm; min-height: 0; }
+.cs-sec { border: 1px solid #dddcd6; border-radius: 2mm; padding: 1.8mm 3mm 2mm; min-height: 0; overflow: hidden; }
+.cs-sec h3 { display: flex; align-items: center; gap: 2mm; font-size: 14pt; margin: 0 0 1mm; color: #23407a; }
+.cs-n { display: inline-grid; place-items: center; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: #23407a; color: #fff; font-size: 11pt; }
+.cs-sec ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1mm; }
+.cs-sec li { font-size: 12pt; line-height: 1.38; padding-left: 4mm; position: relative; }
+.cs-sec li::before { content: ''; position: absolute; left: 0; top: .55em; width: 2mm; height: 2mm; border-radius: 50%; background: #a3a29c; }
+.cs-sec li.ng::before { background: #d03b3b; } .cs-sec li.ok::before { background: #2a78d6; }
+.cs-sec li.act::before { content: '▶'; width: auto; height: auto; background: none; color: #23407a; top: 0; font-size: 10pt; }
+.cs-sec li.fu { padding-left: 0; } .cs-sec li.fu::before { display: none; }
+.cs-sec li b { font-size: 13pt; } .cs-sec li:focus { outline: 2px solid #23407a; }
+.st { display: inline-block; min-width: 4.2em; text-align: center; font-size: 10pt; font-weight: 700; border-radius: 99px; padding: 0 2mm; margin-right: 2mm; color: #fff; background: #5d6068; }
+.st.ng { background: #b42323; } .st.ok { background: #1d5fae; } .st.flat { background: #a07800; }
 .rp-dr { width: 100%; border-collapse: collapse; table-layout: fixed; } .rp-dr col.h { width: 38%; } .rp-page .rp-dr th, .rp-page .rp-dr td { font-size: 10.5pt; padding: .8mm .5mm; white-space: nowrap; text-align: center; border-bottom: 1px solid #dddcd6; } .rp-page .rp-dr tbody th { text-align: left; } .rp-page .rp-dr td.me { font-weight: 700; font-size: 12pt; color: #1d5fae; }
 .rp-heat { width: 100%; border-collapse: separate; border-spacing: 1mm; table-layout: fixed; }
 .rp-page .rp-heat th { font-size: 11pt; padding: 0 .5mm; text-align: center; font-weight: 700; line-height: 1.2; } .rp-heat th div { font-size: 8.5pt; font-weight: 400; color: #5d6068; }
@@ -2934,11 +2948,11 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   /** 縦棒（複数系列の横並び）。ref＝基準線（100%など） */
   function rpBars(cats, series, fmt, opt) {
     opt = opt || {};
-    const W = 440, H = opt.h || 172, L = 44, Rr = 6, T = series.length > 1 ? 36 : 22, B = 26;
+    const W = 440, H = opt.h || 172, L = 52, Rr = 6, T = series.length > 1 ? 36 : 22, B = 30;
     const vals = series.flatMap(x => x.vals).filter(v => v != null);
     if (!vals.length) return '';
     let lo = 0, hi = Math.max(...vals, opt.ref || 0);
-    if (opt.ref != null) { lo = Math.min(...vals, opt.ref); const pad = Math.max(0.03, (hi - lo) * 0.25); lo = Math.max(0, lo - pad); hi += pad; } else hi *= 1.15;
+    if (opt.ref != null) { lo = Math.min(...vals, opt.ref); const pad = Math.max(0.04, (hi - lo) * 0.32); lo = Math.max(0, lo - pad); hi += pad; } else hi *= 1.15;
     const ys = v => T + (1 - (v - lo) / (hi - lo || 1)) * (H - T - B);
     const gw = (W - L - Rr) / cats.length, bw = Math.min(46, gw * 0.8 / series.length);
     let g = svgOpen(W, H, opt.label || '');
@@ -3104,12 +3118,97 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   }
   // コメントを書き換えたら、ページの大きさを合わせ直す
   $('rep').addEventListener('input', () => { clearTimeout(fitPages.t); fitPages.t = setTimeout(fitPages, 400); });
-  function openReport(codes) {
+  /* ---------- FC企業の総評ページ（企業ごとの最初の1ページ）：結果／課題と当月途中の進捗／アクションポイント ---------- */
+  /** 確定した月（結果）と、その次の途中の月（進捗）。どちらかしかなければその月だけ */
+  function reportMonths() {
+    if (!STORE || !S || S.k == null) return { k0: null, k1: null };
+    const full = k => { const m = STORE.months[k]; if (!hasActual(m)) return false; const d = maxD(m.cur.rows.filter(r => r.sales > 0)); return d && d.getDate() === new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); };
+    const k = S.k;
+    if (full(k)) return { k0: k, k1: hasActual(STORE.months[k + 1]) ? k + 1 : null };
+    return full(k - 1) ? { k0: k - 1, k1: k } : { k0: null, k1: k };
+  }
+  function anaMonth(k) {
+    if (k == null) return null;
+    const V = viewOf(STORE, k);
+    try { return analyze(V.cur.rows, V.prev ? V.prev.rows : [], { menu: V.menu ? V.menu.rows : [], pMenu: V.pMenu ? V.pMenu.rows : [], pays: V.pays ? V.pays.rows : [], pPays: V.pPays ? V.pPays.rows : [], inv: (V.invFiles || []).flatMap(x => x.rows), master: V.master ? V.master.rows : [], scope: 'fc', area: lastEff ? lastEff.area : '' }); } catch (e) { console.warn(e); return null; }
+  }
+  /** 課題（followUp の項目）から、次にやることの下書き */
+  function actionsFor(c0, items, storesNg) {
+    const A = [], open = items.filter(x => x.st === 'worse' || x.st === 'flat' || x.st === 'none');
+    const band = /ランチ|アイドル|ディナー|レイト|ピーク|×/;
+    const lbls = open.map(x => x.label.replace(/（前年比）$/, ''));
+    const dts = lbls.filter(l => DAYTYPES.includes(l)), bds = lbls.filter(l => !DAYTYPES.includes(l) && band.test(l));
+    if (dts.length) A.push(`${dts.join('・')}の集客強化：前日までにアプリ・SNSで来店のきっかけを配信し、その日の売上・客数予測を店長と確認`);
+    if (bds.length) A.push(`${bds.slice(0, 2).join('・')}の来店を増やす：時間帯を絞った販促・店頭の案内で、その時間の客数を前年並みに戻す`);
+    if (lbls.includes('客数予算比') && !dts.length) A.push('新規・再来店の集客：チラシ・アプリ会員への配信を計画的に（配信日と客数の変化を記録）');
+    if (lbls.includes('ロス率')) A.push('ロスの多い曜日の仕込み量・発注量を見直す');
+    if (c0 && c0.upEff < 0 && Math.abs(c0.upEff) >= Math.abs(c0.custEff) * 0.5) A.push('客単価アップ：入店時のコース説明でプレミアムコース・飲み放題をおすすめする（声かけの徹底）');
+    const gapSt = c0 ? c0.stores.filter(s => (s.inv ? s.inv.gap : s.gapRate) > 0.01).sort((a, b) => (b.inv ? b.inv.gap : b.gapRate) - (a.inv ? a.inv.gap : a.gapRate)) : [];
+    if (gapSt.length) A.push(`原価率理論差の大きい店（${gapSt.slice(0, 2).map(s => s.name.replace(/^焼肉きんぐ/, '')).join('・')}）の盛り付け基準・棚卸の確認`);
+    if (storesNg.length) A.push(`${storesNg.slice(0, 2).map(s => s.name.replace(/^焼肉きんぐ/, '')).join('・')}を重点フォロー：店長と日別の売上・客数予測と、達成に必要な日販を共有`);
+    if (!A.length) A.push('達成している取り組みを各店で続け、良い店のやり方をほかの店に広げる');
+    return [...new Set(A)].slice(0, 4);
+  }
+  function companyPage(name) {
+    const { k0, k1 } = reportMonths(), R0 = anaMonth(k0), R1 = anaMonth(k1);
+    const c0 = R0 && (R0.companies || []).find(x => x.name === name), c1 = R1 && (R1.companies || []).find(x => x.name === name);
+    const cA = c0 || c1; if (!cA) return '';
+    const L0 = k0 != null ? `${k0 % 12 + 1}月` : '', L1 = k1 != null ? monthLabel(k1, STORE.months[k1].cur.rows) : '';
+    const nm = x => x.name.replace(/^焼肉きんぐ/, '');
+    const today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
+    const ed = ' contenteditable="true"';
+    const li = (t, cl) => `<li${cl ? ` class="${cl}"` : ''}${ed}>${t}</li>`;
+    // 1. 結果（確定した月。なければ途中の月）
+    const r = c0 || c1, rl = c0 ? L0 : L1;
+    const ng = r.stores.filter(x => x.diff < 0).sort((a, b) => a.diff - b.diff);
+    const res = [li(`売上 <b>${man(r.sales)}</b>／予算比 <b>${pct(r.rate)}</b>（${sman(r.diff)}）${r.yoy ? `／前年比 <b>${pct(r.yoy)}</b>` : ''}`, r.diff >= 0 ? 'ok' : 'ng'),
+      li(`予算達成 <b>${r.okN}店／${r.stores.length}店</b>${ng.length ? `　未達：${ng.slice(0, 3).map(x => `${nm(x)} ${pct(x.rate)}`).join('、')}${ng.length > 3 ? ` ほか${ng.length - 3}店` : ''}` : ''}`, ng.length ? 'ng' : 'ok')];
+    const big = Math.abs(r.custEff) >= Math.abs(r.upEff) ? ['客数', r.custEff, `客数予算比 ${pct(r.custRate)}`] : ['客単価', r.upEff, `客単価 ${yen(r.up)}`];
+    res.push(li(`予算差の主な要因は<b>${big[0]}</b>（${sman(big[1])}・${big[2]}）`, big[1] >= 0 ? 'ok' : 'ng'));
+    const gap = r.inv ? r.inv.gap : r.gapRate;
+    if (gap != null) res.push(li(`原価率理論差 <b>${pt(gap)}</b>${r.inv ? '' : '（概算）'}`, gap > 0.01 ? 'ng' : 'ok'));
+    // 2. 課題と当月途中の進捗
+    let items = [];
+    if (c0 && c1) items = followUp(c0, c1);
+    else if (r) items = followUp(r, r).map(x => ({ ...x, st: 'none' })).filter(x => x.label !== '予算比' && (x.r0 < 1));
+    const ST = { worse: ['悪化', 'ng'], flat: ['横ばい', 'flat'], better: ['改善中', 'ok'], solved: ['解消', 'ok'], none: ['課題', 'ng'] };
+    const f = x => v => x.unit === 'loss' ? pct2(v) : pct(v);
+    const prog = [];
+    if (c1 && c1 !== r) prog.push(li(`${L1}：予算比 <b>${pct(c1.rate)}</b>（${sman(c1.diff)}）${c1.fc ? `／着地見込み <b>${man(c1.fc.landing)}</b>（月予算比 ${pct(c1.fc.landRate)}）` : ''}${c1.fc && c1.fc.need > 0 ? `／達成に必要な日販 ${man(c1.fc.needPerDay)}` : ''}`, c1.diff >= 0 ? 'ok' : 'ng'));
+    items.filter(x => x.label !== '予算比').slice(0, 4).forEach(x => { const [t, cl] = ST[x.st]; prog.push(`<li class="fu"${ed}><span class="st ${cl}">${t}</span>${esc(x.label.replace(/（前年比）$/, '（前年比）'))} ${x.st === 'none' ? f(x)(x.r0) : `${f(x)(x.r0)} → <b>${f(x)(x.r1)}</b>`}</li>`); });
+    if (c0 && c1) { const ng1 = c1.stores.filter(x => x.diff < 0).sort((a, b) => a.rate - b.rate); if (ng1.length) prog.push(li(`${L1}に未達の店：${ng1.slice(0, 3).map(x => `${nm(x)} ${pct(x.rate)}`).join('、')}${ng1.length > 3 ? ` ほか${ng1.length - 3}店` : ''}`, 'ng')); }
+    // 3. アクションポイント
+    const act = actionsFor(r, items, (c1 || r).stores.filter(x => x.diff < 0).sort((a, b) => a.diff - b.diff)).map(t => li(t, 'act'));
+    // 右：店舗別の予算比（結果の月と途中の月）
+    const codes = r.stores.map(x => x.code), st1 = c1 ? Object.fromEntries(c1.stores.map(x => [x.code, x])) : {}, st0 = c0 ? Object.fromEntries(c0.stores.map(x => [x.code, x])) : {};
+    const cats = r.stores.map(x => nm(x).slice(0, 5));
+    const series = [];
+    if (c0) series.push({ name: L0, color: c1 ? RPC.cmp : (v => v >= 1 ? RPC.pos : RPC.neg), vals: codes.map(c => st0[c] ? st0[c].rate : null) });
+    if (c1) series.push({ name: L1, color: v => v >= 1 ? RPC.pos : RPC.neg, vals: codes.map(c => st1[c] ? st1[c].rate : null) });
+    const chart = rpBars(cats, series, v => Math.round(v * 100) + '%', { ref: 1, label: '店舗別の予算比' });
+    const kp = (l, v, sub, c) => `<div class="kpi"><div class="label">${l}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
+    const kpis = (c0 ? kp(`${L0} 売上`, man(c0.sales), `予算 ${man(c0.budget)}`) + kp(`${L0} 予算比`, pct(c0.rate), sman(c0.diff), cls(c0.diff)) + (c0.yoy ? kp(`${L0} 前年比`, pct(c0.yoy), '', c0.yoy >= 1 ? 'pos' : 'neg') : '') + kp(`${L0} 達成店`, `${c0.okN}／${c0.stores.length}店`) : '')
+      + (c1 ? kp(`${L1} 予算比`, pct(c1.rate), sman(c1.diff), cls(c1.diff)) + (c1.fc ? kp(`${L1} 着地見込み`, man(c1.fc.landing), `予算比 ${pct(c1.fc.landRate)}`, cls(c1.fc.landDiff)) : '') : '');
+    const per = [c0 ? `${L0}の結果` : '', c1 ? `${L1}（〜${c1.stores[0] ? R1.lastDate.getMonth() + 1 + '/' + R1.lastDate.getDate() : ''}）の進捗` : ''].filter(Boolean).join('・');
+    const ams = [...new Set(r.stores.map(x => x.am).filter(Boolean))].join('・');
+    const sec = (n, title, body) => `<div class="cs-sec"><h3><span class="cs-n">${n}</span>${title}</h3><ul>${body.join('')}</ul></div>`;
+    return `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料　総評</div><h1>${esc(name)}</h1></div><div style="text-align:right"><h2>総評（FC${r.stores.length}店）</h2><div class="muted">${esc(per)}</div></div></div>
+      <div class="rp-body fixed"><div class="rp-in"><div class="kpis">${kpis}</div><div class="cs-g">${sec(1, `結果（${rl}）`, res)}<div class="rp-p"><h3>店舗別の予算比<span>${series.length > 1 ? `グレー＝${L0}　色付き＝${L1}` : '100%より上＝達成'}</span></h3><div class="rp-v">${chart}</div></div>
+      ${sec(2, c1 && c0 ? `課題と${L1}の進捗` : '課題', prog.length ? prog : [li('大きな課題はありません')])}${sec(3, 'アクションポイント', act)}</div></div></div>
+      <div class="rp-foot"><span>${made}${ams ? `　担当AM ${esc(ams)}` : ''}</span><span>総評</span></div></section>`;
+  }
+  /** codes：店舗コード。companies：先頭に総評を入れる企業（その企業の店はまとめて後ろに並べる） */
+  function openReport(codes, companies) {
     if (!codes.length) return;
-    const parts = codes.map(c => reportPages(capture(c)));
+    let parts = [], nCo = 0;
+    if (companies && companies.length && R.companies) {
+      const done = new Set();
+      companies.forEach(name => { const c = R.companies.find(x => x.name === name); if (!c) return; const pg = companyPage(name); if (pg) { parts.push(pg); nCo++; } c.codes.filter(x => codes.includes(x)).forEach(x => { parts.push(reportPages(capture(x))); done.add(x); }); });
+      codes.filter(x => !done.has(x)).forEach(x => parts.push(reportPages(capture(x))));
+    } else parts = codes.map(c => reportPages(capture(c)));
     render(); // 画面を元に戻す
     $('rep').innerHTML = parts.join('');
-    $('repTitle').textContent = codes.length > 1 ? `訪問資料（${codes.length}店舗・${codes.length * 2}ページ）` : `訪問資料：${R.stores.find(x => x.code === codes[0]).name}（2ページ）`;
+    $('repTitle').textContent = codes.length > 1 || nCo ? `訪問資料（${nCo ? `総評${nCo}ページ＋` : ''}${codes.length}店舗・${nCo + codes.length * 2}ページ）` : `訪問資料：${R.stores.find(x => x.code === codes[0]).name}（2ページ）`;
     $('repWrap').hidden = false; document.body.style.overflow = 'hidden';
     requestAnimationFrame(fitPages);
   }
@@ -3118,7 +3217,9 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     if (R.plan) { setStatus('予測月は訪問資料を作れません。実績のある月を選んでください。', true); return; }
     const fc = R.stores.filter(s => /^FC/i.test(s.fcKind || ''));
     if (!fc.length) { setStatus('表示中の店舗にFC店がありません。上の「FCのみ」または「全店」に切り替えてから押してください。', true); return; }
-    openReport(fc.map(s => s.code));
+    // 店舗情報があれば、企業ごとに総評ページ→各店の順に並べる
+    const cos = R.hasMaster && R.companies ? R.companies.map(c => c.name) : null;
+    openReport(fc.map(s => s.code), cos);
   });
   $('repClose').addEventListener('click', () => { $('repWrap').hidden = true; $('rep').innerHTML = ''; document.body.style.overflow = ''; });
   $('repPrint').addEventListener('click', () => { document.body.classList.add('printing'); fitPages(); setTimeout(() => { window.print(); }, 50); });
@@ -3183,7 +3284,7 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   $('repCo').addEventListener('click', () => {
     if (R.plan) { setStatus('予測月は訪問資料を作れません。実績のある月を選んでください。', true); return; }
     const c = (coR().companies || []).find(x => x.name === curCo); if (!c) return;
-    ensureFc(c.codes); openReport(c.codes);
+    ensureFc(c.codes); openReport(c.codes, [c.name]);
   });
 
   /* ---------- 採用・定着 ---------- */
