@@ -145,6 +145,30 @@ function extractNps(XLSX, wb) {
   });
   return out;
 }
+/**
+ * NPSのファイルの年月。期間は「10/1（木）～10/31（土）」のように年がないので、基準の月（売上集計表の最新の月：年*12+月-1）から決める。
+ * 基準の月より2か月以上あとになる月は前の年とみなす
+ */
+function npsYm(period, refK) {
+  const m = String(period || '').match(/(\d{1,2})\s*\/\s*\d{1,2}/); if (!m || refK == null) return null;
+  const mo = +m[1]; let y = Math.floor(refK / 12);
+  if (y * 12 + mo - 1 > refK + 1) y--;
+  return `${y}-${String(mo).padStart(2, '0')}`;
+}
+/** NPSの履歴に残す分（対象の店だけ。1店あたり数十バイト）：NPS・回答数・推奨・批判・QSC5つ、と業態平均 */
+function npsSnapshot(data, codes, ym) {
+  if (!data || !ym) return null;
+  const recs = Object.values(data.stores).filter(x => !codes || codes.has(x.code)).map(x => ({ c: x.code, b: x.brand, nps: x.nps, n: x.n, pro: x.pro, crit: x.crit, q: Object.fromEntries(x.qsc.filter(q => q.v != null).map(q => [q.k, q.v])) }));
+  const brands = {}; recs.forEach(r => { const a = data.brands[r.b]; if (a && !brands[r.b]) brands[r.b] = { nps: a.nps, q: Object.fromEntries(a.qsc.filter(q => q.v != null).map(q => [q.k, q.v])) }; });
+  return recs.length ? { ym, recs, brands, at: Date.now() } : null;
+}
+/** 店のNPSの推移（古い順。最大 n か月）：[{ym, nps, n, q, avg, avgQ}] */
+function npsSeries(H, code, n) {
+  const byYm = {};
+  Object.values((H || {}).nps || {}).forEach(x => { const r = x.recs.find(y => y.c === code); if (r) byYm[x.ym] = { ym: x.ym, nps: r.nps, n: r.n, q: r.q, avg: x.brands[r.b] ? x.brands[r.b].nps : null, avgQ: x.brands[r.b] ? x.brands[r.b].q : null }; });
+  return Object.values(byYm).sort((a, b) => a.ym < b.ym ? -1 : 1).slice(-(n || 6));
+}
+
 /* ===== 店舗情報（経営企業名・担当AM・ブロック）。見出しが「[10488] 経営企業名（表示）」のような形でも読む ===== */
 function masterHeader(aoa) {
   for (let i = 0; i < Math.min(aoa.length, 10); i++) {
@@ -857,10 +881,11 @@ function wageSnapshot(wage, codes, fallbackYm) {
 /** 履歴をまとめる（同じ月は新しいもので置き換え） */
 function mergeHistory(H, add) {
   // キーは「年月」または「年月|エリア」（ウェブアプリではエリアごとに保存する）
-  const out = { tc: { ...((H || {}).tc || {}) }, wage: { ...((H || {}).wage || {}) } };
+  const out = { tc: { ...((H || {}).tc || {}) }, wage: { ...((H || {}).wage || {}) }, nps: { ...((H || {}).nps || {}) } };
   const key = x => x.ym + (x.area ? '|' + x.area : '');
   ((add || {}).tc || []).forEach(x => { if (x && x.ym) out.tc[key(x)] = x; });
   ((add || {}).wage || []).forEach(x => { if (x && x.ym) out.wage[key(x)] = x; });
+  ((add || {}).nps || []).forEach(x => { if (x && x.ym) out.nps[key(x)] = x; });
   return out;
 }
 /** 年月ごとにまとめ直す（エリアごとの分をつなげる） */
@@ -1824,4 +1849,4 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
