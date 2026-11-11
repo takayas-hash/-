@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 40;
-const APP_VERSION = 'f3c6dbb';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = 'b4337c1';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -244,6 +244,34 @@ function checkSetup() {
   const common = cfg.common ? listFiles([]).filter(f => f.common) : [];
   Logger.log('共通のファイル：' + common.length + '件' + (common.length ? '（' + common.map(f => f.name).join('、') + '）' : ''));
   Logger.log('標準比の店舗設定：' + Object.keys(cfg.stdSettings).length + '店');
+}
+
+/* ===== 業績速報を Google Chat へ：PDFをドライブに保存し、Chat には要約とリンクを送る ===== */
+// Webhook のURLは鍵と同じ扱い。コードには書かず、スクリプト プロパティ CHAT_WEBHOOK_URL に入れる
+// PDFの置き場所：スクリプト プロパティ PERF_FOLDER_ID（なければ「共通/業績速報」）。AMがファイルを置けるよう、編集者で共有しておく
+const PERF_FOLDER_NAME = '業績速報';
+function perfFolder_() {
+  const id = PropertiesService.getScriptProperties().getProperty('PERF_FOLDER_ID');
+  if (id) return DriveApp.getFolderById(id);
+  const common = commonFolder_(), it = common.getFoldersByName(PERF_FOLDER_NAME);
+  if (it.hasNext()) return it.next();
+  try { return common.createFolder(PERF_FOLDER_NAME); } catch (e) { throw new Error('「共通/' + PERF_FOLDER_NAME + '」フォルダがなく、作る権限もありません。管理者が setupPerfFolder を実行してください'); }
+}
+/** 管理者がエディタで1回実行：「共通/業績速報」を作る（AMを編集者で共有してください） */
+function setupPerfFolder() { const f = perfFolder_(); Logger.log('業績速報のフォルダ：' + f.getUrl() + '　AMを「編集者」で共有してください（PDFを保存するため）'); }
+/** PDF（base64）を保存し、Webhook に要約とリンクを送る。戻り値はPDFのURL */
+function postPerfToChat(b64, fileName, text) {
+  const url = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL');
+  if (!url) throw new Error('スクリプト プロパティ CHAT_WEBHOOK_URL が未設定です（設定手順 SETUP.md の 3.7）');
+  if (!/^https:\/\/chat\.googleapis\.com\//.test(url)) throw new Error('CHAT_WEBHOOK_URL が Google Chat のURLではありません');
+  fileName = String(fileName || '業績速報.pdf').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
+  const folder = perfFolder_();
+  const old = folder.getFilesByName(fileName); while (old.hasNext()) old.next().setTrashed(true); // 同じ日を送り直したら差し替え
+  const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(b64), 'application/pdf', fileName));
+  const msg = { text: String(text || '').slice(0, 3500) + '\n<' + file.getUrl() + '|📄 ' + fileName + ' を開く>' };
+  const res = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json; charset=UTF-8', payload: JSON.stringify(msg), muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw new Error('Google Chat に送れませんでした（' + res.getResponseCode() + '）：' + res.getContentText().slice(0, 200));
+  return file.getUrl();
 }
 
 /* ===== 自動コピー（NPS・時給データ）：元のフォルダの最新のファイルを「共通」へ。毎朝7時台（installAutoCopy） ===== */

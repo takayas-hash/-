@@ -488,7 +488,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 <div id="repWrap" hidden>
   <div id="repBar">
     <div><b id="repTitle">訪問資料</b><div class="small" id="repShrink" style="color:var(--neg-ink)"></div><div class="small muted">1店舗2ページ（売上・原価）。結論の文はクリックして直接書き換えられます。「印刷・PDF保存」で、送り先を「PDFに保存」にしてください（用紙A4・横、余白なし）。</div></div>
-    <div class="row" style="gap:8px"><button type="button" class="btn" id="repPrint">印刷・PDF保存</button><button type="button" class="btn ghost" id="repClose">閉じる</button></div>
+    <div class="row" style="gap:8px"><button type="button" class="btn" id="repChat" hidden>Google Chat に送る</button><button type="button" class="btn" id="repPrint">印刷・PDF保存</button><button type="button" class="btn ghost" id="repClose">閉じる</button></div>
   </div>
   <div id="rep"></div>
 </div>
@@ -3640,7 +3640,7 @@ if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDai
     codes = codes.slice(0, nStore);
     if (!parts.length) { setStatus('訪問資料を作れる店舗がありません。', true); return; }
     render(); // 画面を元に戻す
-    $('rep').innerHTML = parts.join('');
+    $('rep').innerHTML = parts.join(''); $('repChat').hidden = true; repPerf = null;
     $('repTitle').textContent = codes.length > 1 || nCo ? `訪問資料（${nCo ? `総評${nCo}ページ＋` : ''}${codes.length}店舗・${nCo + codes.length * 2}ページ）` : `訪問資料：${R.stores.find(x => x.code === codes[0]).name}（2ページ）`;
     $('repWrap').hidden = false; document.body.style.overflow = 'hidden';
     requestAnimationFrame(fitPages);
@@ -3723,12 +3723,50 @@ if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDai
     $('perfDayTbl').innerHTML = T.day; $('perfLandTbl').innerHTML = T.land; $('perfCumTbl').innerHTML = T.cum;
   }
   $('perfDay').addEventListener('change', e => { perfDayK = +e.target.value; renderPerf(); });
+  /* Google Chat へ：画面の3ページを画像にしてPDFを作り、サーバー（Code.gs）でドライブに保存して Webhook に要約とリンクを送る */
+  let repPerf = null;
+  const loadJs = src => new Promise((ok, ng) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const x = document.createElement('script'); x.src = src; x.onload = ok; x.onerror = () => ng(new Error('PDF作成用のライブラリを読み込めませんでした')); document.head.appendChild(x); });
+  async function pagesToPdf() {
+    await loadJs('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    await loadJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    const pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+    const pages = [...document.querySelectorAll('#rep .rp-page')];
+    for (let i = 0; i < pages.length; i++) {
+      const c = await window.html2canvas(pages[i], { scale: 2, backgroundColor: '#ffffff', logging: false,
+        // html2canvas は CSS の zoom を扱えないので、拡大縮小を transform に置き換えて描く
+        onclone: doc => doc.querySelectorAll('.rp-in').forEach(el => { const z = parseFloat(el.style.zoom || '1'); if (z !== 1) { el.style.zoom = ''; el.style.transform = `scale(${z})`; el.style.transformOrigin = '0 0'; el.style.width = (100 / z) + '%'; } }) });
+      if (i) pdf.addPage('a4', 'landscape');
+      pdf.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, 297, 210);
+    }
+    return pdf.output('datauristring').split(',')[1];
+  }
+  function perfChatText(x) {
+    const P = x.P, g = P.groups.find(r => r.name === 'エリア全体') || P.groups[P.groups.length - 1], dd = g.day || {}, cm = g.cum || {}, ld = g.land || {};
+    const rt = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '－';
+    const lines = [`*業績速報　${x.area}　${perfDayTxt(x.d)}*`, `日別：売上 ${man(dd.sales || 0)}／予算比 ${rt(dd.sales, dd.budget)}／客数 ${Math.round(dd.cust || 0).toLocaleString('ja-JP')}人`,
+      `累計：予算比 ${rt(cm.sales, cm.budget)}${cm.pSales ? `／売上前年比 ${rt(cm.salesPBase, cm.pSales)}` : ''}`, `着地見込：${man(ld.landing || 0)}／予算比 ${rt(ld.landing, ld.budget)}`];
+    const low = P.rows.filter(r => r.day && r.day.budget).map(r => ({ n: r.name, v: r.day.sales / r.day.budget })).sort((a, b) => a.v - b.v).slice(0, 3);
+    if (low.length) lines.push(`日別の予算比が低い店：${low.map(r => `${r.n} ${(r.v * 100).toFixed(1)}%`).join('、')}`);
+    return lines.join('\n');
+  }
+  $('repChat').addEventListener('click', async e => {
+    if (!repPerf) return; const b = e.currentTarget, old = b.textContent; b.disabled = true;
+    try {
+      b.textContent = 'PDFを作っています…'; const b64 = await pagesToPdf();
+      b.textContent = '送っています…';
+      const d = repPerf.d, name = `業績速報_${repPerf.area}_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.pdf`;
+      await call('postPerfToChat', b64, name, perfChatText(repPerf));
+      b.textContent = '送りました ✓'; setStatus(`Google Chat に業績速報（${perfDayTxt(d)}）を送りました。`);
+    } catch (err) { console.error(err); b.textContent = old; setStatus('Google Chat に送れませんでした：' + (err.message || err), true); alert('Google Chat に送れませんでした：' + (err.message || err)); }
+    setTimeout(() => { b.disabled = false; if (b.textContent === '送りました ✓') b.textContent = old; }, 4000);
+  });
   $('perfPrint').addEventListener('click', () => {
     const D = perfData(); if (!D) return;
     const T = perfTables(D.P), d = new Date(perfDayK), today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
     const page = (n, title, tbl) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">業績速報</div><h1>${esc(listAreas(last[0]).join('・') || 'エリア')}　${perfDayTxt(d)}</h1></div><div style="text-align:right"><h2>${title}</h2></div></div><div class="rp-body"><div class="rp-in"><div class="tbl"><table class="perf">${tbl}</table></div></div></div><div class="rp-foot"><span>${made}　色：90%未満＝赤、100%未満＝黄</span><span>${n} / 3</span></div></section>`;
     $('rep').innerHTML = page(1, '日別', T.day) + page(2, '着地見込', T.land) + page(3, '累計', T.cum);
     $('repTitle').textContent = `業績速報：${perfDayTxt(d)}（3ページ）`;
+    $('repChat').hidden = !GAS; repPerf = { P: D.P, d, area: listAreas(last[0]).join('・') || 'エリア' };
     $('repWrap').hidden = false; document.body.style.overflow = 'hidden';
     requestAnimationFrame(fitPages);
   });
@@ -4388,7 +4426,7 @@ if (typeof module !== 'undefined') module.exports = { perfReport, extractMenuDai
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'f3c6dbb'; // 版（build.py が書き込む）
+  const APP_VERSION = 'b4337c1'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
