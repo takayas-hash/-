@@ -3262,12 +3262,12 @@ if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines
   }
   /** 横棒：当店・平均・前年の比較（指標ごと） */
   function rpCompare(rows, fmt) {
-    rows = rows.filter(r => r.v != null); if (!rows.length) return '';
+    rows = rows.filter(r => r.v != null); if (!rows.length || !rows.some(r => r.avg != null || r.prev != null)) return ''; // 比べる相手がなければ出さない
     const W = 380, rowH = 19, gap = 7, L = 122, Rr = 70;
     const per = r => 1 + (r.avg != null) + (r.prev != null);
     const H = sum(rows, r => per(r) * rowH + gap) + 24;
     let g = svgOpen(W, H, '当店と平均・前年の比較'), y = 6;
-    [['当店', RPC.pos], ['平均', RPC.avg], ['前年', RPC.cmp]].forEach(([n, c], i) => { g += `<rect x="${L + i * 90}" y="${y}" width="12" height="12" rx="2" fill="${c}"/><text x="${L + i * 90 + 17}" y="${y + 11}" font-size="17" fill="${RPC.mut}">${n}</text>`; });
+    [['当店', RPC.pos], ['平均', RPC.avg], ['前年', RPC.cmp]].filter(([n]) => n === '当店' || rows.some(r => (n === '平均' ? r.avg : r.prev) != null)).forEach(([n, c], i) => { g += `<rect x="${L + i * 90}" y="${y}" width="12" height="12" rx="2" fill="${c}"/><text x="${L + i * 90 + 17}" y="${y + 11}" font-size="17" fill="${RPC.mut}">${n}</text>`; });
     y += 20;
     rows.forEach(r => {
       g += `<text x="${L - 8}" y="${y + rowH * per(r) / 2 + 5}" text-anchor="end" font-size="17" font-weight="700" fill="${RPC.ink}">${esc(r.name)}</text>`;
@@ -3347,13 +3347,14 @@ if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines
     return L;
   }
   function costConcl(s) {
-    const L = [], A = R.area, many = R.stores.length > 1;
+    const L = [], A = R.area, many = false; // オーナー資料では対象店の平均と比べない（前年と比べる）
     const gap = s.inv ? s.inv.gap : s.gapRate;
     if (gap != null) L.push({ c: gap > 0.01 ? 'ng' : 'ok', t: `原価率理論差 <b>${pt(gap)}</b>${s.inv ? '' : '（概算）'}${many && A.benchGapRate != null && !s.inv ? `／平均 ${pt(A.benchGapRate)}` : ''}` });
     else if (s.costRate != null) L.push({ c: 'info', t: `原価率 <b>${pct(s.costRate)}</b>${s.pCostRate != null ? `／前年 ${pct(s.pCostRate)}` : ''}` });
     if (s.lossRate != null) { const wd = [...s.lossByWd].sort((a, b) => b.loss - a.loss)[0]; L.push({ c: many && A.benchLossRate != null && s.lossRate > A.benchLossRate ? 'ng' : 'info', t: `ロス率 <b>${(s.lossRate * 100).toFixed(2)}%</b>${many && A.benchLossRate != null ? `（平均 ${(A.benchLossRate * 100).toFixed(2)}%）` : ''}${wd && s.loss ? `／いちばん多いのは<b>${wd.key}曜</b>` : ''}` }); }
     if (s.menu && A.menu) { const m = s.menu, a = A.menu, top = m.cats.map(c => { const x = a.cats.find(y => y.cat === c.cat); return { cat: c.cat, d: x ? c.costPP - x.costPP : 0 }; }).sort((p, q) => q.d - p.d)[0];
-      L.push({ c: m.costPP > a.costPP ? 'ng' : 'ok', t: `1人あたり原価 <b>${yen(m.costPP)}</b>${many ? `（平均 ${yen(a.costPP)}）` : ''}${many && top && top.d > 5 ? `／平均より多いのは<b>${esc(top.cat)}</b>（${syen(top.d)}）` : ''}` }); }
+      const pc = s.pMenuAgg ? s.pMenuAgg.costPP : null;
+      L.push({ c: pc != null && m.costPP > pc ? 'ng' : 'info', t: `1人あたり原価 <b>${yen(m.costPP)}</b>${pc != null ? `（前年 ${yen(pc)}）` : ''}${many ? `（平均 ${yen(a.costPP)}）` : ''}${many && top && top.d > 5 ? `／平均より多いのは<b>${esc(top.cat)}</b>（${syen(top.d)}）` : ''}` }); }
     return L.slice(0, 3);
   }
   function reportPages({ s, S1, S2 }) {
@@ -3362,7 +3363,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines
     const concl = L => `<div class="rp-concl">${L.map(x => `<div class="rp-c ${x.c}"${' contenteditable="true"'}>${x.t}</div>`).join('')}</div>`;
     const panel = (title, body, note) => body ? `<div class="rp-p"><h3>${title}${note ? `<span>${note}</span>` : ''}</h3><div class="rp-v">${body}</div></div>` : '';
     const page = (n, title, body) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">オーナー様 訪問資料</div><h1>${esc(s.name)}</h1></div><div style="text-align:right"><h2>${title}</h2><div class="muted">${esc(per)}</div></div></div>
-      <div class="rp-body fixed"><div class="rp-in">${body}</div></div><div class="rp-foot"><span>${made}${R.stores.length > 1 ? `　平均＝${esc(R.titleLabel)}（${R.stores.length}店）の平均` : ''}</span><span>${n} / 2</span></div></section>`;
+      <div class="rp-body fixed"><div class="rp-in">${body}</div></div><div class="rp-foot"><span>${made}</span><span>${n} / 2</span></div></section>`;
     const kp = (l, v, sub, c) => `<div class="kpi"><div class="label">${l}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
     // 1ページ目：売上
     const k1 = kp('売上', man(s.sales), `予算 ${man(s.budget)}`) + kp('予算比', pct(s.rate), sman(s.diff), cls(s.diff)) + (s.yoy ? kp('売上前年比', pct(s.yoy), `前年 ${man(s.pSales)}`, s.yoy >= 1 ? 'pos' : 'neg') : '')
@@ -3376,7 +3377,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines
       panel('時間帯別の売上前年比（1日あたり）', rpHeat(s), '青＝前年超え・赤＝前年割れ'),
       np ? (() => { const ser = npsSeries(HIST, s.code, 6); return panel('NPS（お客様の推奨度）', rpNps(np, npA, ser), `${esc(NP.period.replace(/（.）/g, ''))}・回答${np.n}件`); })() : '', np ? panel('QSCの評価（100点満点）', rpQsc(np, npA), 'オレンジの線＝業態平均') : '']);
     // 2ページ目：原価
-    const A = R.area, many = R.stores.length > 1, I = s.inv, p2f = v => (v * 100).toFixed(2) + '%';
+    const A = R.area, many = false, I = s.inv, p2f = v => (v * 100).toFixed(2) + '%'; // オーナー資料では対象店の平均を出さない
     const k2 = (I ? kp('値引前原価率', pct2(I.preRate)) + kp('理論原価率', pct2(I.theory)) + kp('原価率理論差', pt2(I.gap), sman(I.gapAmt), I.gap > 0.01 ? 'neg' : '')
         : kp('原価率', pct(s.costRate), s.pCostRate != null ? `前年 ${pct(s.pCostRate)}` : '') + kp('仕入率', pct(s.buyRate)) + (s.gapRate != null ? kp('理論差（概算）', pt(s.gapRate), '', s.gapRate > 0.01 ? 'neg' : '') : ''))
       + (s.lossRate != null ? kp('ロス率', p2f(s.lossRate), `ロス額 ${man(s.loss)}`) : '')
@@ -3392,9 +3393,9 @@ if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines
     const course = s.menu && s.menu.courses.length ? courseChart(s, true) : '';
     // コース構成があるときは右半分の縦長の枠に。左は比較と、原価率の推移（なければロス→分類別原価）の2つ
     const others = [panel('原価率の推移（原価管理表）', invSvg), panel('曜日別のロス額', lossChart), panel('食べ放題の分類別 1人あたり原価', catChart)].filter(Boolean);
-    const cmpP = panel('当店と平均・前年の比較', rpCompare(cmpRows));
-    const coP = course ? panel('コース構成・飲み放題比率', course, '青＝当店　オレンジの線＝平均' + (s.pMenuAgg ? '　点線＝前年' : '')).replace('class="rp-p"', 'class="rp-p tall"') : '';
-    const panels2 = coP ? [cmpP, others[0], coP].filter(Boolean) : [cmpP, ...others].filter(Boolean).slice(0, 4);
+    const cmpP = panel('当店と前年の比較', rpCompare(cmpRows));
+    const coP = course ? panel('コース構成・飲み放題比率', course, '青＝当店' + (s.pMenuAgg ? '　点線＝前年' : '')).replace('class="rp-p"', 'class="rp-p tall"') : '';
+    const panels2 = coP ? [...[cmpP, ...others].filter(Boolean).slice(0, 2), coP] : [cmpP, ...others].filter(Boolean).slice(0, 4);
     const p2 = concl(costConcl(s)) + `<div class="kpis">${k2}</div>` + (panels2.length ? (coP ? `<div class="rp-g tallg">${panels2.join('')}</div>` : grid(panels2)) : '<div class="rp-none">原価のデータがありません。売上集計表の原価・廃棄額、メニュー別（ABC分析）、原価管理表を読み込むと表示します。</div>');
     return page(1, '売上', p1) + page(2, '原価', p2);
   }
@@ -4008,7 +4009,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines
    */
   function courseChart(s, print) {
     const m = s.menu; if (!m || !m.courses.length) return '';
-    const A = R.stores.length > 1 && R.area.menu ? R.area.menu : null, P = s.pMenuAgg;
+    const A = !print && R.stores.length > 1 && R.area.menu ? R.area.menu : null, P = s.pMenuAgg; // 訪問資料（print）では対象店の平均を出さない
     const col = print ? { me: '#2a78d6', avg: '#eda100', prev: '#6f6e69', track: '#f0efec', ink: '#1d1f24', mut: '#5d6068', line: '#dddcd6' } : { me: 'var(--c1)', avg: 'var(--c4)', prev: 'var(--muted)', track: 'var(--mid)', ink: 'var(--fg)', mut: 'var(--muted)', line: 'var(--line)' };
     const shareOf = (list, n) => { if (!list) return null; const c = list.find(x => x.name === n); return c ? c.share : 0; };
     // 当店・平均のどちらかで2%以上のコース（多い順）。残りは「その他」
@@ -4237,7 +4238,7 @@ if (typeof module !== 'undefined') module.exports = { extractMenuDaily, qscLines
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'f559be8'; // 版（build.py が書き込む）
+  const APP_VERSION = '005cd48'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
