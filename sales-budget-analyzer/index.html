@@ -178,6 +178,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .rp-g { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 3mm 5mm; }
 .rp-g.n1 { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); } .rp-g.n2 { grid-template-rows: minmax(0, 1fr); }
 .rp-g.n3 > :last-child { grid-column: 1 / -1; }
+.rp-g.tallg > .tall { grid-column: 2; grid-row: 1 / span 2; } .rp-g.tallg > :not(.tall) { grid-column: 1; }
+.rp-g.tallg:has(> :nth-child(2).tall) > :first-child { grid-row: 1 / span 2; }
 .rp-p { min-width: 0; min-height: 0; border: 1px solid #dddcd6; border-radius: 2mm; padding: 2mm 3mm; display: flex; flex-direction: column; }
 .rp-v { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
 .rp-v > svg { width: 100%; height: 100%; }
@@ -278,7 +280,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <div class="tbl"><table id="storeTbl"></table></div>
     <div data-tab="cost" hidden id="courseAllBox">
       <h3>店舗別のコース構成</h3>
-      <p class="small muted" style="margin:2px 0 0">年齢区分（大人・シニア・小学生・幼児）を合算。プレミアムコースの比率が高い順。</p>
+      <p class="small muted" style="margin:2px 0 0">年齢区分（大人・シニア・小学生・幼児）を合算。プレミアムコースの比率が高い順。色が濃いほどその列で比率が高い店。飲み放題＝注文数÷すべてのコースの注文数。</p>
       <div class="lg" id="courseLegend"></div>
       <div class="stk" id="courseAll"></div>
     </div>
@@ -3046,13 +3048,13 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
     const lossChart = s.lossRate != null && s.loss ? rpBars(s.lossByWd.map(w => w.key), [{ name: 'ロス額', color: RPC.neg, vals: s.lossByWd.map(w => w.days ? w.loss / 10000 : null) }], v => v.toFixed(1) + '万', { label: '曜日別のロス額' }) : '';
     let catChart = '';
     if (s.menu && A.menu) { const cs = s.menu.cats.slice(0, 6); catChart = rpBars(cs.map(c => (c.cat || 'その他').slice(0, 5)), [{ name: '当店', color: RPC.pos, vals: cs.map(c => c.costPP) }].concat(many ? [{ name: '平均', color: RPC.avg, vals: cs.map(c => { const a = A.menu.cats.find(x => x.cat === c.cat); return a ? a.costPP : null; }) }] : []).concat(s.pMenuAgg ? [{ name: '前年', color: RPC.cmp, vals: cs.map(c => { const a = s.pMenuAgg.cats.find(x => x.cat === c.cat); return a ? a.costPP : null; }) }] : []), v => Math.round(v) + '円', { label: '食べ放題の分類別 1人あたり原価' }); }
-    // コース構成の帯グラフ＋飲み放題比率（ソフトドリンク・アルコール）の小さな表
-    const drRows = [['当店', s.menu && s.menu.drink, true], ['前年', s.pMenuAgg && s.pMenuAgg.drink], ['平均', many && A.menu && A.menu.drink]].filter(r => r[1]);
-    const drTbl = drRows.length ? `<table class="rp-dr"><colgroup><col class="h"></colgroup><thead><tr><th>飲み放題</th>${drRows.map(r => `<th>${r[0]}</th>`).join('')}</tr></thead><tbody>`
-      + [['ソフト', 'softRate'], ['ランチソフト', 'lunchRate'], ['アルコール', 'alcRate']].filter(([, k]) => drRows.some(r => r[1][k] != null)).map(([n, k]) => `<tr><th>${n}</th>${drRows.map(r => `<td${r[2] ? ' class="me"' : ''}>${pct(r[1][k])}</td>`).join('')}</tr>`).join('') + '</tbody></table>' : '';
-    const course = S2.course ? (() => { const t = document.createElement('div'); t.innerHTML = S2.course; t.querySelectorAll('.tbl').forEach(e => e.remove()); t.querySelectorAll('.lg span').forEach(e => { if (/右端/.test(e.textContent)) e.remove(); }); t.querySelectorAll('.stk .v').forEach(e => { e.innerHTML = e.innerHTML.replace(/<br>.*$/, ''); }); return drTbl ? `<div class="rp-cd"><div>${t.innerHTML}</div>${drTbl}</div>` : t.innerHTML; })() : '';
-    const panels2 = [panel('当店と平均・前年の比較', rpCompare(cmpRows)), panel('原価率の推移（原価管理表）', invSvg), panel('曜日別のロス額', lossChart), panel('食べ放題の分類別 1人あたり原価', catChart), panel('コース構成・飲み放題比率', course)].filter(Boolean).slice(0, 4);
-    const p2 = concl(costConcl(s)) + `<div class="kpis">${k2}</div>` + (panels2.length ? grid(panels2) : '<div class="rp-none">原価のデータがありません。売上集計表の原価・廃棄額、メニュー別（ABC分析）、原価管理表を読み込むと表示します。</div>');
+    const course = s.menu && s.menu.courses.length ? courseChart(s, true) : '';
+    // コース構成があるときは右半分の縦長の枠に。左は比較と、原価率の推移（なければロス→分類別原価）の2つ
+    const others = [panel('原価率の推移（原価管理表）', invSvg), panel('曜日別のロス額', lossChart), panel('食べ放題の分類別 1人あたり原価', catChart)].filter(Boolean);
+    const cmpP = panel('当店と平均・前年の比較', rpCompare(cmpRows));
+    const coP = course ? panel('コース構成・飲み放題比率', course, '青＝当店　オレンジの線＝平均' + (s.pMenuAgg ? '　点線＝前年' : '')).replace('class="rp-p"', 'class="rp-p tall"') : '';
+    const panels2 = coP ? [cmpP, others[0], coP].filter(Boolean) : [cmpP, ...others].filter(Boolean).slice(0, 4);
+    const p2 = concl(costConcl(s)) + `<div class="kpis">${k2}</div>` + (panels2.length ? (coP ? `<div class="rp-g tallg">${panels2.join('')}</div>` : grid(panels2)) : '<div class="rp-none">原価のデータがありません。売上集計表の原価・廃棄額、メニュー別（ABC分析）、原価管理表を読み込むと表示します。</div>');
     return page(1, '売上', p1) + page(2, '原価', p2);
   }
   /** ページからあふれる分は縮小して、1店舗4ページに収める */
@@ -3515,14 +3517,74 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   function legendHtml(map) {
     return Object.keys(map).map(n => `<span><i style="background:${map[n]}"></i>${esc(n)}</span>`).join('') + '<span><i style="background:var(--c0)"></i>その他</span><span>右端の「プ」＝プレミアムコース比率、「飲」＝飲み放題比率（ソフト・ランチソフト・アルコールの合計÷全コース）</span>';
   }
+  /**
+   * コース構成と飲み放題比率：1コース1行の横棒。当店＝青い棒（数字を大きく）、平均＝オレンジの線、前年＝グレーの点線。
+   * 右に平均・前年の数字。print＝訪問資料用（固定色）
+   */
+  function courseChart(s, print) {
+    const m = s.menu; if (!m || !m.courses.length) return '';
+    const A = R.stores.length > 1 && R.area.menu ? R.area.menu : null, P = s.pMenuAgg;
+    const col = print ? { me: '#2a78d6', avg: '#eda100', prev: '#6f6e69', track: '#f0efec', ink: '#1d1f24', mut: '#5d6068', line: '#dddcd6' } : { me: 'var(--c1)', avg: 'var(--c4)', prev: 'var(--muted)', track: 'var(--mid)', ink: 'var(--fg)', mut: 'var(--muted)', line: 'var(--line)' };
+    const shareOf = (list, n) => { if (!list) return null; const c = list.find(x => x.name === n); return c ? c.share : 0; };
+    // 当店・平均のどちらかで2%以上のコース（多い順）。残りは「その他」
+    const names = [...new Set([...m.courses, ...(A ? A.courses : [])].map(c => c.name))].filter(n => Math.max(shareOf(m.courses, n), A ? shareOf(A.courses, n) : 0) >= 0.02)
+      .sort((a, b) => shareOf(m.courses, b) - shareOf(m.courses, a));
+    const rest = list => list ? Math.max(0, 1 - sum(names, n => shareOf(list, n))) : null;
+    const rows = names.map(n => ({ n, v: shareOf(m.courses, n), a: A ? shareOf(A.courses, n) : null, p: P ? shareOf(P.courses, n) : null }));
+    if (rest(m.courses) >= 0.005) rows.push({ n: 'その他', v: rest(m.courses), a: A ? rest(A.courses) : null, p: P ? rest(P.courses) : null });
+    const dk = [['ソフト', 'softRate'], ['ランチソフト', 'lunchRate'], ['アルコール', 'alcRate']];
+    const drows = m.drink ? dk.map(([n, k]) => ({ n, v: m.drink[k], a: A && A.drink ? A.drink[k] : null, p: P && P.drink ? P.drink[k] : null })).filter(r => r.v != null) : [];
+    const L = print ? 120 : 128, BW = print ? 170 : 280, RX = L + BW + (print ? 76 : 64), W = RX + (print ? 64 : 120), rh = print ? 30 : 28, head = print ? 2 : 26, sec = 26;
+    const H = head + sec + rows.length * rh + (drows.length ? sec + drows.length * rh : 0) + 6;
+    const fs = print ? 17 : 14, mx = Math.max(...rows.concat(drows).flatMap(r => [r.v, r.a || 0, r.p || 0])) * 1.08 || 1;
+    const xs = v => L + v / mx * BW;
+    let g = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="コース構成と飲み放題比率" style="font-family:inherit;${print ? '' : 'max-width:760px'}">`;
+    // 凡例
+    g += `<rect x="${L}" y="6" width="14" height="12" rx="2" fill="${col.me}"/><text x="${L + 19}" y="17" font-size="${fs - 2}" fill="${col.mut}">当店</text>`;
+    if (A) g += `<line x1="${L + 72}" x2="${L + 72}" y1="4" y2="20" stroke="${col.avg}" stroke-width="3"/><text x="${L + 79}" y="17" font-size="${fs - 2}" fill="${col.mut}">平均</text>`;
+    if (P) g += `<line x1="${L + 140}" x2="${L + 140}" y1="4" y2="20" stroke="${col.prev}" stroke-width="2" stroke-dasharray="3 2"/><text x="${L + 147}" y="17" font-size="${fs - 2}" fill="${col.mut}">前年</text>`;
+    g += `<text x="${RX}" y="17" font-size="${fs - 3}" fill="${col.mut}">${[A ? '平均' : '', P ? '前年' : ''].filter(Boolean).join('／')}</text>`;
+    if (print) g = g.replace(/<rect x="\d+" y="6"[^]*$/, ''); // 資料では凡例は枠の見出しに書く
+    let y = head;
+    const block = (title, list) => {
+      g += `<text x="4" y="${y + 18}" font-size="${fs - 1}" font-weight="700" fill="${col.mut}">${title}</text><line x1="${L}" x2="${W - 4}" y1="${y + 12}" y2="${y + 12}" stroke="${col.line}"/>`;
+      y += sec;
+      list.forEach(r => {
+        const cy = y + rh / 2, bh = rh * 0.56;
+        g += `<text x="${L - 8}" y="${cy + fs * 0.36}" text-anchor="end" font-size="${fs}" font-weight="700" fill="${col.ink}">${esc((n => n.length > 8 ? n.slice(0, 8) : n)(print ? r.n.replace(/コース$/, '') || r.n : r.n))}</text>`;
+        g += `<rect x="${L}" y="${cy - bh / 2}" width="${BW}" height="${bh}" rx="3" fill="${col.track}"/><rect x="${L}" y="${cy - bh / 2}" width="${Math.max(2, xs(r.v) - L).toFixed(1)}" height="${bh}" rx="3" fill="${col.me}"/>`;
+        if (r.p != null) g += `<line x1="${xs(r.p).toFixed(1)}" x2="${xs(r.p).toFixed(1)}" y1="${cy - rh / 2 + 2}" y2="${cy + rh / 2 - 2}" stroke="${col.prev}" stroke-width="2" stroke-dasharray="3 2"/>`;
+        if (r.a != null) g += `<line x1="${xs(r.a).toFixed(1)}" x2="${xs(r.a).toFixed(1)}" y1="${cy - rh / 2 + 1}" y2="${cy + rh / 2 - 1}" stroke="${col.avg}" stroke-width="3"/>`;
+        g += `<text x="${L + BW + 6}" y="${cy + fs * 0.36}" font-size="${fs}" font-weight="700" fill="${col.ink}">${pct(r.v)}</text>`;
+        const sub = [r.a != null ? pct(r.a) : '', r.p != null ? pct(r.p) : ''].filter(Boolean).join('／');
+        if (sub) g += `<text x="${RX}" y="${cy + fs * 0.36}" font-size="${fs - 3}" fill="${col.mut}">${sub}</text>`;
+        y += rh;
+      });
+    };
+    block('コース構成', rows);
+    if (drows.length) block('飲み放題', drows);
+    return g + '</svg>';
+  }
+  /** 店舗別のコース構成：店舗×コースの表。数字が大きいほど色が濃い（列ごと） */
+  function courseTable(list) {
+    const A = R.area.menu, names = (A ? A.courses : list[0].menu.courses).filter(c => c.share >= 0.01).slice(0, 6).map(c => c.name);
+    const shareOf = (cs, n) => (cs.find(c => c.name === n) || { share: 0 }).share;
+    const hasDr = list.some(s => s.menu.drink);
+    const cols = names.map(n => ({ h: n, f: s => shareOf(s.menu.courses, n), fa: A ? () => shareOf(A.courses, n) : null }))
+      .concat(hasDr ? [['飲み放題ソフト', 'softRate'], ['ランチソフト', 'lunchRate'], ['アルコール', 'alcRate']].map(([h, k]) => ({ h, f: s => s.menu.drink ? s.menu.drink[k] : null, fa: A && A.drink ? () => A.drink[k] : null, dr: true })) : []);
+    const rng = cols.map(c => { const v = list.map(c.f).filter(x => x != null); return [Math.min(...v), Math.max(...v)]; });
+    const shade = (v, i) => { if (v == null) return ''; const [lo, hi] = rng[i], t = hi > lo ? (v - lo) / (hi - lo) : 0.5; return `background:color-mix(in oklab, var(--c1) ${Math.round(6 + t * 42)}%, var(--panel));`; };
+    const premOf = s => sum(s.menu.courses.filter(c => /プレミアム/.test(c.name)), c => c.share);
+    return `<thead><tr><th>店舗</th>${cols.map(c => `<th class="n"${c.dr ? ' style="border-left:2px solid var(--line)"' : ''}>${esc(c.h)}</th>`).join('')}</tr></thead><tbody>`
+      + [...list].sort((a, b) => premOf(b) - premOf(a)).map(s => `<tr${s.code === cur ? ' style="font-weight:700"' : ''}><td>${esc(s.name)}</td>${cols.map((c, i) => { const v = c.f(s); return `<td class="n" style="${shade(v, i)}${c.dr ? 'border-left:2px solid var(--line);' : ''}">${v == null ? '－' : pct(v)}</td>`; }).join('')}</tr>`).join('')
+      + (A && list.length > 1 ? `<tr><td><b>対象店平均</b></td>${cols.map(c => `<td class="n"${c.dr ? ' style="border-left:2px solid var(--line)"' : ''}><b>${c.fa && c.fa() != null ? pct(c.fa()) : '－'}</b></td>`).join('')}</tr>` : '') + '</tbody>';
+  }
   function renderCourseAll() {
     const box = $('courseAllBox'); const map = courseColors();
     const list = R.stores.filter(s => s.menu && s.menu.courses.length);
     if (!list.length) { $('courseAll').innerHTML = '<p class="small muted" style="grid-column:1/-1">メニュー別（ABC分析）を読み込むと表示されます。</p>'; $('courseLegend').innerHTML = ''; return; }
-    const premOf = s => sum(s.menu.courses.filter(c => /プレミアム/.test(c.name)), c => c.share);
-    $('courseLegend').innerHTML = legendHtml(map);
-    $('courseAll').innerHTML = [...list].sort((a, b) => premOf(b) - premOf(a)).map(s => stackRow(s.name, s.menu.courses, map, s.code === cur, s.menu.drink)).join('')
-      + (R.area.menu && list.length > 1 ? stackRow('対象店平均', R.area.menu.courses, map, false, R.area.menu.drink) : '');
+    $('courseLegend').innerHTML = '';
+    $('courseAll').innerHTML = `<div class="tbl" style="grid-column:1/-1"><table>${courseTable(list)}</table></div>`;
   }
   function renderYoy(s) {
     const m = s.menu, P = s.pMenuAgg, box = $('yoyBody');
@@ -3550,11 +3612,11 @@ if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMast
   function renderCourseStore(s) {
     const map = courseColors();
     if (!s.menu || !s.menu.courses.length) { $('courseStore').innerHTML = '<p class="small muted" style="grid-column:1/-1">メニュー別（ABC分析）を読み込むと表示されます。</p>'; $('courseLegend2').innerHTML = ''; $('courseTbl').innerHTML = ''; return; }
-    $('courseLegend2').innerHTML = legendHtml(map);
+    $('courseLegend2').innerHTML = '';
     const rows = [['当店（当年）', s.menu.courses, true, s.menu.drink]];
     if (s.pMenuAgg) rows.push(['当店（前年）', s.pMenuAgg.courses, false, s.pMenuAgg.drink]);
     if (R.stores.length > 1 && R.area.menu) rows.push(['対象店平均', R.area.menu.courses, false, R.area.menu.drink]);
-    $('courseStore').innerHTML = rows.map(r => stackRow(r[0], r[1], map, r[2], r[3])).join('');
+    $('courseStore').innerHTML = `<div style="grid-column:1/-1">${courseChart(s, false)}</div>`;
     const names = [...Object.keys(map), 'その他'];
     const shareOf = (courses, n) => n === 'その他' ? sum(courses.filter(c => !map[c.name]), c => c.share) : (courses.find(c => c.name === n) || { share: 0 }).share;
     const hasDr = rows.some(r => r[3]);
