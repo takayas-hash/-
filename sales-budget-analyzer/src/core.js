@@ -91,6 +91,31 @@ function headerIndex(aoa, must, lim) {
   for (let i = 0; i < Math.min(aoa.length, lim || 10); i++) { const r = aoa[i]; if (r && must.every(m => r.includes(m))) return i; }
   return -1;
 }
+/* ===== 店舗情報（経営企業名・担当AM・ブロック）。見出しが「[10488] 経営企業名（表示）」のような形でも読む ===== */
+function masterHeader(aoa) {
+  for (let i = 0; i < Math.min(aoa.length, 10); i++) {
+    const r = (aoa[i] || []).map(x => String(x == null ? '' : x));
+    if (r.some(x => x.includes('店舗コード')) && r.some(x => x.includes('経営企業名'))) return i;
+  }
+  return -1;
+}
+function isMasterSheet(XLSX, ws) { return masterHeader(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 10 })) >= 0; }
+function extractMaster(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
+  const hr = masterHeader(aoa); if (hr < 0) return [];
+  const H = aoa[hr].map(x => String(x == null ? '' : x));
+  const col = (inc, exc) => H.findIndex(x => x.includes(inc) && !(exc && exc.test(x)));
+  const C = { code: col('店舗コード'), name: col('店舗名', /ふりがな|かな/), kind: col('直営・FC'), company: col('経営企業名'), am: col('担当AM'), block: col('ブロック'), lane: col('特急'), address: col('住所'), status: col('開店状態') };
+  const v = (r, k) => C[k] >= 0 && r[C[k]] != null ? String(r[C[k]]).trim() : '';
+  const out = [];
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r) continue;
+    const code = v(r, 'code'); if (!code) continue;
+    const company = v(r, 'company');
+    out.push({ code, name: v(r, 'name'), kind: v(r, 'kind'), company: company === '0' ? '' : company, am: v(r, 'am'), block: v(r, 'block'), lane: v(r, 'lane'), address: v(r, 'address'), status: v(r, 'status') });
+  }
+  return out;
+}
 /** シートの種類を判定：summary（売上集計表）／hourly（1時間ごと詳細）／payment（値引・受取内訳） */
 function sheetKind(XLSX, ws) {
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 30 });
@@ -1159,6 +1184,9 @@ function analyze(curRows, prevRows, extra) {
     const catSum = {}; withInv.forEach(s => s.inv.cats.forEach(c => { catSum[c.cat] = (catSum[c.cat] || 0) + c.cost; }));
     area.inv.catRate = Object.fromEntries(Object.entries(catSum).map(([k, v]) => [k, v / pre]));
   }
+  // 店舗情報（経営企業名・担当AM）を付ける
+  const master = extra.master && extra.master.length ? Object.fromEntries(extra.master.map(m => [m.code, m])) : null;
+  if (master) stores.forEach(s => { const m = master[s.code]; if (m) { s.company = m.company; s.am = m.am; s.block = m.block; } });
   // 理論差（概算）＝仕入率−理論原価率
   stores.concat([area]).forEach(s => { s.gapRate = s.buyRate != null && s.costRate != null ? s.buyRate - s.costRate : null; s.pGapRate = s.pBuyRate != null && s.pCostRate != null ? s.pBuyRate - s.pCostRate : null; });
   const withGap = stores.filter(s => s.gapRate != null);
@@ -1173,6 +1201,27 @@ function analyze(curRows, prevRows, extra) {
     area.benchUp = withMenu.length ? sum(withMenu, s => s.preSales) / sum(withMenu, s => s.menu.cust) : null;
   }
   const ctx = { isFullMonth, lastDate, commonWeak, areaLabor, scopeLabel, multiArea, area, nStores: stores.length };
+  // FC企業ごとの集計（店舗情報があるときだけ）
+  let companies = null;
+  if (master) {
+    const by = {};
+    stores.filter(s => s.company && !/^直営/.test(s.fcKind)).forEach(s => { (by[s.company] = by[s.company] || []).push(s); });
+    companies = Object.entries(by).map(([name, ss]) => {
+      const codes = new Set(ss.map(s => s.code));
+      const c = analyzeStore(cur.filter(r => codes.has(r.code)).map(r => ({ ...r, code: 'CO', name })), prev.filter(r => codes.has(r.code)), monthEnd.getDate());
+      c.name = name; c.stores = ss; c.codes = [...codes];
+      c.ams = [...new Set(ss.map(s => s.am).filter(Boolean))];
+      c.fullBudget = sum(ss, s => s.fullBudget || 0);
+      c.fc = isFullMonth ? null : forecastSum(ss.map(s => s.fc), c);
+      c.okN = ss.filter(s => s.diff >= 0).length;
+      c.gapRate = c.buyRate != null && c.costRate != null ? c.buyRate - c.costRate : null;
+      const wi = ss.filter(s => s.inv);
+      if (wi.length) { const T = f => sum(wi, s => f(s.inv)); const pre = T(i => i.preSales), cost = T(i => i.cost), th = T(i => i.theory * i.preSales); c.inv = { preRate: cost / pre, theory: th / pre, gap: (cost - th) / pre, lossPre: T(i => i.loss) / pre, n: wi.length }; }
+      c.lines = companyLines(c, isFullMonth);
+      return c;
+    }).sort((a, b) => (a.rate || 0) - (b.rate || 0));
+  }
+
   stores.forEach(s => { s.lines = storeComment(s, ctx); s.costLines = costComment(s, ctx); });
   area.hasInv = withInv.length > 0;
   area.lines = areaComment(area, stores, ctx);
@@ -1230,7 +1279,7 @@ function analyze(curRows, prevRows, extra) {
       stores.forEach(s => { const st = tenure.stores.find(x => x.code === s.code); s.tenure = st || null; s.tenureLines = st ? tenureLines(tenure, st, false) : [{ t: '当月に勤務したパートの履歴がありません。', d: false }]; });
     }
   }
-  return { tenure, labor, stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0,  hasPays: pays.length > 0 };
+  return { companies, hasMaster: !!master, tenure, labor, stores, area, firstDate, lastDate, isFullMonth, commonWeak, areaLabor, scopeLabel, titleLabel, multiArea, areas, hasHourly: hourly.length > 0,  hasPays: pays.length > 0 };
 }
 
 /* ===== コメント生成 ===== */
@@ -1684,6 +1733,25 @@ function followUpLine(items, L0, L1, viewingLater) {
   return { t: `${head}：${parts.join('／')}。`, d: false };
 }
 
+/** FC企業のコメント：会社合計 → 着地 → 店舗ごと → 客数・単価 → 原価・ロス */
+function companyLines(c, isFullMonth) {
+  const L = [], n = c.stores.length;
+  L.push({ t: `【${c.diff >= 0 ? '予算達成' : '予算未達'}】${c.name}（FC${n}店）売上${man(c.sales)}／予算比${pct(c.rate)}（${sman(c.diff)}）${c.yoy ? `・前年比${pct(c.yoy)}` : ''}。予算達成${c.okN}店／${n}店。`, d: false });
+  if (c.fc) L.push({ t: `・着地見込み：${man(c.fc.landing)}（月予算比${pct(c.fc.landRate)}・${sman(c.fc.landDiff)}）。${c.fc.need > 0 ? `達成には残り${c.fc.remDays}日で1日${man(c.fc.needPerDay)}（1店あたり${man(c.fc.needPerDay / n)}）が必要。` : '月予算は達成済み。'}`, d: false });
+  if (n > 1) {
+    const ng = c.stores.filter(s => s.diff < 0).sort((a, b) => a.diff - b.diff), ok = c.stores.filter(s => s.diff >= 0).sort((a, b) => b.diff - a.diff);
+    const nm = s => s.name.replace(/^焼肉きんぐ/, '');
+    if (ng.length) L.push({ t: `・店舗別の未達：${ng.slice(0, 4).map(s => `${nm(s)} ${sman(s.diff)}（${pct(s.rate)}）`).join('、')}${ng.length > 4 ? ` ほか${ng.length - 4}店` : ''}。`, d: false });
+    if (ok.length) L.push({ t: `・店舗別の達成：${ok.slice(0, 4).map(s => `${nm(s)} ${sman(s.diff)}（${pct(s.rate)}）`).join('、')}${ok.length > 4 ? ` ほか${ok.length - 4}店` : ''}。`, d: false });
+    const yo = c.stores.filter(s => s.yoy != null);
+    if (yo.length > 1) { const lo = [...yo].sort((a, b) => a.yoy - b.yoy)[0]; if (lo.yoy < 1) L.push({ t: `・店舗別の前年比：いちばん低いのは${nm(lo)}（前年比${pct(lo.yoy)}）。`, d: true }); }
+  }
+  L.push({ t: `・要因分解：客数要因${sman(c.custEff)}（客数予算比${pct(c.custRate)}${c.custYoy ? `・前年比${pct(c.custYoy)}` : ''}）、単価要因${sman(c.upEff)}（客単価${Math.round(c.up).toLocaleString('ja-JP')}円）。`, d: false });
+  if (c.inv) L.push({ t: `・原価（原価管理表${c.inv.n}店）：原価率${pct(c.inv.preRate)}、理論原価率${pct(c.inv.theory)}、理論差${pt(c.inv.gap)}。`, d: false });
+  else if (c.gapRate != null) L.push({ t: `・原価（概算）：仕入率${pct(c.buyRate)}、理論原価率${pct(c.costRate)}、理論差${pt(c.gapRate)}。`, d: false });
+  if (c.lossRate != null) L.push({ t: `・ロス：廃棄率${pct(c.lossRate)}。`, d: true });
+  return L;
+}
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };

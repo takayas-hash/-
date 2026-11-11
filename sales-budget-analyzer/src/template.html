@@ -217,6 +217,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <button type="button" role="tab" id="tabCost" aria-selected="false">原価分析</button>
     <button type="button" role="tab" id="tabLabor" aria-selected="false">人（労働時間・雑給）</button>
     <button type="button" role="tab" id="tabTenure" aria-selected="false">採用・定着</button>
+    <button type="button" role="tab" id="tabCompany" aria-selected="false">FC企業別</button>
   </div>
 
   <div class="note" id="planBanner" hidden></div>
@@ -254,6 +255,19 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       <div class="lg" id="courseLegend"></div>
       <div class="stk" id="courseAll"></div>
     </div>
+  </section>
+
+  <section class="card" id="coCard" data-tab="company" hidden>
+    <div class="row">
+      <div><div class="label">FC企業の詳細</div><h2 id="coName"></h2><div class="small muted" id="coSub"></div></div>
+      <div class="row" style="gap:8px"><select id="coSel" aria-label="企業を選択" class="btn ghost"></select><button type="button" class="btn ghost" id="copyCo">この企業のコメントをコピー</button><button type="button" class="btn" id="repCo">この企業の訪問資料（PDF）</button></div>
+    </div>
+    <div class="kpis" id="coKpis"></div>
+    <h3>報告コメント（下書き）</h3>
+    <div id="coComment" class="cmView"></div>
+    <h3 style="margin-top:14px">店舗別</h3>
+    <p class="small muted" style="margin:2px 0 8px">行をクリックすると「売上分析」でその店舗の詳細を表示します。</p>
+    <div class="tbl"><table id="coStoreTbl"></table></div>
   </section>
 
   <section class="card" id="storeCard">
@@ -394,6 +408,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 <script>
 (() => {
   const $ = id => document.getElementById(id);
+  let RC = null, lastEff = null, curCo = null; // FC企業別：直営だけを表示中でもFCの店舗で集計する
   let R = null, cur = null, detail = false, scope = 'direct', areaSel = '', last = null, tab = 'sales';
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const cls = v => v < 0 ? 'neg' : 'pos';
@@ -470,7 +485,9 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     const wsC = findSheet(wb, SHEET_CUR);
     if (wsC) return { name: f.name, cur: extractRows(XLSX, wsC), prev: extractRows(XLSX, findSheet(wb, SHEET_PREV)) };
     for (const n of wb.SheetNames) {
-      const ws = wb.Sheets[n], k = sheetKind(XLSX, ws);
+      const ws = wb.Sheets[n];
+      if (isMasterSheet(XLSX, ws)) return { name: f.name, master: extractMaster(XLSX, ws) };
+      const k = sheetKind(XLSX, ws);
       if (k === 'summary') return { name: f.name, raw: extractRows(XLSX, ws) };
       if (k === 'hourly') return { name: f.name, hourly: extractHourly(XLSX, ws) };
       if (k === 'payment') return { name: f.name, pays: extractPayments(XLSX, ws) };
@@ -532,7 +549,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   let STORE = null; // 保存データ {months:{月:{cur, prev, menu…}}, wage, stdBook, stdLane, active}
   const kYM = k => `${Math.floor(k / 12)}年${k % 12 + 1}月`;
   /** 表示する月のデータ（時給・標準比マスタは全部の月で共通） */
-  const viewOf = (ST, k) => ({ ...ST.months[k], wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane, savedAt: ST.savedAt, v: ST.v, k });
+  const viewOf = (ST, k) => ({ ...ST.months[k], master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane, savedAt: ST.savedAt, v: ST.v, k });
   /** 以前の形式（1か月分だけ）の保存データを月ごとの形に直す */
   function toStore(v) {
     if (!v) return null;
@@ -540,16 +557,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (!v.cur) return null;
     const k = mKey(v.cur.rows), m = {};
     ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (v[x]) m[x] = v[x]; });
-    return { months: { [k]: m }, wage: v.wage, stdBook: v.stdBook, stdLane: v.stdLane, savedAt: v.savedAt, v: v.v, active: k };
+    return { months: { [k]: m }, master: v.master, wage: v.wage, stdBook: v.stdBook, stdLane: v.stdLane, savedAt: v.savedAt, v: v.v, active: k };
   }
   async function reparseStore(ST) {
     const out = { ...ST, months: {} };
     for (const k of Object.keys(ST.months)) {
       const m = ST.months[k];
-      const N = await reparse({ ...m, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane });
+      const N = await reparse({ ...m, master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane });
       if (!N) return null;
       const keep = {}; ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (N[x]) keep[x] = N[x]; });
-      out.months[k] = keep; out.wage = N.wage; out.stdBook = N.stdBook; out.stdLane = N.stdLane;
+      out.months[k] = keep; out.master = N.master; out.wage = N.wage; out.stdBook = N.stdBook; out.stdLane = N.stdLane;
     }
     out.v = DATA_VERSION;
     return out;
@@ -558,7 +575,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
   const DATA_VERSION = 3;
   async function reparse(v) {
-    const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage'];
+    const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage', 'master'];
     const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : []), ...(v.stdLane ? [v.stdLane] : [])];
     if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
     const cache = new Map();
@@ -567,7 +584,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     for (const k of slots) {
       const x = v[k]; if (!x) continue;
       const g = await parse(x.file);
-      const rows = k === 'cur' ? (g.cur || g.raw) : k === 'prev' ? (x.sheet === 'prev' ? g.prev : g.raw) : (g.pays || g.menu || g.hourly || g.tc || g.ws || g.wage);
+      const rows = k === 'cur' ? (g.cur || g.raw) : k === 'prev' ? (x.sheet === 'prev' ? g.prev : g.raw) : (g.pays || g.menu || g.hourly || g.tc || g.ws || g.wage || g.master);
       N[k] = { ...x, rows: rows || [] };
     }
     delete N.usage;
@@ -593,6 +610,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       + (S.stdLane ? `<li><span class="label">標準比マスタ（特急レーン店）</span> ${esc(S.stdLane.name)} <span class="muted">レーン店${Object.values(S.stdLane.data.info).filter(x => x.perCust != null && /特急|レーン/.test(x.flag || '')).length}店</span></li>` : '<li class="muted"><span class="label">標準比マスタ（特急レーン店）</span> なし</li>')
       + (HIST && Object.keys(HIST.tc).length ? `<li><span class="label">採用・定着の履歴</span> タイムカード ${[...new Set(Object.values(HIST.tc).map(x => x.ym))].sort().map(ymTxt).join('・')}<span class="muted">／時給データ ${[...new Set(Object.values(HIST.wage).map(x => x.ym))].sort().map(ymTxt).join('・') || 'なし'}</span></li>` : '')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
+      + (S.master ? `<li><span class="label">店舗情報</span> ${esc(S.master.name)} <span class="muted">${S.master.rows.length}店・FC企業${new Set(S.master.rows.filter(r => r.company).map(r => r.company)).size}社</span></li>` : '<li class="muted"><span class="label">店舗情報（FC企業別に使う）</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
     $('saved').querySelector('p').hidden = !!GAS;
@@ -632,7 +650,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function runSaved() {
     syncMonthSel();
     const curRows = planRows(S.cur.rows);
-    run(curRows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: PLAN ? [] : S.pays ? S.pays.rows : [], pPays: PLAN ? [] : S.pPays ? S.pPays.rows : [], menu: PLAN ? [] : S.menu ? S.menu.rows : [], pMenu: PLAN ? [] : S.pMenu ? S.pMenu.rows : [], planMode: !!PLAN, tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: PLAN ? null : HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
+    run(curRows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: PLAN ? [] : S.pays ? S.pays.rows : [], pPays: PLAN ? [] : S.pPays ? S.pPays.rows : [], menu: PLAN ? [] : S.menu ? S.menu.rows : [], pMenu: PLAN ? [] : S.pMenu ? S.pMenu.rows : [], planMode: !!PLAN, tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], master: S.master ? S.master.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: PLAN ? null : HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows) });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -745,6 +763,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         else if (g.ws) { if (curKs.has(k)) M(k).ws = { name: g.name, rows: g.ws, file: g.file }; }
         else if (g.hourly) { if (curKs.has(k)) M(k).hourly = { name: g.name, rows: g.hourly, file: g.file }; }
         // 時給データ・標準比マスタは全部の月で共通（新しいファイルで差し替え）
+        // 店舗情報（経営企業名・担当AM）も全部の月で共通
+        else if (g.master) { if (!(opt.fresh && ST.master && (ST.master.mtime || 0) >= (g.mtime || 0))) ST.master = { name: g.name, rows: g.master, file: g.file, mtime: g.mtime }; }
         else if (g.wage) { if (!(opt.fresh && ST.wage)) ST.wage = { name: g.name, rows: g.wage, file: g.file }; }
         else if (g.std) { if (g.std.kind === 'lane') { if (!(opt.fresh && ST.stdLane)) ST.stdLane = { name: g.name, data: g.std, file: g.file }; } else if (!(opt.fresh && ST.stdBook)) ST.stdBook = { name: g.name, data: g.std, file: g.file }; }
       }
@@ -792,6 +812,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     last = [curRows, prevRows, extra || {}];
     const eff = syncControls(curRows);
     R = analyze(curRows, prevRows, { ...(extra || {}), scope: eff.scope, area: eff.area });
+    RC = null; lastEff = eff;
     R.plan = PLAN;
     if (PLAN) planComments();
     else try { attachFollowUp(eff); } catch (e) { console.warn('前月の課題の比較に失敗', e); }
@@ -868,7 +889,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   function render() {
     const a = R.area;
-    $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor'); $('tabTenure').setAttribute('aria-selected', tab === 'tenure');
+    $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor'); $('tabTenure').setAttribute('aria-selected', tab === 'tenure'); $('tabCompany').setAttribute('aria-selected', tab === 'company');
+    $('storeCard').hidden = tab === 'company';
     document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; });
     // 予測月：売上の見込み（予算×直近の予算比）と、勤務予定による労働時間・標準比だけを出す
     $('planBanner').hidden = !R.plan;
@@ -887,6 +909,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (tab === 'cost') { renderCost(); return; }
     if (tab === 'labor') { renderLabor(); return; }
     if (tab === 'tenure') { renderTenure(); return; }
+    if (tab === 'company') { renderCompany(); return; }
     $('storeTblTitle').textContent = R.plan ? '店舗別 売上見込み（予測）' : '店舗別 予算差と要因';
     const okN = R.stores.filter(s => s.diff >= 0).length;
     $('areaTitle').textContent = `${R.titleLabel}（${R.stores.length}店）`;
@@ -1037,7 +1060,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     ['前月の課題', /課題のその後|課題の.*状況/], ['着地見込み', /^着地見込み/], ['客数・客単価・値引', /要因分解|値引|誘客|客単価/],
     ['曜日・時間帯', /曜日|時間帯/], ['特異日・データ確認', /不振日|未達が大きかった日|上振れが大きかった日|売上0の日/],
     ['労働時間・雑給', /労働時間|雑給|勤務予定/], ['残業', /残業/], ['標準比', /標準比/], ['採用・定着', /勤務期間|戦力化|新規採用|退社|減り方|入社月/],
-    ['営業部・店舗の比較', /営業部別|未達額上位|達成額上位|挽回|の高い店|店舗別|プレミアム比率/], ['原価', /^原価|理論差|喫食|平均との差|コース構成|食べ放題/], ['ロス', /ロス/],
+    ['営業部・店舗の比較', /営業部別|未達額上位|達成額上位|挽回|の高い店|店舗別|プレミアム比率/], ['原価', /^原価|理論差|喫食|平均との差|コース構成|食べ放題/], ['ロス', /ロス/], ['FC企業別', /株式会社|有限会社|合同会社|（株）|\(株\)|㈱|^企業/],
   ];
   const secOf = lbl => { const x = CM_SECTIONS.find(([, re]) => re.test(lbl)); return x ? x[0] : null; };
   /** カッコの外の区切り文字で分ける */
@@ -1132,6 +1155,68 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('repClose').addEventListener('click', () => { $('repWrap').hidden = true; $('rep').innerHTML = ''; document.body.style.overflow = ''; });
   $('repPrint').addEventListener('click', () => { document.body.classList.add('printing'); fitPages(); setTimeout(() => { window.print(); }, 50); });
   addEventListener('afterprint', () => document.body.classList.remove('printing'));
+
+  /* ---------- FC企業別（店舗情報の経営企業名でFC店をまとめる） ---------- */
+  function coR() {
+    if (RC) return RC;
+    if (!R.hasMaster || lastEff.scope !== 'direct') return (RC = R);
+    try { RC = analyze(last[0], last[1], { ...last[2], scope: 'fc', area: lastEff.area }); } catch (e) { RC = { companies: [], area: null, err: e.message }; }
+    return RC;
+  }
+  /** 直営だけを表示中なら、FCも見られるように「FCのみ」へ切り替える（店舗の詳細・訪問資料用） */
+  function ensureFc(codes) { if (codes.every(c => R.stores.some(s => s.code === c))) return; scope = 'fc'; pref.set('scope', 'fc'); rerun(); }
+  const NO_MASTER = '店舗情報（店舗コード・経営企業名・担当AMの入った表）を読み込むと、FC企業ごとの集計を表示します。ウェブ版は「共通」フォルダに置いてください。';
+  function renderCompany() {
+    const X = coR(), cs = X.companies || [];
+    $('storeTblTitle').textContent = 'FC企業別 予算差と要因';
+    const blank = (title, msg) => { $('areaTitle').textContent = title; $('kpis').innerHTML = ''; setCmt('areaComment', msg); $('storeTbl').innerHTML = ''; $('coCard').hidden = true; };
+    if (!R.hasMaster) return blank('FC企業別', NO_MASTER);
+    if (!cs.length) return blank('FC企業別', X.err ? `FCの店舗がありません（${X.err}）。` : '表示中の範囲に、経営企業名のわかるFC店がありません。');
+    const a = X.area, nS = sum(cs, c => c.stores.length), okC = cs.filter(c => c.diff >= 0).length;
+    $('areaTitle').textContent = `FC企業別（${cs.length}社・${nS}店）`;
+    $('kpis').innerHTML = kpi('FC売上', man(a.sales), `予算 ${man(a.budget)}`) + kpi('予算比', pct(a.rate), `差額 ${sman(a.diff)}`, cls(a.diff))
+      + kpi('達成企業', `${okC}／${cs.length}社`, `達成店舗 ${sum(cs, c => c.okN)}／${nS}店`) + kpi('前年比', pct(a.yoy), a.custYoy ? `客数前年比 ${pct(a.custYoy)}` : '')
+      + fcKpis(a.fc, `達成見込み ${cs.filter(c => c.fc && c.fc.landDiff >= 0).length}／${cs.filter(c => c.fc).length}社`);
+    setCmt('areaComment', [`【FC企業別】${cs.length}社・${nS}店：予算達成${okC}社／未達${cs.length - okC}社。FC計の予算比${pct(a.rate)}（${sman(a.diff)}）${a.yoy ? `・前年比${pct(a.yoy)}` : ''}。`]
+      .concat(cs.map(c => `・${c.name}：${c.stores.length}店で予算比${pct(c.rate)}（${sman(c.diff)}）${c.yoy ? `・前年比${pct(c.yoy)}` : ''}${c.fc ? `・着地見込み${pct(c.fc.landRate)}` : ''}。予算達成${c.okN}／${c.stores.length}店。`)).join('\n'));
+    const hasFcst = cs.some(c => c.fc), maxAbs = Math.max(1, ...cs.map(c => Math.abs(c.diff)));
+    const costTxt = c => c.inv ? pt(c.inv.gap) : c.gapRate != null ? pt(c.gapRate) : '－';
+    $('storeTbl').innerHTML = `<thead><tr><th>経営企業</th><th>担当AM</th><th class="n">店舗</th><th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th>${hasFcst ? '<th class="n">着地見込み</th><th class="n">着地予算比</th>' : ''}<th class="n">達成店舗</th><th class="n">客数要因</th><th class="n">単価要因</th><th class="n">前年比</th><th class="n">客数前年比</th><th class="n">原価率理論差</th></tr></thead><tbody>`
+      + cs.map(c => `<tr class="pick" tabindex="0" data-co="${esc(c.name)}" aria-selected="${c.name === curCo}"><td>${esc(c.name)}</td><td class="muted">${esc(c.ams.join('・'))}</td><td class="n">${c.stores.length}</td><td><span class="pill ${c.diff >= 0 ? 'ok' : 'ng'}">${c.diff >= 0 ? '達成' : '未達'}</span></td>
+        <td class="n">${man(c.sales)}</td><td class="n ${cls(c.diff)}">${pct(c.rate)}</td><td class="n ${cls(c.diff)}">${sman(c.diff)}</td><td><span class="bar" style="width:${Math.round(Math.abs(c.diff) / maxAbs * 110)}px;background:var(${c.diff < 0 ? '--neg' : '--pos'})"></span></td>
+        ${hasFcst ? (c.fc ? `<td class="n">${man(c.fc.landing)}</td><td class="n ${cls(c.fc.landDiff)}">${pct(c.fc.landRate)}</td>` : '<td class="n muted" colspan="2">－</td>') : ''}
+        <td class="n">${c.okN}／${c.stores.length}</td><td class="n ${cls(c.custEff)}">${sman(c.custEff)}</td><td class="n ${cls(c.upEff)}">${sman(c.upEff)}</td><td class="n">${pct(c.yoy)}</td><td class="n">${pct(c.custYoy)}</td><td class="n">${costTxt(c)}</td></tr>`).join('') + '</tbody>';
+    $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
+      const go = () => { curCo = tr.dataset.co; renderCompany(); $('coCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
+      tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+    if (!cs.some(c => c.name === curCo)) curCo = cs[0].name;
+    const c = cs.find(x => x.name === curCo);
+    $('coCard').hidden = false;
+    $('coSel').innerHTML = cs.map(x => `<option value="${esc(x.name)}"${x.name === curCo ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+    $('coName').textContent = c.name;
+    $('coSub').textContent = `FC${c.stores.length}店${c.ams.length ? `・担当AM ${c.ams.join('・')}` : ''}`;
+    $('coKpis').innerHTML = kpi('売上', man(c.sales), `予算 ${man(c.budget)}`) + kpi('予算比', pct(c.rate), `差額 ${sman(c.diff)}`, cls(c.diff))
+      + kpi('客数要因', sman(c.custEff), `客数予算比 ${pct(c.custRate)}`, cls(c.custEff)) + kpi('単価要因', sman(c.upEff), `客単価 ${yen(c.up)}`, cls(c.upEff))
+      + kpi('達成店舗', `${c.okN}／${c.stores.length}店`, c.yoy ? `前年比 ${pct(c.yoy)}` : '') + fcKpis(c.fc);
+    $('coComment').innerHTML = cmtHtml(commentText(c.lines, detail), false);
+    const ss = [...c.stores].sort((x, y) => x.rate - y.rate);
+    $('coStoreTbl').innerHTML = `<thead><tr><th>店舗</th><th>担当AM</th><th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th>${hasFcst ? '<th class="n">着地見込み</th><th class="n">着地予算比</th>' : ''}<th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客単価</th><th class="n">前年比</th><th class="n">客数前年比</th><th class="n">原価率理論差</th></tr></thead><tbody>`
+      + ss.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}"><td>${esc(s.name)}</td><td class="muted">${esc(s.am || '')}</td><td><span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '達成' : '未達'}</span></td><td class="n">${man(s.sales)}</td><td class="n ${cls(s.diff)}">${pct(s.rate)}</td><td class="n ${cls(s.diff)}">${sman(s.diff)}</td>
+        ${hasFcst ? (s.fc ? `<td class="n">${man(s.fc.landing)}</td><td class="n ${cls(s.fc.landDiff)}">${pct(s.fc.landRate)}</td>` : '<td class="n muted" colspan="2">－</td>') : ''}
+        <td class="n ${cls(s.custEff)}">${sman(s.custEff)}</td><td class="n ${cls(s.upEff)}">${sman(s.upEff)}</td><td class="n">${yen(s.up)}</td><td class="n">${pct(s.yoy)}</td><td class="n">${pct(s.custYoy)}</td><td class="n">${s.inv ? pt(s.inv.gap) : s.gapRate != null ? pt(s.gapRate) : '－'}</td></tr>`).join('') + '</tbody>';
+    $('coStoreTbl').querySelectorAll('tr.pick').forEach(tr => {
+      const go = () => { const code = tr.dataset.code; ensureFc([code]); cur = code; setTab('sales'); $('storeCard').scrollIntoView({ block: 'start' }); };
+      tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+  }
+  $('coSel').addEventListener('change', e => { curCo = e.target.value; renderCompany(); });
+  $('copyCo').addEventListener('click', e => { const c = (coR().companies || []).find(x => x.name === curCo); if (c) copy(commentText(c.lines, detail), e.currentTarget); });
+  $('repCo').addEventListener('click', () => {
+    if (R.plan) { setStatus('予測月は訪問資料を作れません。実績のある月を選んでください。', true); return; }
+    const c = (coR().companies || []).find(x => x.name === curCo); if (!c) return;
+    ensureFc(c.codes); openReport(c.codes);
+  });
 
   /* ---------- 採用・定着 ---------- */
   const NO_TENURE = 'タイムカード表と時給データ（入社年月日の入った店長資料）を読み込むと、勤務期間別の労働時間・新規採用・退社・退社リスクを分析します。毎月読み込むと履歴が積み上がり、前の月との比較ができるようになります。';
@@ -1595,6 +1680,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('tabCost').addEventListener('click', () => setTab('cost'));
   $('tabLabor').addEventListener('click', () => setTab('labor'));
   $('tabTenure').addEventListener('click', () => setTab('tenure'));
+  $('tabCompany').addEventListener('click', () => setTab('company'));
   $('copyAll').addEventListener('click', e => {
     const q = t => '"' + t.replace(/"/g, '""') + '"';
     const key = tab === 'cost' ? 'costLines' : tab === 'labor' ? 'laborLines' : tab === 'tenure' ? 'tenureLines' : 'lines';
