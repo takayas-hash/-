@@ -2737,7 +2737,11 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
         // 店舗情報（経営企業名・担当AM）も全部の月で共通
         else if (g.nps) npsGot.push({ name: g.name, data: g.nps, file: g.file, mtime: g.mtime }); // 月を決めてから、いちばん新しい月を使う（下）
         else if (g.master) { if (!(opt.fresh && ST.master && (ST.master.mtime || 0) >= (g.mtime || 0))) ST.master = { name: g.name, rows: g.master, file: g.file, mtime: g.mtime }; }
-        else if (g.wage) { if (!(opt.fresh && ST.wage)) ST.wage = { name: g.name, rows: g.wage, file: g.file }; }
+        else if (g.wage) {
+          // いちばん新しい月の時給データを使う（月がわからないときは更新日時の新しい方）
+          const ymW = x => (x && x.rows && x.rows[0] && x.rows[0].ym) || '', nw = { name: g.name, rows: g.wage, file: g.file, mtime: g.mtime }, cw = ST.wage;
+          if (!cw || ymW(nw) > ymW(cw) || (ymW(nw) === ymW(cw) && (nw.mtime || 0) >= (cw.mtime || 0))) ST.wage = nw;
+        }
         else if (g.std) { if (g.std.kind === 'lane') { if (!(opt.fresh && ST.stdLane)) ST.stdLane = { name: g.name, data: g.std, file: g.file }; } else if (!(opt.fresh && ST.stdBook)) ST.stdBook = { name: g.name, data: g.std, file: g.file }; }
       }
       if (got.some(g => g.usage)) notes.push('食材別の理論差データは分析に使わないため読み込みませんでした');
@@ -2759,10 +2763,11 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
       // 採用・定着：タイムカード（読み込んだすべての月）と時給データを履歴に積み上げる
       const add = { tc: [], wage: [] };
       gotRaw.filter(g => g.tc).forEach(g => { const x = tcSummary(g.tc); if (x) { if (g.area) x.area = g.area; add.tc.push(x); } });
-      const wg = gotRaw.find(g => g.wage);
-      if (wg) {
+      // 時給データは月ごとに履歴へ（先月分と今月分が両方あれば両方。月がわからないものは表示に使う1つだけ）
+      const wgs = gotRaw.filter(g => g.wage && ((g.wage[0] && g.wage[0].ym) || (ST.wage && g.wage === ST.wage.rows)));
+      if (wgs.length) {
         const H1 = mergeHistory(HIST, add), areas = [...new Set(Object.values(H1.tc).map(x => x.area || ''))];
-        areas.forEach(a => { const codes = new Set(Object.values(H1.tc).filter(x => (x.area || '') === a).flatMap(x => x.recs.map(r => r.c))); const w = wageSnapshot(wg.wage, codes, ymOf(maxD(N.cur.rows))); if (w && w.recs.length) { if (a) w.area = a; add.wage.push(w); } });
+        wgs.forEach(wg => areas.forEach(a => { const codes = new Set(Object.values(H1.tc).filter(x => (x.area || '') === a).flatMap(x => x.recs.map(r => r.c))); const w = wageSnapshot(wg.wage, codes, ymOf(maxD(N.cur.rows))); if (w && w.recs.length) { if (a) w.area = a; add.wage.push(w); } }));
       }
       // NPS：月ごとに履歴へ（ウェブアプリはエリアごと＝そのエリアの売上集計表の店だけ。ブラウザ版は表示中の店）
       add.nps = [];
@@ -4145,7 +4150,7 @@ if (typeof module !== 'undefined') module.exports = { qscLines, npsYm, npsSnapsh
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'c5c4657'; // 版（build.py が書き込む）
+  const APP_VERSION = '8091601'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
