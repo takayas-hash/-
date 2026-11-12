@@ -216,6 +216,12 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 .perf td.r { background: #d32f2f !important; color: #fff; font-weight: 700; } .perf td.y { background: #ffe94d !important; color: #1d1f24; font-weight: 700; }
 .perf td.neg { color: var(--neg-ink); }
 .rp-page .perf { font-size: 8.5pt; } .rp-page .perf th.nm { position: static; } .rp-page .perf th, .rp-page .perf td { padding: .7mm 1.2mm; border-color: #c9c8c2; } .rp-page .perf thead th { background: #e6ebf5; } .rp-page .perf tr.tot th, .rp-page .perf tr.tot td { background: #f0efec; } .rp-page .perf tr.fc th, .rp-page .perf tr.fc td { background: #e5f4ea; } .rp-page .perf th.nm { background: #fff; }
+.rp-page.tight { padding: 5mm 6mm 4mm; gap: 2mm; } .rp-page.tight .rp-head { padding-bottom: 1mm; } .rp-page.tight .rp-head h1 { font-size: 15pt; } .rp-page.tight .rp-head h2 { font-size: 13pt; } .rp-page.tight .rp-head .muted { font-size: 9pt; } .rp-page.tight .rp-foot { font-size: 8.5pt; padding-top: 1mm; }
+.rp-page .perf.wide { width: 100%; font-size: 10pt; }
+.rp-page .perf.wide th, .rp-page .perf.wide td { padding: 1.4mm 1mm; border-color: #8d8c86; color: #111; }
+.rp-page .perf.wide td { font-weight: 700; } .rp-page .perf.wide tbody th { font-weight: 800; }
+.rp-page .perf.wide thead th { font-size: 8.5pt; font-weight: 800; background: #23407a; color: #fff; padding: .7mm .5mm; } .rp-page .perf.wide thead small { color: #e6ebf5; }
+.rp-page .perf.wide td.r { color: #fff; } .rp-page .perf.wide tr.tot th, .rp-page .perf.wide tr.tot td { font-weight: 800; background: #e6ebf5; border-top: 2px solid #111; }
 .perf2 { width: 100%; border-collapse: collapse; font-size: 12.5pt; font-variant-numeric: tabular-nums; }
 .perf2 th, .perf2 td { border: 1px solid #b9b8b1; padding: 1.6mm 2mm; color: #1d1f24; }
 .perf2 thead th { background: #23407a; color: #fff; font-size: 10.5pt; font-weight: 700; text-align: center; line-height: 1.25; } .perf2 thead th small { display: block; font-size: 8.5pt; font-weight: 400; opacity: .85; }
@@ -357,7 +363,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   <section class="card" id="perfCard" data-tab="perf" hidden>
     <div class="row">
       <div><div class="label">業績速報（日報）</div><h2 id="perfTitle"></h2><div class="small muted">日別の前年は同じ曜日（364日前）、累計・着地の前年は同じ日付の範囲。労働時間は社員＋P/A、標準は標準比マスタから。色：予算比などが90%未満＝赤、100%未満＝黄</div></div>
-      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrint">印刷・PDF（見やすい版）</button><button type="button" class="btn ghost" id="perfPrintStore">店舗ごと（1店1ページ）</button><button type="button" class="btn ghost" id="perfPrintFull">詳細（3ページ）</button></div>
+      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrint">印刷・PDF（見やすい版）</button><button type="button" class="btn ghost" id="perfPrintStore">店舗ごと（1店1ページ）</button><button type="button" class="btn ghost" id="perfPrintFull">詳細（3ページ）</button><button type="button" class="btn" id="perfPrintAll">まとめて（詳細＋店舗ごと）</button></div>
     </div>
     <h3>日別</h3><div class="tbl"><table class="perf" id="perfDayTbl"></table></div>
     <h3 style="margin-top:14px">着地見込 <span class="small muted" style="font-weight:400">着地見込＝今日までの実績＋残りの日の見込み（店長の予測。ない日は予算×ここまでの曜日区分別の予算比）</span></h3><div class="tbl"><table class="perf" id="perfLandTbl"></table></div>
@@ -1505,7 +1511,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       const avail = b.clientHeight - 2;
       const availW = b.clientWidth + 1;
       // 高さと幅の両方が収まるか（業績速報の横に長い表のため）
-      const fits = z => { inner.style.zoom = z; const t = inner.querySelector('table.perf, table.perf2'); return inner.getBoundingClientRect().height <= avail && (!t || t.getBoundingClientRect().width <= availW); };
+      const fits = z => { inner.style.zoom = z; const ts = [...inner.querySelectorAll('table.perf, table.perf2')]; return inner.getBoundingClientRect().height <= avail && ts.every(t => t.getBoundingClientRect().width <= availW); };
       let lo, hi;
       if (fits(1)) { lo = 1; hi = ZOOM_MAX; if (fits(hi)) lo = hi; } else { lo = ZOOM_MIN; hi = 1; }
       for (let k = 0; k < 9 && hi - lo > 0.01; k++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
@@ -1780,7 +1786,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     try {
       b.textContent = 'PDFを作っています…'; const b64 = await pagesToPdf();
       b.textContent = '送っています…';
-      const d = repPerf.d, name = `業績速報_${repPerf.area}_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.pdf`;
+      const d = repPerf.d, name = `業績速報${repPerf.all ? '（詳細＋店舗ごと）' : ''}_${repPerf.area}_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.pdf`;
       await call('postPerfToChat', b64, name, perfChatText(repPerf));
       b.textContent = '送りました ✓'; setStatus(`Google Chat に業績速報（${perfDayTxt(d)}）を送りました。`);
     } catch (err) { console.error(err); b.textContent = old; setStatus('Google Chat に送れませんでした：' + (err.message || err), true); alert('Google Chat に送れませんでした：' + (err.message || err)); }
@@ -1831,16 +1837,17 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         return `<tr class="${cls}"><th>${e.date.getMonth() + 1}/${e.date.getDate()}（${e.wd}）</th><td class="n">${n0(e.budget)}</td><td class="n">${e.salesFc ? n0(e.salesFc) : '－'}</td><td class="n b">${e.done ? n0(e.sales) : ''}</td>${e.done ? pc(rt(e.sales, e.budget)) : '<td></td>'}<td class="n">${n0(e.pSales)}</td>${e.done && e.pSales ? pc(rt(e.sales, e.pSales)) : '<td class="n">' + (e.done ? '－' : '') + '</td>'}<td class="n">${e.done ? n0(e.cust) : ''}</td><td class="n">${e.custFc ? n0(e.custFc) : '－'}</td>${e.done && e.pCust ? pc(rt(e.cust, e.pCust)) : '<td class="n">' + (e.done ? '－' : '') + '</td>'}<td class="n">${e.done && e.cust ? n0(e.sales / e.cust) : ''}</td><td class="n">${e.done ? f1(rt(e.disc, e.sales + e.disc)) : ''}</td>`
           + `<td class="n">${e.plan ? n0(e.plan) : '－'}</td><td class="n">${e.act ? n0(e.act) : ''}</td><td class="n">${e.std ? n0(e.std) : ''}</td><td class="n${e.std && e.act / e.std > (c.budgetStd || 1.03) ? ' hi' : ''}">${e.std && e.act ? f1(e.act / e.std) : ''}</td><td class="n">${e.done ? n0(e.loss) : ''}</td></tr>`; };
       const tot = `<tr class="tot"><th>累計</th><td class="n">${n0(c.budget)}</td><td class="n">${c.salesFc ? n0(c.salesFc) : '－'}</td><td class="n b">${n0(c.sales)}</td>${pc(rt(c.sales, c.budget))}<td class="n">${n0(c.pSales)}</td>${pc(c.pSales ? rt(c.salesPBase, c.pSales) : null)}<td class="n">${n0(c.cust)}</td><td class="n">${c.custFcSum ? n0(c.custFcSum) : '－'}</td>${pc(c.pCust ? rt(c.custPBase, c.pCust) : null)}<td class="n">${c.cust ? n0(c.sales / c.cust) : '－'}</td><td class="n">${f1(rt(c.disc, c.sales + c.disc))}</td><td class="n">${c.planDone ? n0(c.planDone) : '－'}</td><td class="n">${n0(c.act)}</td><td class="n">${n0(c.std)}</td><td class="n${c.std && c.act / c.std > (c.budgetStd || 1.03) ? ' hi' : ''}">${c.std ? f1(c.act / c.std) : '－'}</td><td class="n">${n0(c.loss)}</td></tr>`;
-      return `<section class="rp-page"><div class="rp-head"><div><div class="muted">業績速報　${esc(area)}</div><h1>${esc(r.name)}</h1></div><div style="text-align:right"><h2>${perfDayTxt(d)}時点</h2></div></div>
+      return `<section class="rp-page tight"><div class="rp-head"><div><div class="muted">業績速報　${esc(area)}</div><h1>${esc(r.name)}</h1></div><div style="text-align:right"><h2>${perfDayTxt(d)}時点</h2></div></div>
         <div class="rp-body"><div class="rp-in">${kp}<table class="perf2 days">${head}<tbody>${ds.map(tr).join('')}${tot}</tbody></table>
         <div class="pnote">太字の行＝${perfDayTxt(d)}。薄い行＝まだ来ていない日（予算・店長の予測・計画だけ）。前年は同じ曜日（364日前）。色は見やすい版と同じ。</div></div></div>
-        <div class="rp-foot"><span>${made}</span><span>${i + 1} / ${P.rows.length}</span></div></section>`;
+        <div class="rp-foot"><span>${made}</span><span>店舗ごと ${i + 1} / ${P.rows.length}</span></div></section>`;
     }).join('');
   }
   function openPerfReport(full) {
     const D = perfData(); if (!D) return;
     const d = new Date(perfDayK), area = listAreas(last[0]).join('・') || 'エリア';
-    if (full === 'store') { $('rep').innerHTML = perfStorePages(D.P, d, area); $('repTitle').textContent = `業績速報：${perfDayTxt(d)}（店舗ごと ${D.P.rows.length}ページ）`; $('repChat').hidden = !GAS; repPerf = { P: D.P, d, area }; $('repWrap').hidden = false; document.body.style.overflow = 'hidden'; requestAnimationFrame(fitPages); return; }
+    if (full === 'store') return showPerf(perfStorePages(D.P, d, area), `業績速報：${perfDayTxt(d)}（店舗ごと ${D.P.rows.length}ページ）`, { P: D.P, d, area });
+    if (full === 'all') return showPerf(perfFullPages(D.P, d, area) + perfStorePages(D.P, d, area), `業績速報：${perfDayTxt(d)}（詳細3ページ＋店舗ごと${D.P.rows.length}ページ）`, { P: D.P, d, area, all: true });
     if (full) return openPerfFull(D);
     $('rep').innerHTML = perfSummaryPages(D.P, d, area);
     $('repTitle').textContent = `業績速報：${perfDayTxt(d)}（見やすい版）`;
@@ -1851,12 +1858,36 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('perfPrint').addEventListener('click', () => openPerfReport(false));
   $('perfPrintFull').addEventListener('click', () => openPerfReport(true));
   $('perfPrintStore').addEventListener('click', () => openPerfReport('store'));
+  $('perfPrintAll').addEventListener('click', () => openPerfReport('all'));
+  /** 詳細3ページ（日別・着地見込・累計の全部の列）。余白を少なく、表をページの幅いっぱいに、文字を太く */
+  function perfFullPages(P, d, area) {
+    const T = perfTables(P), today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
+    // 列の多い表（日別・累計）は、最初の見出しのまとまり（売上）とそれ以外の2段に分けて、1段あたりの列を減らし文字を大きくする
+    const split = html => {
+      const t = document.createElement('table'); t.innerHTML = html;
+      const h1 = t.tHead.rows[0], h2 = t.tHead.rows[1]; if (!h2) return [html];
+      const n1 = h1.cells[1].colSpan, mk = () => document.createElement('table');
+      const A = mk(), B = mk(); A.innerHTML = B.innerHTML = '<thead><tr></tr><tr></tr></thead><tbody></tbody>';
+      const cp = (from, to, i0, i1) => [...from.cells].slice(i0, i1).forEach(c => to.appendChild(c.cloneNode(true)));
+      cp(h1, A.tHead.rows[0], 0, 2); A.tHead.rows[0].cells[0].rowSpan = 2; cp(h2, A.tHead.rows[1], 0, n1);
+      B.tHead.rows[0].appendChild(h1.cells[0].cloneNode(true)); B.tHead.rows[0].cells[0].rowSpan = 2; cp(h1, B.tHead.rows[0], 2); cp(h2, B.tHead.rows[1], n1);
+      [...t.tBodies[0].rows].forEach(r => { const a = A.tBodies[0].insertRow(), b = B.tBodies[0].insertRow(); a.className = b.className = r.className;
+        a.appendChild(r.cells[0].cloneNode(true)); b.appendChild(r.cells[0].cloneNode(true));
+        if (r.cells.length === 2) { const c = r.cells[1]; a.appendChild(c.cloneNode(true)); return; } // 「この日のデータなし」
+        cp(r, a, 1, 1 + n1); cp(r, b, 1 + n1); });
+      return [A.innerHTML, B.innerHTML];
+    };
+    const tables = html => split(html).map(h => `<table class="perf wide">${h}</table>`).join('<div style="height:4mm"></div>');
+    const page = (n, title, tbl) => `<section class="rp-page tight"><div class="rp-head"><div><div class="muted">業績速報　詳細</div><h1>${esc(area)}　${perfDayTxt(d)}</h1></div><div style="text-align:right"><h2>${title}</h2></div></div><div class="rp-body"><div class="rp-in">${tbl}</div></div><div class="rp-foot"><span>${made}　色：90%未満＝赤、100%未満＝黄</span><span>詳細 ${n} / 3</span></div></section>`;
+    return page(1, '日別', tables(T.day)) + page(2, '着地見込', `<table class="perf wide">${T.land}</table>`) + page(3, '累計', tables(T.cum));
+  }
   function openPerfFull(D) {
-    const T = perfTables(D.P), d = new Date(perfDayK), today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
-    const page = (n, title, tbl) => `<section class="rp-page"><div class="rp-head"><div><div class="muted">業績速報</div><h1>${esc(listAreas(last[0]).join('・') || 'エリア')}　${perfDayTxt(d)}</h1></div><div style="text-align:right"><h2>${title}</h2></div></div><div class="rp-body"><div class="rp-in"><div class="tbl"><table class="perf">${tbl}</table></div></div></div><div class="rp-foot"><span>${made}　色：90%未満＝赤、100%未満＝黄</span><span>${n} / 3</span></div></section>`;
-    $('rep').innerHTML = page(1, '日別', T.day) + page(2, '着地見込', T.land) + page(3, '累計', T.cum);
-    $('repTitle').textContent = `業績速報：${perfDayTxt(d)}（3ページ）`;
-    $('repChat').hidden = !GAS; repPerf = { P: D.P, d, area: listAreas(last[0]).join('・') || 'エリア' };
+    const d = new Date(perfDayK), area = listAreas(last[0]).join('・') || 'エリア';
+    showPerf(perfFullPages(D.P, d, area), `業績速報：${perfDayTxt(d)}（詳細3ページ）`, { P: D.P, d, area });
+  }
+  function showPerf(html, title, rp) {
+    $('rep').innerHTML = html; $('repTitle').textContent = title;
+    $('repChat').hidden = !GAS; repPerf = rp;
     $('repWrap').hidden = false; document.body.style.overflow = 'hidden';
     requestAnimationFrame(fitPages);
   }
