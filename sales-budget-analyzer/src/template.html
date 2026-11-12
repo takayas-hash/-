@@ -570,12 +570,32 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function setStatus(t, err) { const s = $('status'); s.textContent = t; s.className = 'status small' + (err ? ' err' : ''); }
   // 1ファイルを読み、{cur, prev} または {raw} を返す
   async function readOne(f) {
+    // ウェブアプリ：前に読んだことがあり変わっていないファイルは、保存しておいた読み取り結果を使う（ダウンロードもしない）
+    if (f.__parsed) { const r = { ...f.__parsed, file: { name: f.name, raw: null }, area: f.__area || null, mtime: f.lastModified || 0 }; return r; }
     const r = await readOneInner(f);
+    if (f.__cacheKey) parseCache.put(f.__cacheKey, f.name, r);
     r.file = { name: f.name, raw: await f.arrayBuffer() };
     r.area = f.__area || null; // ウェブアプリ：どのエリアのフォルダのファイルか
     r.mtime = f.lastModified || 0; // 同じ月のファイルが重なったときに新しい方を使う
     return r;
   }
+  /**
+   * 読み取り結果の保存（ウェブアプリ用）。キー＝ファイルID＋更新日時＋版。ファイルを差し替える（更新日時が変わる）か、ツールを更新すると読み直す。
+   * このブラウザの IndexedDB に置き、45日使わなかったものは消す
+   */
+  const parseCache = {
+    key: m => `pc:${APP_VERSION}:${m.id}@${m.updated || 0}`,
+    async get(k) { const v = await store.getK(k); if (v && v.g) this.touch(k); return v && v.g ? v.g : null; },
+    put(k, name, g) { const { file, ...rest } = g; store.putK(k, { name, g: rest, at: Date.now() }, 30000).then(() => this.touch(k)).catch(() => {}); },
+    used: {},
+    touch(k) { this.used[k] = Date.now(); },
+    async prune() {
+      const idx = (await store.getK('pcIndex')) || {}; Object.assign(idx, this.used); this.used = {};
+      const limit = Date.now() - 45 * 864e5;
+      for (const [k, t] of Object.entries(idx)) if (t < limit || !k.startsWith(`pc:${APP_VERSION}:`)) { await store.delK(k); delete idx[k]; }
+      store.putK('pcIndex', idx).catch(() => {});
+    },
+  };
   async function readOneInner(f) {
     const buf = await f.arrayBuffer();
     let wb;
@@ -631,15 +651,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         } catch (e) { rej(e); }
       });
     },
-    async tx(mode, fn) {
-      // 環境によっては応答が返らないため3秒で打ち切る
-      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000));
+    async tx(mode, fn, ms) {
+      // 環境によっては応答が返らないため3秒で打ち切る（読み取り結果の保存は大きいので長め）
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms || 3000));
       const db = await Promise.race([this.open(), timeout]);
       return Promise.race([timeout, new Promise((res, rej) => { const x = db.transaction('kv', mode); const r = fn(x.objectStore('kv')); x.oncomplete = () => res(r && r.result); x.onerror = () => rej(x.error); })]);
     },
     get() { return this.tx('readonly', s => s.get('data')).catch(() => null); },
     getK(k) { return this.tx('readonly', s => s.get(k)).catch(() => null); },
-    putK(k, v) { return this.tx('readwrite', s => s.put(v, k)); },
+    putK(k, v, ms) { return this.tx('readwrite', s => s.put(v, k), ms); },
+    delK(k) { return this.tx('readwrite', s => s.delete(k)).catch(() => null); },
     put(v) { return this.tx('readwrite', s => s.put(v, 'data')); },
     clear() { return this.tx('readwrite', s => { s.delete('history'); return s.delete('data'); }); },
   };
@@ -2516,16 +2537,24 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       let hist = null; try { const h = await call('getHistory', ids); hist = mergeHistory(null, { tc: h.tc.map(x => JSON.parse(x)), wage: h.wage.map(x => JSON.parse(x)), nps: (h.nps || []).map(x => JSON.parse(x)) }); } catch (e) { console.warn(e); }
       const files = []; let n = 0;
       const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name, { lastModified: m.updated || Date.now() }); f.__area = m.common ? null : m.folderId; return f; };
+      // 前に読んで変わっていないファイルは保存してある読み取り結果を使い、それ以外だけダウンロードする
+      const t0 = Date.now(), need = []; let hit = 0;
+      for (const m of list) {
+        const k = parseCache.key(m), g = await parseCache.get(k);
+        if (g) { hit++; files.push({ name: m.name, lastModified: m.updated || 0, __area: m.common ? null : m.folderId, __parsed: g }); }
+        else need.push({ m, k });
+      }
       // 4件ずつ並行して取得
-      for (let i = 0; i < list.length; i += 4) {
-        const part = await Promise.all(list.slice(i, i + 4).map(m => call('getFile', m.id).then(r => { n++; if (!stale()) setStatus(`「${label}」を読み込み中… ${n}／${list.length}件（${m.name}）`); return b64ToFile(r, m); })));
+      for (let i = 0; i < need.length; i += 4) {
+        const part = await Promise.all(need.slice(i, i + 4).map(({ m, k }) => call('getFile', m.id).then(r => { n++; if (!stale()) setStatus(`「${label}」を読み込み中… ${n}／${need.length}件をダウンロード（${m.name}）${hit ? `・${hit}件は保存済みを使用` : ''}`); const f = b64ToFile(r, m); f.__cacheKey = k; return f; })));
         if (stale()) return;
         files.push(...part);
       }
+      const took = Math.round((Date.now() - t0) / 1000);
       if (stale()) return;
       HIST = hist;
-      const ok = await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています。`, fail: e => { throw e; } });
-      if (ok) shownLabel = label;
+      const ok = await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています（${files.length}件中${hit}件は前に読んだものを使用・${need.length}件をダウンロード、${took}秒）。`, fail: e => { throw e; } });
+      if (ok) { shownLabel = label; setTimeout(() => parseCache.prune().catch(() => {}), 5000); }
     } catch (e) { console.error(e); if (!stale()) setStatus(`「${label}」を読み込めませんでした：${e.message || e}。` + (shownLabel ? `画面は「${shownLabel}」の表示のままです。` : ''), true); }
     if (!stale()) $('driveLoad').disabled = false;
   }
