@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 100;               // 1つのフォルダで読む件数（更新日時の新しい順）。使わなくなった古いファイルは開いたときに「過去」へ移す
-const APP_VERSION = '71fb216';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = 'eb2e33f';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {

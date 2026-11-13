@@ -4266,6 +4266,8 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       + (land ? kpi('労働時間（着地見込み）', hrs0(a.landMins), `残り予定 ${hrs0(a.planMins)}${a.estDays ? `・未作成${a.estDays}日を補完` : ''}`) : '')
       + (L.hasWage ? kpi('雑給（着地見込み）', man(a.landCost), `実績 ${man(a.cost)}${a.wageless ? `・${a.wageless}店除く` : ''}`) : '')
       + (L.hasWage && full && R.area.fc ? kpi('雑給率（見込み）', pct(a.landCost / R.area.fc.landing), `売上見込み ${man(R.area.fc.landing)}`) : '')
+      + (() => { const ws = R.stores.filter(s => s.labor && !s.labor.wageless && s.plc && s.plc.bWage); if (!L.hasWage || !ws.length) return ''; const b = ws.reduce((t, s) => t + s.plc.bWage, 0), v = ws.reduce((t, s) => t + (land ? s.labor.landCost : s.plc.wage != null ? s.plc.wage : s.labor.cost), 0), d = v - b;
+          return kpi(land ? '雑給の予算差（見込み）' : '雑給の予算差', cman(d), `予算 ${man(b)}（損益・${ws.length}店）`, d > 0 ? 'neg' : 'pos'); })()
       + kpi('残業アラート', `${a.alerts.length}名`, `60h以上 ${a.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, a.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '')
       + (R.area.std && R.area.std.planRate != null ? kpi('計画標準比', pct(R.area.std.planRate), `予算超えの計画 ${R.area.std.overDays}日`, R.area.std.budgetRate != null && R.area.std.planRate > R.area.std.budgetRate ? 'neg' : 'pos') : '')
       + (R.area.std ? kpi('標準比（実績）', pct(R.area.std.cutRate), `${L.mo + 1}/${L.cut}時点`) + (land ? kpi('標準比（着地見込み）', pct(R.area.std.landRate), R.area.std.budgetRate != null ? `予算標準比 ${pct(R.area.std.budgetRate)}` : '', R.area.std.budgetRate != null && R.area.std.landRate > R.area.std.budgetRate ? 'neg' : 'pos') : '') : '');
@@ -4274,11 +4276,15 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     const stdCells = (s, land) => { if (!hasStd) return ''; const x = s.std; if (!x || x.missing) return `<td class="n muted" colspan="${land ? 4 : 2}">卓数なし</td>`;
       return `<td class="n">${pct(x.cutRate)}</td>${land ? `<td class="n ${x.budgetRate != null && x.landRate > x.budgetRate ? 'neg' : ''}"><b>${pct(x.landRate)}</b></td>` : ''}<td class="n muted">${pct(x.budgetRate)}</td>${land ? `<td class="n ${x.over > 0 ? 'neg' : 'pos'}">${x.over != null ? (x.over > 0 ? '+' : '▲') + hrs0(Math.abs(x.over) * 60) : '－'}</td>` : ''}`; };
     const rows = [...R.stores].sort((x, y) => (lRate(y) ?? -1) - (lRate(x) ?? -1));
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}<th class="n">雑給率（見込み）</th><th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th>${hasStd ? `<th class="n">標準比（実績）</th>${land ? '<th class="n">標準比（着地）</th>' : ''}<th class="n">予算標準比</th>${land ? '<th class="n">予算との差</th>' : ''}` : ''}</tr></thead><tbody>`
+    // 雑給の予算（損益のパートナー等給与）との差。月の途中＝着地見込み−予算、確定月＝損益の実績（なければ時給×勤務時間）−予算
+    const hasWB = L.hasWage && R.stores.some(s => s.plc && s.plc.bWage);
+    const wVal = s => land ? s.labor.landCost : s.plc && s.plc.wage != null ? s.plc.wage : s.labor.cost;
+    const wbCells = s => { if (!hasWB) return ''; const b = s.plc && s.plc.bWage; if (!b) return '<td class="n muted" colspan="2">損益なし</td>'; const d = wVal(s) - b; return `<td class="n muted">${man(b)}</td><td class="n ${d > 0 ? 'neg' : 'pos'}"><b>${cman(d)}</b></td>`; };
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}<th class="n">雑給率（見込み）</th>${hasWB ? `<th class="n">雑給予算</th><th class="n">${land ? '予算差（見込み）' : '予算差'}</th>` : ''}<th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th>${hasStd ? `<th class="n">標準比（実績）</th>${land ? '<th class="n">標準比（着地）</th>' : ''}<th class="n">予算標準比</th>${land ? '<th class="n">予算との差</th>' : ''}` : ''}</tr></thead><tbody>`
       + rows.map(s => { const l = s.labor; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
         + (!l ? `<td class="n muted" colspan="9">勤怠データなし</td></tr>` :
         `<td class="n">${hrs0(l.mins)}</td><td class="n muted">${hrs0(l.staffMins)}</td>${land ? `<td class="n">${hrs0(l.planMins)}</td><td class="n"><b>${hrs0(l.landMins)}</b></td><td class="n ${l.estDays ? 'neg' : ''}">${l.estDays ? l.estDays + '日' : '－'}</td>` : ''}`
-        + (L.hasWage ? (l.wageless ? `<td class="n muted" colspan="${land ? 4 : 3}">時給データなし</td>` : `<td class="n">${man(l.cost)}</td>${land ? `<td class="n"><b>${man(l.landCost)}</b></td>` : ''}<td class="n">${pct(lRate(s))}</td><td class="n ${l.noWage ? 'neg' : 'muted'}">${l.noWage ? l.noWage + '名' : '－'}</td>`) : '')
+        + (L.hasWage ? (l.wageless ? `<td class="n muted" colspan="${(land ? 4 : 3) + (hasWB ? 2 : 0)}">時給データなし</td>` : `<td class="n">${man(l.cost)}</td>${land ? `<td class="n"><b>${man(l.landCost)}</b></td>` : ''}<td class="n">${pct(lRate(s))}</td>${wbCells(s)}<td class="n ${l.noWage ? 'neg' : 'muted'}">${l.noWage ? l.noWage + '名' : '－'}</td>`) : '')
         + `<td class="n ${l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : ''}">${l.alerts.length ? l.alerts.length + '名' : '－'}</td>` + stdCells(s, land) + '</tr>'); }).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
@@ -4373,25 +4379,30 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
   const ptx = v => v == null ? '－' : (v >= 0 ? '+' : '▲') + Math.abs(v * 100).toFixed(1) + 'pt';
   function renderCost() {
     const a = R.area;
-    $('kpis').innerHTML = kpi('理論原価率', pct(a.costRate), a.pCostRate != null ? `前年 ${pct(a.pCostRate)}（${ptx(a.costRate - a.pCostRate)}）` : '')
+    const pc = a.plc, pLab = pc && pc.mode === 'land' ? '（見込み）' : '';
+    $('kpis').innerHTML = (pc && pc.rate != null ? kpi('値引後原価率' + pLab, pct(pc.rate), `予算 ${pct(pc.bRate)}（${cpt(pc.rate - pc.bRate)}）${pc.pRate != null ? `・前年 ${pct(pc.pRate)}` : ''}`, pc.rate > pc.bRate ? 'neg' : 'pos')
+        + kpi('原価の予算差' + pLab, cman(pc.diff), `率の差 ${cman(pc.rateEff)}・売上の差 ${cman(pc.salesEff)}`, pc.rateEff > 0 ? 'neg' : 'pos') : '')
+      + kpi('理論原価率', pct(a.costRate), a.pCostRate != null ? `前年 ${pct(a.pCostRate)}（${ptx(a.costRate - a.pCostRate)}）` : '')
       + kpi('ロス率（値引前）', p2(a.lossRate), a.pLossRate != null ? `前年 ${p2(a.pLossRate)}` : '')
       + (a.menu ? kpi('食べ放題フード', a.menu.foodQty.toFixed(1) + '皿/人', `${Math.round(a.menu.foodG).toLocaleString('ja-JP')}g/人`) + kpi('1人あたり原価', yen(a.menu.costPP), `精肉 ${a.menu.meatQty.toFixed(2)}皿`) : '')
       + (a.inv ? kpi('原価率理論差', pt2(a.inv.gap), `値引前原価率 ${pct2(a.inv.preRate)}`) + kpi('ロス込理論差', pt2(a.inv.gapExLoss), `原価管理表 ${a.inv.n}店`)
         : kpi('理論差（概算）', ptx(a.gapRate), `仕入率 ${pct(a.buyRate)}${a.pGapRate != null ? `・前年 ${ptx(a.pGapRate)}` : ''}`));
     setCmt('areaComment', commentText(a.costLines, detail));
-    $('storeTblTitle').textContent = R.stores.some(s => s.inv) ? '店舗別 原価・ロス・原価率理論差' : '店舗別 原価・ロス・理論差（概算）';
-    const rows = [...R.stores].sort((x, y) => (y.costRate || 0) - (x.costRate || 0));
-    const bR = a.benchCostRate != null ? a.benchCostRate : a.costRate;
-    const premOf = s => s.menu ? sum(s.menu.courses.filter(c => /プレミアム/.test(c.name)), c => c.share) : null;
+    $('storeTblTitle').textContent = (R.stores.some(s => s.plc && s.plc.rate != null) ? '店舗別 値引後原価率（予算差）・' : '店舗別 ') + (R.stores.some(s => s.inv) ? '原価・ロス・原価率理論差' : '原価・ロス・理論差（概算）');
+    // 値引後原価率（損益の予算と比較）があれば、予算差の大きい順
+    const hasPL = R.stores.some(s => s.plc && s.plc.rate != null), pd = s => s.plc && s.plc.rate != null ? s.plc.rate - s.plc.bRate : null;
+    const rows = [...R.stores].sort((x, y) => hasPL ? (pd(y) ?? -9) - (pd(x) ?? -9) : (y.costRate || 0) - (x.costRate || 0));
+    const plCols = hasPL ? `<th class="n">値引後原価率${a.plc && a.plc.mode === 'land' ? '（見込み）' : ''}</th><th class="n">予算</th><th class="n">予算差</th><th class="n">原価の予算差</th><th class="n">うち率の差</th>` : '';
+    const plCells = s => !hasPL ? '' : pd(s) == null ? '<td class="n muted" colspan="5">損益なし</td>' : `<td class="n"><b>${pct2(s.plc.rate)}</b></td><td class="n muted">${pct2(s.plc.bRate)}</td><td class="n ${pd(s) > 0 ? 'neg' : 'pos'}"><b>${cpt(pd(s))}</b></td><td class="n">${cman(s.plc.diff)}</td><td class="n ${s.plc.rateEff > 0 ? 'neg' : 'pos'}">${cman(s.plc.rateEff)}</td>`;
     const hasInv = R.stores.some(s => s.inv);
     const g3 = s => s.inv && s.inv.trend.length ? avgOf(s.inv.trend.slice(-3).map(x => x.gapExLoss).filter(v => v != null)) : null;
     const gapCols = hasInv ? '<th class="n">値引前原価率</th><th class="n">原価率理論差</th><th class="n">ロス込理論差</th><th class="n">直近3か月</th>' : '<th class="n">仕入率</th><th class="n">理論差（概算）</th>';
     const gapCells = s => hasInv ? (s.inv ? `<td class="n">${pct2(s.inv.preRate)}</td><td class="n">${pt2(s.inv.gap)}</td><td class="n"><b>${pt2(s.inv.gapExLoss)}</b></td><td class="n">${g3(s) != null ? pt2(g3(s)) : '－'}</td>` : '<td class="n muted" colspan="4">原価管理表なし</td>') : `<td class="n">${pct(s.buyRate)}</td><td class="n">${ptx(s.gapRate)}</td>`;
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">理論原価率</th><th class="n">平均差</th><th class="n">前年差</th>${gapCols}<th class="n">ロス率</th><th class="n">1人あたり原価</th><th class="n">フード皿/人</th><th class="n">プレミアム比率</th></tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}${plCols}<th class="n">理論原価率</th><th class="n">前年差</th>${gapCols}<th class="n">ロス率</th><th class="n">1人あたり原価</th><th class="n">フード皿/人</th></tr></thead><tbody>`
       + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}
-        <td class="n">${pct(s.costRate)}</td><td class="n ${s.costRate - bR > 0 ? 'neg' : 'pos'}">${s.costRate != null && bR != null ? ptx(s.costRate - bR) : '－'}</td><td class="n">${s.pCostRate != null ? ptx(s.costRate - s.pCostRate) : '－'}</td>
+        ${plCells(s)}<td class="n">${pct(s.costRate)}</td><td class="n">${s.pCostRate != null ? ptx(s.costRate - s.pCostRate) : '－'}</td>
         ${gapCells(s)}<td class="n">${p2(s.lossRate)}</td>
-        <td class="n">${s.menu ? yen(s.menu.costPP) : '－'}</td><td class="n">${s.menu ? s.menu.foodQty.toFixed(1) : '－'}</td><td class="n">${premOf(s) != null ? pct(premOf(s)) : '－'}</td></tr>`).join('') + '</tbody>';
+        <td class="n">${s.menu ? yen(s.menu.costPP) : '－'}</td><td class="n">${s.menu ? s.menu.foodQty.toFixed(1) : '－'}</td></tr>`).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
       tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -4403,8 +4414,11 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
   function renderStoreCost(s) {
     $('storeName').textContent = s.name;
     const I = s.inv;
-    $('sKpis').innerHTML = (I ? kpi('値引前原価率', pct2(I.preRate), `実質原価率 ${pct2(I.realRate)}`) : '')
-      + kpi('理論原価率', I ? pct2(I.theory) : pct(s.costRate), [R.area.benchCostRate != null && R.stores.length > 1 ? `平均 ${pct(R.area.benchCostRate)}` : '', s.pCostRate != null ? `前年 ${pct(s.pCostRate)}` : ''].filter(Boolean).join('・'))
+    const pc = s.plc && s.plc.rate != null ? s.plc : null, pLab = pc && pc.mode === 'land' ? '（見込み）' : '';
+    $('sKpis').innerHTML = (pc ? kpi('値引後原価率' + pLab, pct2(pc.rate), `予算 ${pct2(pc.bRate)}（${cpt(pc.rate - pc.bRate)}）${pc.pRate != null ? `・前年 ${pct2(pc.pRate)}` : ''}`, pc.rate > pc.bRate ? 'neg' : 'pos')
+        + kpi('原価の予算差' + pLab, cman(pc.diff), `率の差 ${cman(pc.rateEff)}・売上の差 ${cman(pc.salesEff)}`, pc.rateEff > 0 ? 'neg' : 'pos') : '')
+      + (I ? kpi('値引前原価率', pct2(I.preRate), `実質原価率 ${pct2(I.realRate)}`) : '')
+      + kpi('理論原価率', I ? pct2(I.theory) : pct(s.costRate), [s.pCostRate != null ? `前年 ${pct(s.pCostRate)}` : ''].filter(Boolean).join('・'))
       + (I ? kpi('原価率理論差', pt2(I.gap), sman(I.gapAmt)) + kpi('ロス込理論差', pt2(I.gapExLoss), `ロス率 ${p2(I.lossPre)}`)
         : kpi('仕入率', pct(s.buyRate), s.pBuyRate != null ? `前年 ${pct(s.pBuyRate)}` : '') + kpi('理論差（概算）', ptx(s.gapRate), `うちロス ${ptx(s.lossRate || 0)}`))
       + (I ? '' : kpi('ロス率', p2(s.lossRate), s.loss ? `ロス額 ${man(s.loss)}` : ''))
@@ -4757,7 +4771,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '71fb216'; // 版（build.py が書き込む）
+  const APP_VERSION = 'eb2e33f'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
