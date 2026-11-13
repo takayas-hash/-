@@ -465,16 +465,29 @@ function plCostLines(c, name) {
   return L;
 }
 /** 雑給（パートナー等給与）の予算差のコメント。land：着地見込みの雑給（時給×勤務時間） */
+/** 雑給の予算差：金額と雑給率（売上比）。金額の差を「売上の差による分」と「雑給率の差による分」に分ける */
+function wageVar(w, sales, bW, bS) {
+  const rate = sales ? w / sales : null, bRate = bS ? bW / bS : null, o = { d: w - bW, rate, bRate };
+  if (rate != null && bRate != null) { o.rd = rate - bRate; o.salesEff = (sales - bS) * bRate; o.rateEff = (rate - bRate) * sales; }
+  return o;
+}
+function wageVarTxt(v, land) {
+  let t = `雑給率${land ? 'の見込み' : ''}${pct(v.rate)}（予算${pct(v.bRate)}・${v.rd != null ? cpt(v.rd) : '－'}）。金額は予算に対して${cman(v.d)}`;
+  if (v.rd != null) t += `（売上の差による分${cman(v.salesEff)}、雑給率の差による分${cman(v.rateEff)}）`;
+  if (v.rd != null && v.rd >= 0.003) t += land ? `。雑給率が予算を上回る見込み。残りの日の勤務（人時）を売上見込みに合わせて調整` : '。雑給率が予算を上回った。売上に対して人時が多い日・時間帯を確認';
+  else if (v.d > 0 && v.rd != null && v.rd < 0.003) t += '。金額は予算を超えるが、売上が予算を上回った分で、雑給率は予算内';
+  return t;
+}
+/** 雑給（パートナー等給与）の予算差のコメント。landWage：着地見込みの雑給（時給×勤務時間） */
 function plWageLines(c, landWage, landSales, full) {
   if (!c || !c.bWage) return [];
   const bR = c.bSales ? c.bWage / c.bSales : null;
   if (full) {
     if (c.wage == null) return [{ t: `・雑給の予算（損益のパートナー等給与）：${man(c.bWage)}${bR != null ? `（雑給率${pct(bR)}）` : ''}。実績は損益が入ると出ます。`, d: true }];
-    return [{ t: `・雑給（損益のパートナー等給与）：実績${man(c.wage)}、予算${man(c.bWage)}に対して${cman(c.wage - c.bWage)}。雑給率${pct(c.wage / c.sales)}（予算${pct(bR)}）${c.prevWage ? `、前年${man(c.prevWage)}` : ''}。`, d: false }];
+    return [{ t: `・雑給（損益のパートナー等給与）：実績${man(c.wage)}・予算${man(c.bWage)}。${wageVarTxt(wageVar(c.wage, c.sales, c.bWage, c.bSales), false)}${c.prevWage ? `。前年${man(c.prevWage)}` : ''}。`, d: false }];
   }
   if (landWage == null) return [{ t: `・雑給の予算（損益のパートナー等給与）：${man(c.bWage)}${bR != null ? `（雑給率${pct(bR)}）` : ''}。タイムカード表・勤務スケジュール表と時給データを入れると、着地見込みとの予算差が出ます。`, d: true }];
-  const d = landWage - c.bWage;
-  return [{ t: `・雑給の予算差異見込み：着地見込み${man(landWage)}、予算${man(c.bWage)}に対して${cman(d)}。雑給率の見込み${landSales ? pct(landWage / landSales) : '－'}（予算${pct(bR)}）${d > 0 ? '。予算内に収めるには残りの日の勤務を見直し' : ''}。`, d: false },
+  return [{ t: `・雑給の予算差異見込み：着地見込み${man(landWage)}・予算${man(c.bWage)}。${wageVarTxt(wageVar(landWage, landSales, c.bWage, c.bSales), true)}。`, d: false },
     { t: '　※着地見込みは時給×勤務時間（実績＋勤務予定）。交通費・手当などは入らないため、損益の金額より少なめに出ます。', d: true }];
 }
 
@@ -1626,13 +1639,15 @@ function analyze(curRows, prevRows, extra) {
       const bW = sum(ws, s => s.plc.bWage), bS = sum(ws, s => s.plc.bSales), L = [];
       if (isFullMonth) {
         const wa = ws.filter(s => s.plc.wage != null);
-        if (wa.length === ws.length) { const w = sum(wa, s => s.plc.wage), sl = sum(wa, s => s.plc.sales); L.push({ t: `・雑給（損益・直営${ws.length}店）：実績${man(w)}、予算${man(bW)}に対して${cman(w - bW)}。雑給率${pct(w / sl)}（予算${pct(bW / bS)}）。${ws.length > 1 ? `予算を上回った店：${wa.filter(s => s.plc.wage > s.plc.bWage).sort((a, b) => (b.plc.wage - b.plc.bWage) - (a.plc.wage - a.plc.bWage)).slice(0, 3).map(s => `${s.name}${cman(s.plc.wage - s.plc.bWage)}`).join('、') || 'なし'}。` : ''}`, d: false }); }
+        if (wa.length === ws.length) { const w = sum(wa, s => s.plc.wage), sl = sum(wa, s => s.plc.sales); const rd = s => s.plc.wage / s.plc.sales - s.plc.bWage / s.plc.bSales;
+          L.push({ t: `・雑給（損益・直営${ws.length}店）：実績${man(w)}・予算${man(bW)}。${wageVarTxt(wageVar(w, sl, bW, bS), false)}。${ws.length > 1 ? `雑給率が予算を上回った店：${wa.filter(s => rd(s) > 0).sort((a, b) => rd(b) - rd(a)).slice(0, 3).map(s => `${s.name}${cpt(rd(s))}（${cman(s.plc.wage - s.plc.bWage)}）`).join('、') || 'なし'}。` : ''}`, d: false }); }
       } else {
         const wl = ws.filter(okL);
         if (wl.length) {
           const lw = sum(wl, s => s.labor.landCost), ls = sum(wl, s => s.fc ? s.fc.landing : 0), bW2 = sum(wl, s => s.plc.bWage), bS2 = sum(wl, s => s.plc.bSales);
           const miss = ws.filter(s => !okL(s)).map(s => s.name);
-          L.push({ t: `・雑給の予算差異見込み（直営${wl.length}店${miss.length ? `。勤怠・時給のない${miss.join('、')}は除く` : ''}）：着地見込み${man(lw)}、予算${man(bW2)}に対して${cman(lw - bW2)}。雑給率の見込み${ls ? pct(lw / ls) : '－'}（予算${pct(bW2 / bS2)}）。${ws.length > 1 ? `予算を上回る見込みの店：${wl.filter(s => s.labor.landCost > s.plc.bWage).sort((a, b) => (b.labor.landCost - b.plc.bWage) - (a.labor.landCost - a.plc.bWage)).slice(0, 3).map(s => `${s.name}${cman(s.labor.landCost - s.plc.bWage)}`).join('、') || 'なし'}。` : ''}`, d: false });
+          const rd = s => s.fc && s.fc.landing ? s.labor.landCost / s.fc.landing - s.plc.bWage / s.plc.bSales : null;
+          L.push({ t: `・雑給の予算差異見込み（直営${wl.length}店${miss.length ? `。勤怠・時給のない${miss.join('、')}は除く` : ''}）：着地見込み${man(lw)}・予算${man(bW2)}。${wageVarTxt(wageVar(lw, ls, bW2, bS2), true)}。${wl.length > 1 ? `雑給率が予算を上回る見込みの店：${wl.filter(s => rd(s) > 0).sort((a, b) => rd(b) - rd(a)).slice(0, 3).map(s => `${s.name}${cpt(rd(s))}（${cman(s.labor.landCost - s.plc.bWage)}）`).join('、') || 'なし'}。` : ''}`, d: false });
           L.push({ t: '　※着地見込みは時給×勤務時間。交通費・手当などは入らないため、損益の金額より少なめに出ます。', d: true });
         } else L.push({ t: `・雑給の予算（損益・直営${ws.length}店）：${man(bW)}（雑給率${pct(bW / bS)}）。`, d: true });
       }

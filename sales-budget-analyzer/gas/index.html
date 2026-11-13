@@ -990,16 +990,29 @@ function plCostLines(c, name) {
   return L;
 }
 /** 雑給（パートナー等給与）の予算差のコメント。land：着地見込みの雑給（時給×勤務時間） */
+/** 雑給の予算差：金額と雑給率（売上比）。金額の差を「売上の差による分」と「雑給率の差による分」に分ける */
+function wageVar(w, sales, bW, bS) {
+  const rate = sales ? w / sales : null, bRate = bS ? bW / bS : null, o = { d: w - bW, rate, bRate };
+  if (rate != null && bRate != null) { o.rd = rate - bRate; o.salesEff = (sales - bS) * bRate; o.rateEff = (rate - bRate) * sales; }
+  return o;
+}
+function wageVarTxt(v, land) {
+  let t = `雑給率${land ? 'の見込み' : ''}${pct(v.rate)}（予算${pct(v.bRate)}・${v.rd != null ? cpt(v.rd) : '－'}）。金額は予算に対して${cman(v.d)}`;
+  if (v.rd != null) t += `（売上の差による分${cman(v.salesEff)}、雑給率の差による分${cman(v.rateEff)}）`;
+  if (v.rd != null && v.rd >= 0.003) t += land ? `。雑給率が予算を上回る見込み。残りの日の勤務（人時）を売上見込みに合わせて調整` : '。雑給率が予算を上回った。売上に対して人時が多い日・時間帯を確認';
+  else if (v.d > 0 && v.rd != null && v.rd < 0.003) t += '。金額は予算を超えるが、売上が予算を上回った分で、雑給率は予算内';
+  return t;
+}
+/** 雑給（パートナー等給与）の予算差のコメント。landWage：着地見込みの雑給（時給×勤務時間） */
 function plWageLines(c, landWage, landSales, full) {
   if (!c || !c.bWage) return [];
   const bR = c.bSales ? c.bWage / c.bSales : null;
   if (full) {
     if (c.wage == null) return [{ t: `・雑給の予算（損益のパートナー等給与）：${man(c.bWage)}${bR != null ? `（雑給率${pct(bR)}）` : ''}。実績は損益が入ると出ます。`, d: true }];
-    return [{ t: `・雑給（損益のパートナー等給与）：実績${man(c.wage)}、予算${man(c.bWage)}に対して${cman(c.wage - c.bWage)}。雑給率${pct(c.wage / c.sales)}（予算${pct(bR)}）${c.prevWage ? `、前年${man(c.prevWage)}` : ''}。`, d: false }];
+    return [{ t: `・雑給（損益のパートナー等給与）：実績${man(c.wage)}・予算${man(c.bWage)}。${wageVarTxt(wageVar(c.wage, c.sales, c.bWage, c.bSales), false)}${c.prevWage ? `。前年${man(c.prevWage)}` : ''}。`, d: false }];
   }
   if (landWage == null) return [{ t: `・雑給の予算（損益のパートナー等給与）：${man(c.bWage)}${bR != null ? `（雑給率${pct(bR)}）` : ''}。タイムカード表・勤務スケジュール表と時給データを入れると、着地見込みとの予算差が出ます。`, d: true }];
-  const d = landWage - c.bWage;
-  return [{ t: `・雑給の予算差異見込み：着地見込み${man(landWage)}、予算${man(c.bWage)}に対して${cman(d)}。雑給率の見込み${landSales ? pct(landWage / landSales) : '－'}（予算${pct(bR)}）${d > 0 ? '。予算内に収めるには残りの日の勤務を見直し' : ''}。`, d: false },
+  return [{ t: `・雑給の予算差異見込み：着地見込み${man(landWage)}・予算${man(c.bWage)}。${wageVarTxt(wageVar(landWage, landSales, c.bWage, c.bSales), true)}。`, d: false },
     { t: '　※着地見込みは時給×勤務時間（実績＋勤務予定）。交通費・手当などは入らないため、損益の金額より少なめに出ます。', d: true }];
 }
 
@@ -2151,13 +2164,15 @@ function analyze(curRows, prevRows, extra) {
       const bW = sum(ws, s => s.plc.bWage), bS = sum(ws, s => s.plc.bSales), L = [];
       if (isFullMonth) {
         const wa = ws.filter(s => s.plc.wage != null);
-        if (wa.length === ws.length) { const w = sum(wa, s => s.plc.wage), sl = sum(wa, s => s.plc.sales); L.push({ t: `・雑給（損益・直営${ws.length}店）：実績${man(w)}、予算${man(bW)}に対して${cman(w - bW)}。雑給率${pct(w / sl)}（予算${pct(bW / bS)}）。${ws.length > 1 ? `予算を上回った店：${wa.filter(s => s.plc.wage > s.plc.bWage).sort((a, b) => (b.plc.wage - b.plc.bWage) - (a.plc.wage - a.plc.bWage)).slice(0, 3).map(s => `${s.name}${cman(s.plc.wage - s.plc.bWage)}`).join('、') || 'なし'}。` : ''}`, d: false }); }
+        if (wa.length === ws.length) { const w = sum(wa, s => s.plc.wage), sl = sum(wa, s => s.plc.sales); const rd = s => s.plc.wage / s.plc.sales - s.plc.bWage / s.plc.bSales;
+          L.push({ t: `・雑給（損益・直営${ws.length}店）：実績${man(w)}・予算${man(bW)}。${wageVarTxt(wageVar(w, sl, bW, bS), false)}。${ws.length > 1 ? `雑給率が予算を上回った店：${wa.filter(s => rd(s) > 0).sort((a, b) => rd(b) - rd(a)).slice(0, 3).map(s => `${s.name}${cpt(rd(s))}（${cman(s.plc.wage - s.plc.bWage)}）`).join('、') || 'なし'}。` : ''}`, d: false }); }
       } else {
         const wl = ws.filter(okL);
         if (wl.length) {
           const lw = sum(wl, s => s.labor.landCost), ls = sum(wl, s => s.fc ? s.fc.landing : 0), bW2 = sum(wl, s => s.plc.bWage), bS2 = sum(wl, s => s.plc.bSales);
           const miss = ws.filter(s => !okL(s)).map(s => s.name);
-          L.push({ t: `・雑給の予算差異見込み（直営${wl.length}店${miss.length ? `。勤怠・時給のない${miss.join('、')}は除く` : ''}）：着地見込み${man(lw)}、予算${man(bW2)}に対して${cman(lw - bW2)}。雑給率の見込み${ls ? pct(lw / ls) : '－'}（予算${pct(bW2 / bS2)}）。${ws.length > 1 ? `予算を上回る見込みの店：${wl.filter(s => s.labor.landCost > s.plc.bWage).sort((a, b) => (b.labor.landCost - b.plc.bWage) - (a.labor.landCost - a.plc.bWage)).slice(0, 3).map(s => `${s.name}${cman(s.labor.landCost - s.plc.bWage)}`).join('、') || 'なし'}。` : ''}`, d: false });
+          const rd = s => s.fc && s.fc.landing ? s.labor.landCost / s.fc.landing - s.plc.bWage / s.plc.bSales : null;
+          L.push({ t: `・雑給の予算差異見込み（直営${wl.length}店${miss.length ? `。勤怠・時給のない${miss.join('、')}は除く` : ''}）：着地見込み${man(lw)}・予算${man(bW2)}。${wageVarTxt(wageVar(lw, ls, bW2, bS2), true)}。${wl.length > 1 ? `雑給率が予算を上回る見込みの店：${wl.filter(s => rd(s) > 0).sort((a, b) => rd(b) - rd(a)).slice(0, 3).map(s => `${s.name}${cpt(rd(s))}（${cman(s.labor.landCost - s.plc.bWage)}）`).join('、') || 'なし'}。` : ''}`, d: false });
           L.push({ t: '　※着地見込みは時給×勤務時間。交通費・手当などは入らないため、損益の金額より少なめに出ます。', d: true });
         } else L.push({ t: `・雑給の予算（損益・直営${ws.length}店）：${man(bW)}（雑給率${pct(bW / bS)}）。`, d: true });
       }
@@ -4242,7 +4257,9 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       + (L.hasWage ? kpi('雑給（着地見込み）', man(a.landCost), `実績 ${man(a.cost)}${a.wageless ? `・${a.wageless}店除く` : ''}`) : '')
       + (L.hasWage && full && R.area.fc ? kpi('雑給率（見込み）', pct(a.landCost / R.area.fc.landing), `売上見込み ${man(R.area.fc.landing)}`) : '')
       + (() => { const ws = R.stores.filter(s => s.labor && !s.labor.wageless && s.plc && s.plc.bWage); if (!L.hasWage || !ws.length) return ''; const b = ws.reduce((t, s) => t + s.plc.bWage, 0), v = ws.reduce((t, s) => t + (land ? s.labor.landCost : s.plc.wage != null ? s.plc.wage : s.labor.cost), 0), d = v - b;
-          return kpi(land ? '雑給の予算差（見込み）' : '雑給の予算差', cman(d), `予算 ${man(b)}（損益・${ws.length}店）`, d > 0 ? 'neg' : 'pos'); })()
+          const sl = ws.reduce((t, s) => t + (land ? (s.fc ? s.fc.landing : 0) : s.plc.wage != null ? s.plc.sales : s.sales), 0), bs = ws.reduce((t, s) => t + s.plc.bSales, 0), r = sl ? v / sl : null, br = b / bs;
+          return kpi(land ? '雑給率の予算差（見込み）' : '雑給率の予算差', r != null ? cpt(r - br) : '－', `雑給率 ${pct(r)}・予算 ${pct(br)}（損益・${ws.length}店）`, r > br ? 'neg' : 'pos')
+            + kpi(land ? '雑給の予算差（見込み）' : '雑給の予算差', cman(d), `予算 ${man(b)}`, d > 0 ? 'neg' : 'pos'); })()
       + kpi('残業アラート', `${a.alerts.length}名`, `60h以上 ${a.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, a.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '')
       + (R.area.std && R.area.std.planRate != null ? kpi('計画標準比', pct(R.area.std.planRate), `予算超えの計画 ${R.area.std.overDays}日`, R.area.std.budgetRate != null && R.area.std.planRate > R.area.std.budgetRate ? 'neg' : 'pos') : '')
       + (R.area.std ? kpi('標準比（実績）', pct(R.area.std.cutRate), `${L.mo + 1}/${L.cut}時点`) + (land ? kpi('標準比（着地見込み）', pct(R.area.std.landRate), R.area.std.budgetRate != null ? `予算標準比 ${pct(R.area.std.budgetRate)}` : '', R.area.std.budgetRate != null && R.area.std.landRate > R.area.std.budgetRate ? 'neg' : 'pos') : '') : '');
@@ -4250,16 +4267,21 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     const hasStd = !!R.area.std;
     const stdCells = (s, land) => { if (!hasStd) return ''; const x = s.std; if (!x || x.missing) return `<td class="n muted" colspan="${land ? 4 : 2}">卓数なし</td>`;
       return `<td class="n">${pct(x.cutRate)}</td>${land ? `<td class="n ${x.budgetRate != null && x.landRate > x.budgetRate ? 'neg' : ''}"><b>${pct(x.landRate)}</b></td>` : ''}<td class="n muted">${pct(x.budgetRate)}</td>${land ? `<td class="n ${x.over > 0 ? 'neg' : 'pos'}">${x.over != null ? (x.over > 0 ? '+' : '▲') + hrs0(Math.abs(x.over) * 60) : '－'}</td>` : ''}`; };
-    const rows = [...R.stores].sort((x, y) => (lRate(y) ?? -1) - (lRate(x) ?? -1));
     // 雑給の予算（損益のパートナー等給与）との差。月の途中＝着地見込み−予算、確定月＝損益の実績（なければ時給×勤務時間）−予算
     const hasWB = L.hasWage && R.stores.some(s => s.plc && s.plc.bWage);
     const wVal = s => land ? s.labor.landCost : s.plc && s.plc.wage != null ? s.plc.wage : s.labor.cost;
-    const wbCells = s => { if (!hasWB) return ''; const b = s.plc && s.plc.bWage; if (!b) return '<td class="n muted" colspan="2">損益なし</td>'; const d = wVal(s) - b; return `<td class="n muted">${man(b)}</td><td class="n ${d > 0 ? 'neg' : 'pos'}"><b>${cman(d)}</b></td>`; };
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}<th class="n">雑給率（見込み）</th>${hasWB ? `<th class="n">雑給予算</th><th class="n">${land ? '予算差（見込み）' : '予算差'}</th>` : ''}<th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th>${hasStd ? `<th class="n">標準比（実績）</th>${land ? '<th class="n">標準比（着地）</th>' : ''}<th class="n">予算標準比</th>${land ? '<th class="n">予算との差</th>' : ''}` : ''}</tr></thead><tbody>`
+    // 雑給率：月の途中＝着地見込みの雑給÷着地見込みの売上、確定月＝損益の雑給÷損益の売上（なければ時給×勤務時間÷売上）
+    const wRate = s => { if (!s.labor || s.labor.wageless || !L.hasWage) return null; if (land) return lRate(s); if (s.plc && s.plc.wage != null && s.plc.sales) return s.plc.wage / s.plc.sales; return s.sales ? s.labor.cost / s.sales : null; };
+    const bRate = s => s.plc && s.plc.bWage && s.plc.bSales ? s.plc.bWage / s.plc.bSales : null;
+    const rDiff = s => wRate(s) != null && bRate(s) != null ? wRate(s) - bRate(s) : null;
+    const rows = [...R.stores].sort((x, y) => hasWB ? (rDiff(y) ?? -9) - (rDiff(x) ?? -9) : (lRate(y) ?? -1) - (lRate(x) ?? -1));
+    const wbCells = s => { if (!hasWB) return `<td class="n">${pct(wRate(s))}</td>`; const b = s.plc && s.plc.bWage; if (!b) return `<td class="n muted" colspan="2">損益なし</td><td class="n">${pct(wRate(s))}</td><td class="n muted" colspan="2">－</td>`; const d = wVal(s) - b, rd = rDiff(s);
+      return `<td class="n muted">${man(b)}</td><td class="n ${d > 0 ? 'neg' : 'pos'}">${cman(d)}</td><td class="n"><b>${pct(wRate(s))}</b></td><td class="n muted">${pct(bRate(s))}</td><td class="n ${rd > 0 ? 'neg' : 'pos'}"><b>${rd != null ? cpt(rd) : '－'}</b></td>`; };
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}${hasWB ? `<th class="n">雑給予算</th><th class="n">金額の差</th>` : ''}<th class="n">雑給率${land ? '（見込み）' : ''}</th>${hasWB ? '<th class="n">予算の雑給率</th><th class="n">雑給率の差</th>' : ''}<th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th>${hasStd ? `<th class="n">標準比（実績）</th>${land ? '<th class="n">標準比（着地）</th>' : ''}<th class="n">予算標準比</th>${land ? '<th class="n">予算との差</th>' : ''}` : ''}</tr></thead><tbody>`
       + rows.map(s => { const l = s.labor; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
         + (!l ? `<td class="n muted" colspan="9">勤怠データなし</td></tr>` :
         `<td class="n">${hrs0(l.mins)}</td><td class="n muted">${hrs0(l.staffMins)}</td>${land ? `<td class="n">${hrs0(l.planMins)}</td><td class="n"><b>${hrs0(l.landMins)}</b></td><td class="n ${l.estDays ? 'neg' : ''}">${l.estDays ? l.estDays + '日' : '－'}</td>` : ''}`
-        + (L.hasWage ? (l.wageless ? `<td class="n muted" colspan="${(land ? 4 : 3) + (hasWB ? 2 : 0)}">時給データなし</td>` : `<td class="n">${man(l.cost)}</td>${land ? `<td class="n"><b>${man(l.landCost)}</b></td>` : ''}<td class="n">${pct(lRate(s))}</td>${wbCells(s)}<td class="n ${l.noWage ? 'neg' : 'muted'}">${l.noWage ? l.noWage + '名' : '－'}</td>`) : '')
+        + (L.hasWage ? (l.wageless ? `<td class="n muted" colspan="${(land ? 4 : 3) + (hasWB ? 4 : 0)}">時給データなし</td>` : `<td class="n">${man(l.cost)}</td>${land ? `<td class="n"><b>${man(l.landCost)}</b></td>` : ''}${wbCells(s)}<td class="n ${l.noWage ? 'neg' : 'muted'}">${l.noWage ? l.noWage + '名' : '－'}</td>`) : '')
         + `<td class="n ${l.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : ''}">${l.alerts.length ? l.alerts.length + '名' : '－'}</td>` + stdCells(s, land) + '</tr>'); }).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
@@ -4746,7 +4768,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'eb2e33f'; // 版（build.py が書き込む）
+  const APP_VERSION = 'e71b873'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
