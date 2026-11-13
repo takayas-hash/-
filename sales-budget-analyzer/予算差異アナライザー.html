@@ -365,7 +365,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   <section class="card" id="perfCard" data-tab="perf" hidden>
     <div class="row">
       <div><div class="label">業績速報（日報）</div><h2 id="perfTitle"></h2><div class="small muted">日別の前年は同じ曜日（364日前）、累計・着地の前年は同じ日付の範囲。労働時間は社員＋P/A、標準は標準比マスタから。色：予算比などが90%未満＝赤、100%未満＝黄</div></div>
-      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrint">印刷・PDF（見やすい版）</button><button type="button" class="btn ghost" id="perfPrintStore">店舗ごと（1店1ページ）</button><button type="button" class="btn ghost" id="perfPrintFull">詳細（3ページ）</button><button type="button" class="btn" id="perfPrintAll">まとめて（詳細＋店舗ごと）</button></div>
+      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrintAll">業績速報を作る（詳細＋店舗ごと）</button></div>
     </div>
     <h3>日別</h3><div class="tbl"><table class="perf" id="perfDayTbl"></table></div>
     <h3 style="margin-top:14px">着地見込 <span class="small muted" style="font-weight:400">着地見込＝今日までの実績＋残りの日の見込み（店長の予測。ない日は予算×ここまでの曜日区分別の予算比）</span></h3><div class="tbl"><table class="perf" id="perfLandTbl"></table></div>
@@ -3897,9 +3897,6 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
     $('repWrap').hidden = false; document.body.style.overflow = 'hidden';
     requestAnimationFrame(fitPages);
   }
-  $('perfPrint').addEventListener('click', () => openPerfReport(false));
-  $('perfPrintFull').addEventListener('click', () => openPerfReport(true));
-  $('perfPrintStore').addEventListener('click', () => openPerfReport('store'));
   $('perfPrintAll').addEventListener('click', () => openPerfReport('all'));
   /** 詳細3ページ（日別・着地見込・累計の全部の列）。余白を少なく、表をページの幅いっぱいに、文字を太く */
   function perfFullPages(P, d, area) {
@@ -4589,7 +4586,7 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'f991cd3'; // 版（build.py が書き込む）
+  const APP_VERSION = '22ff8e6'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
