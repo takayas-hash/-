@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 100;               // 1つのフォルダで読む件数（更新日時の新しい順）。使わなくなった古いファイルは開いたときに「過去」へ移す
-const APP_VERSION = 'b323db9';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = 'f991cd3';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -133,6 +133,9 @@ function archiveFiles(areaId, ids) {
       const get = (parent, name) => { const it = parent.getFoldersByName(name); return it.hasNext() ? it.next() : parent.createFolder(name); };
       f.moveTo(get(get(get(area, ARCHIVE_NAME), ym), '置き換え済み')); moved++;
     });
+    // 開いたAMが持ち主の、古い「置き換え済み」をゴミ箱へ（毎月の自動整理では、持ち主でないと消せないため）。6時間に1回まで
+    const cache = CacheService.getUserCache(), ck = 'clean_' + areaId;
+    if (!cache.get(ck)) { try { cleanupReplaced_(area, false); } catch (e) { /* 消せなくても続ける */ } cache.put(ck, '1', 21600); }
     return moved;
   } finally { lock.releaseLock(); }
 }
@@ -439,7 +442,36 @@ function archiveOldFiles(dryRun) {
     }
   });
   Logger.log((dryRun ? '【移す予定】' : '【移しました】') + moved.length + '件\n' + moved.join('\n'));
+  // 「置き換え済み」の片付け：3か月より前の月の分をゴミ箱へ（ゴミ箱から30日間は戻せる）
+  let trashed = 0, kept = 0;
+  tree.areas.forEach(a => { const r = cleanupReplaced_(DriveApp.getFolderById(a.id), dryRun); trashed += r.trashed; kept += r.kept; });
+  Logger.log((dryRun ? '【ゴミ箱へ移す予定】' : '【ゴミ箱へ移しました】') + '「置き換え済み」の古いファイル ' + trashed + '件' + (kept ? '（持ち主でないため消せなかったもの ' + kept + '件。そのAMがウェブアプリを開いたときに消えます）' : ''));
   return moved;
+}
+/** 「置き換え済み」を残す月数（今月＋前の3か月。それより前の月はゴミ箱へ） */
+const REPLACED_KEEP_MONTHS = 3;
+/**
+ * エリアの「過去/YYYY-MM/置き換え済み」のうち、今月から REPLACED_KEEP_MONTHS か月より前の月のファイルをゴミ箱へ移す。
+ * 持ち主でないファイルはゴミ箱へ移せないので残す（kept に数える）。空になった「置き換え済み」フォルダも消す
+ */
+function cleanupReplaced_(area, dryRun) {
+  const now = new Date(), cut = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() - REPLACED_KEEP_MONTHS, 1), 'Asia/Tokyo', 'yyyy-MM');
+  let trashed = 0, kept = 0;
+  const past = area.getFoldersByName(ARCHIVE_NAME);
+  while (past.hasNext()) {
+    const months = past.next().getFolders();
+    while (months.hasNext()) {
+      const mo = months.next(), ym = mo.getName();
+      if (!/^\d{4}-\d{2}$/.test(ym) || ym >= cut) continue;
+      const rs = mo.getFoldersByName('置き換え済み');
+      while (rs.hasNext()) {
+        const r = rs.next(), fs = r.getFiles(); let left = 0;
+        while (fs.hasNext()) { const f = fs.next(); if (dryRun) { trashed++; continue; } try { f.setTrashed(true); trashed++; } catch (e) { kept++; left++; } }
+        if (!dryRun && !left) { try { r.setTrashed(true); } catch (e) { /* 持ち主でないフォルダは残す */ } }
+      }
+    }
+  }
+  return { trashed, kept };
 }
 /** 移す予定のファイルを確認するだけ（移さない） */
 function previewArchive() { return archiveOldFiles(true); }

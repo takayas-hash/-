@@ -2591,7 +2591,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       if (ok) {
         shownLabel = label; setTimeout(() => parseCache.prune().catch(() => {}), 5000);
         // 使わなかった古いファイル（同じ月・同じ種類で新しい方がある）を、そのエリアの「過去/YYYY-MM/置き換え済み」へ移す（エリアの編集者のときだけ）
-        const byArea = {}; superseded.filter(g => g.id && g.area).forEach(g => { (byArea[g.area] = byArea[g.area] || []).push(g.id); });
+        // 自分が編集者のエリアは移すものがなくても呼ぶ（サーバー側で、そのAMが持ち主の古い「置き換え済み」を6時間に1回までゴミ箱へ）
+        const byArea = {}; DRIVE_AREAS.filter(a => a.mine && ids.includes(a.id)).forEach(a => { byArea[a.id] = []; }); superseded.filter(g => g.id && g.area).forEach(g => { (byArea[g.area] = byArea[g.area] || []).push(g.id); });
         let movedAll = 0;
         for (const [a, ids] of Object.entries(byArea)) { try { movedAll += (await call('archiveFiles', a, ids)) || 0; } catch (e) { console.warn('古いファイルを移せませんでした（編集権限がない場合）', e); } }
         if (movedAll && !stale()) setStatus($('status').textContent + `　使わなくなった古いファイル${movedAll}件を「過去/置き換え済み」へ移しました。`);

@@ -4564,7 +4564,7 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'b323db9'; // 版（build.py が書き込む）
+  const APP_VERSION = 'f991cd3'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
@@ -4605,7 +4605,8 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       if (ok) {
         shownLabel = label; setTimeout(() => parseCache.prune().catch(() => {}), 5000);
         // 使わなかった古いファイル（同じ月・同じ種類で新しい方がある）を、そのエリアの「過去/YYYY-MM/置き換え済み」へ移す（エリアの編集者のときだけ）
-        const byArea = {}; superseded.filter(g => g.id && g.area).forEach(g => { (byArea[g.area] = byArea[g.area] || []).push(g.id); });
+        // 自分が編集者のエリアは移すものがなくても呼ぶ（サーバー側で、そのAMが持ち主の古い「置き換え済み」を6時間に1回までゴミ箱へ）
+        const byArea = {}; DRIVE_AREAS.filter(a => a.mine && ids.includes(a.id)).forEach(a => { byArea[a.id] = []; }); superseded.filter(g => g.id && g.area).forEach(g => { (byArea[g.area] = byArea[g.area] || []).push(g.id); });
         let movedAll = 0;
         for (const [a, ids] of Object.entries(byArea)) { try { movedAll += (await call('archiveFiles', a, ids)) || 0; } catch (e) { console.warn('古いファイルを移せませんでした（編集権限がない場合）', e); } }
         if (movedAll && !stale()) setStatus($('status').textContent + `　使わなくなった古いファイル${movedAll}件を「過去/置き換え済み」へ移しました。`);
