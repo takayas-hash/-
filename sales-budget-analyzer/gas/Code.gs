@@ -17,8 +17,8 @@
 const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
-const MAX_FILES_PER_FOLDER = 40;
-const APP_VERSION = '8ba4c2b';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const MAX_FILES_PER_FOLDER = 100;               // 1つのフォルダで読む件数（更新日時の新しい順）。使わなくなった古いファイルは開いたときに「過去」へ移す
+const APP_VERSION = 'b323db9';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -112,6 +112,29 @@ function listFiles(areaIds) {
     files.slice(0, MAX_FILES_PER_FOLDER).forEach(x => out.push(x));
   });
   return out;
+}
+
+/**
+ * 使わなくなったファイル（同じ月・同じ種類で、新しいファイルがあるもの）を「エリア/過去/YYYY-MM/置き換え済み」へ移す。
+ * ウェブアプリが読み込んだあとに呼ぶ。エリアの編集者のときだけ移せる（ほかの人はエラーになり、何もしない）。
+ * 安全のため、そのエリアのフォルダの直下にあるファイルだけを移す
+ */
+function archiveFiles(areaId, ids) {
+  const tree = folderTree_();
+  if (!tree.areas.some(a => a.id === areaId)) throw new Error('エリアのフォルダではありません');
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const area = DriveApp.getFolderById(areaId); let moved = 0;
+    (ids || []).slice(0, 200).forEach(id => {
+      let f; try { f = DriveApp.getFileById(id); } catch (e) { return; }
+      const ps = f.getParents(); let inArea = false; while (ps.hasNext()) if (ps.next().getId() === areaId) inArea = true;
+      if (!inArea) return; // すでに移した・別の場所のファイル
+      const ym = Utilities.formatDate(f.getLastUpdated(), 'Asia/Tokyo', 'yyyy-MM');
+      const get = (parent, name) => { const it = parent.getFoldersByName(name); return it.hasNext() ? it.next() : parent.createFolder(name); };
+      f.moveTo(get(get(get(area, ARCHIVE_NAME), ym), '置き換え済み')); moved++;
+    });
+    return moved;
+  } finally { lock.releaseLock(); }
 }
 
 /** ファイルの中身（base64）。Googleスプレッドシートは .xlsx に変換して返す */

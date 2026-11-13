@@ -2616,11 +2616,12 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
   // 1ファイルを読み、{cur, prev} または {raw} を返す
   async function readOne(f) {
     // ウェブアプリ：前に読んだことがあり変わっていないファイルは、保存しておいた読み取り結果を使う（ダウンロードもしない）
-    if (f.__parsed) { const r = { ...f.__parsed, file: { name: f.name, raw: null }, area: f.__area || null, mtime: f.lastModified || 0 }; return r; }
+    if (f.__parsed) { const r = { ...f.__parsed, file: { name: f.name, raw: null }, area: f.__area || null, id: f.__id || null, mtime: f.lastModified || 0 }; return r; }
     const r = await readOneInner(f);
     if (f.__cacheKey) parseCache.put(f.__cacheKey, f.name, r);
     r.file = { name: f.name, raw: await f.arrayBuffer() };
     r.area = f.__area || null; // ウェブアプリ：どのエリアのフォルダのファイルか
+    r.id = f.__id || null;
     r.mtime = f.lastModified || 0; // 同じ月のファイルが重なったときに新しい方を使う
     return r;
   }
@@ -2893,14 +2894,16 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
    * 同じ種類・同じ月で店舗が重なるファイル（同じデータを何度も書き出したもの）は、いちばん新しいものだけ残す。
    * 店舗が重ならないもの（エリアごとのファイル）は残して、あとで mergeSame でつなげる
    */
+  let superseded = []; // 新しいファイルがあって使わなかったもの（ウェブアプリはあとで「過去」へ移す）
   function dropDup(got, notes) {
+    superseded = [];
     const codesOf = (g, k) => new Set(g[k].map(r => r.code));
     const keep = [], dropped = [];
     [...got].sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).forEach(g => {
       const k = MERGE_KINDS.find(x => g[x]); if (!k) { keep.push(g); return; }
       const cs = codesOf(g, k);
       const dup = keep.find(x => x[k] && mKey(x[k]) === mKey(g[k]) && [...codesOf(x, k)].some(c => cs.has(c)));
-      if (dup) dropped.push(`「${g.name}」（「${dup.name}」の方が新しいため）`); else keep.push(g);
+      if (dup) { dropped.push(`「${g.name}」（「${dup.name}」の方が新しいため）`); superseded.push(g); } else keep.push(g);
     });
     if (dropped.length) notes.push(`同じ月・同じ店舗のファイルが重なっていたため、古い方を使いませんでした：${dropped.join('、')}`);
     return got.filter(g => keep.includes(g));
@@ -4586,7 +4589,7 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '8ba4c2b'; // 版（build.py が書き込む）
+  const APP_VERSION = 'b323db9'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
@@ -4606,12 +4609,12 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       // 採用・定着の履歴（各エリアの「履歴データ」フォルダ）
       let hist = null; try { const h = await call('getHistory', ids); hist = mergeHistory(null, { tc: h.tc.map(x => JSON.parse(x)), wage: h.wage.map(x => JSON.parse(x)), nps: (h.nps || []).map(x => JSON.parse(x)) }); } catch (e) { console.warn(e); }
       const files = []; let n = 0;
-      const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name, { lastModified: m.updated || Date.now() }); f.__area = m.common ? null : m.folderId; return f; };
+      const b64ToFile = (r, m) => { const bin = atob(r.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const f = new File([u], r.name, { lastModified: m.updated || Date.now() }); f.__area = m.common ? null : m.folderId; f.__id = m.id; return f; };
       // 前に読んで変わっていないファイルは保存してある読み取り結果を使い、それ以外だけダウンロードする
       const t0 = Date.now(), need = []; let hit = 0;
       for (const m of list) {
         const k = parseCache.key(m), g = await parseCache.get(k);
-        if (g) { hit++; files.push({ name: m.name, lastModified: m.updated || 0, __area: m.common ? null : m.folderId, __parsed: g }); }
+        if (g) { hit++; files.push({ name: m.name, lastModified: m.updated || 0, __area: m.common ? null : m.folderId, __id: m.id, __parsed: g }); }
         else need.push({ m, k });
       }
       // 4件ずつ並行して取得
@@ -4624,7 +4627,14 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       if (stale()) return;
       HIST = hist;
       const ok = await handleFiles(files, { fresh: true, nosave: true, label: `${files.length}件のファイルを分析しています…`, done: `共有ドライブ「${label}」の最新ファイルで分析しています（${files.length}件中${hit}件は前に読んだものを使用・${need.length}件をダウンロード、${took}秒）。`, fail: e => { throw e; } });
-      if (ok) { shownLabel = label; setTimeout(() => parseCache.prune().catch(() => {}), 5000); }
+      if (ok) {
+        shownLabel = label; setTimeout(() => parseCache.prune().catch(() => {}), 5000);
+        // 使わなかった古いファイル（同じ月・同じ種類で新しい方がある）を、そのエリアの「過去/YYYY-MM/置き換え済み」へ移す（エリアの編集者のときだけ）
+        const byArea = {}; superseded.filter(g => g.id && g.area).forEach(g => { (byArea[g.area] = byArea[g.area] || []).push(g.id); });
+        let movedAll = 0;
+        for (const [a, ids] of Object.entries(byArea)) { try { movedAll += (await call('archiveFiles', a, ids)) || 0; } catch (e) { console.warn('古いファイルを移せませんでした（編集権限がない場合）', e); } }
+        if (movedAll && !stale()) setStatus($('status').textContent + `　使わなくなった古いファイル${movedAll}件を「過去/置き換え済み」へ移しました。`);
+      }
     } catch (e) { console.error(e); if (!stale()) setStatus(`「${label}」を読み込めませんでした：${e.message || e}。` + (shownLabel ? `画面は「${shownLabel}」の表示のままです。` : ''), true); }
     if (!stale()) $('driveLoad').disabled = false;
   }
