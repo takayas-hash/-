@@ -365,7 +365,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   <section class="card" id="perfCard" data-tab="perf" hidden>
     <div class="row">
       <div><div class="label">業績速報（日報）</div><h2 id="perfTitle"></h2><div class="small muted">日別の前年は同じ曜日（364日前）、累計・着地の前年は同じ日付の範囲。労働時間は社員＋P/A、標準は標準比マスタから。色：予算比などが90%未満＝赤、100%未満＝黄</div></div>
-      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrintAll">業績速報を作る（詳細＋店舗ごと）</button></div>
+      <div class="row" style="gap:8px"><select id="perfDay" class="btn ghost" aria-label="日付"></select><button type="button" class="btn" id="perfPrintAll">業績速報を作ってChatに送る</button></div>
     </div>
     <h3>日別</h3><div class="tbl"><table class="perf" id="perfDayTbl"></table></div>
     <h3 style="margin-top:14px">着地見込 <span class="small muted" style="font-weight:400">着地見込＝今日までの実績＋残りの日の見込み（店長の予測。ない日は予算×ここまでの曜日区分別の予算比）</span></h3><div class="tbl"><table class="perf" id="perfLandTbl"></table></div>
@@ -3798,17 +3798,20 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
     if (low.length) lines.push(`日別の予算比が低い店：${low.map(r => `${r.n} ${(r.v * 100).toFixed(1)}%`).join('、')}`);
     return lines.join('\n');
   }
-  $('repChat').addEventListener('click', async e => {
-    if (!repPerf) return; const b = e.currentTarget, old = b.textContent; b.disabled = true;
+  $('repChat').addEventListener('click', e => sendPerf(e.currentTarget));
+  /** 開いている業績速報をPDFにして Google Chat へ送る。b＝進み具合を表示するボタン */
+  async function sendPerf(b) {
+    if (!repPerf) return false; const old = b.textContent; b.disabled = true; let ok = false;
     try {
       b.textContent = 'PDFを作っています…'; const b64 = await pagesToPdf();
       b.textContent = '送っています…';
       const d = repPerf.d, name = `業績速報${repPerf.all ? '（詳細＋店舗ごと）' : ''}_${repPerf.area}_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.pdf`;
       await call('postPerfToChat', b64, name, perfChatText(repPerf));
-      b.textContent = '送りました ✓'; setStatus(`Google Chat に業績速報（${perfDayTxt(d)}）を送りました。`);
+      b.textContent = '送りました ✓'; setStatus(`Google Chat に業績速報（${perfDayTxt(d)}）を送りました。`); ok = true;
     } catch (err) { console.error(err); b.textContent = old; setStatus('Google Chat に送れませんでした：' + (err.message || err), true); alert('Google Chat に送れませんでした：' + (err.message || err)); }
     setTimeout(() => { b.disabled = false; if (b.textContent === '送りました ✓') b.textContent = old; }, 4000);
-  });
+    return ok;
+  }
   /** 見やすい版：1枚目＝直営の店＋直営計、2枚目＝FCの店＋FC計＋エリア全体。日別・累計・着地見込を横に並べ、列を絞って大きく */
   function perfSummaryPages(P, d, area) {
     const today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
@@ -3872,7 +3875,20 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
     $('repWrap').hidden = false; document.body.style.overflow = 'hidden';
     requestAnimationFrame(fitPages);
   }
-  $('perfPrintAll').addEventListener('click', () => openPerfReport('all'));
+  // ワンクリック：確認を1回出して、作る→Google Chat へ送る。送ったあとも中身は開いたまま（印刷もできる）
+  $('perfPrintAll').addEventListener('click', async e => {
+    const D = perfData(); if (!D) return;
+    if (!GAS) return openPerfReport('all'); // ローカル版はChatに送れないので作るだけ
+    const d = new Date(perfDayK), area = listAreas(last[0]).join('・') || 'エリア';
+    const msg = perfChatText({ P: D.P, d, area }).replace(/\*/g, '');
+    if (!confirm(`次の内容と、PDF（詳細3ページ＋店舗ごと${D.P.rows.length}ページ）を Google Chat に送ります。よろしいですか？\n\n${msg}`)) return;
+    const b = e.currentTarget; b.disabled = true; b.textContent = '作っています…';
+    try {
+      openPerfReport('all');
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 300)))); // fitPages が終わるのを待つ
+      await sendPerf($('repChat'));
+    } finally { b.disabled = false; b.textContent = '業績速報を作ってChatに送る'; }
+  });
   /** 詳細3ページ（日別・着地見込・累計の全部の列）。余白を少なく、表をページの幅いっぱいに、文字を太く */
   function perfFullPages(P, d, area) {
     const T = perfTables(P), today = new Date(), made = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()} 作成`;
@@ -4561,7 +4577,7 @@ if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport,
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '22ff8e6'; // 版（build.py が書き込む）
+  const APP_VERSION = '2f21631'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
