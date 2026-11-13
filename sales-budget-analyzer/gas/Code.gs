@@ -18,7 +18,7 @@ const COMMON_NAME = '共通';
 const SKIP_NAMES = ['過去', '保管', 'old'];       // この名前のフォルダは読まない
 const HISTORY_NAME = '履歴データ';                // エリアのフォルダの中に作る、採用・定着の履歴（月ごとの小さなJSON）
 const MAX_FILES_PER_FOLDER = 100;               // 1つのフォルダで読む件数（更新日時の新しい順）。使わなくなった古いファイルは開いたときに「過去」へ移す
-const APP_VERSION = '2f21631';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
+const APP_VERSION = '71fb216';                       // 版（build.py が書き込む。index.html と同じなら正しく貼り替えられている）
 const TREE_KEY = 'folder_tree';                // フォルダの一覧（ブロック・エリア・共通のID）
 
 function doGet() {
@@ -111,7 +111,25 @@ function listFiles(areaIds) {
     files.sort((a, b) => b.updated - a.updated);
     files.slice(0, MAX_FILES_PER_FOLDER).forEach(x => out.push(x));
   });
+  // 損益（部門別推移表）のフォルダ：新しい2ファイルだけ（1ファイルに期の全部の月の予算・前年・実績が入っている）。見られない人は飛ばす
+  plFolderIds_().forEach(id => {
+    let folder; try { folder = DriveApp.getFolderById(id); folder.getName(); } catch (e) { return; }
+    const files = [], it = folder.getFiles();
+    while (it.hasNext()) {
+      const f = it.next(), name = f.getName(), mime = f.getMimeType();
+      if (/^~\$/.test(name) || (!/\.(xlsx|xlsm|xls)$/i.test(name) && mime !== MimeType.GOOGLE_SHEETS)) continue;
+      files.push({ id: f.getId(), name: name, folder: folder.getName(), folderId: id, common: true, updated: f.getLastUpdated().getTime(), size: f.getSize() });
+    }
+    files.sort((a, b) => b.updated - a.updated).slice(0, 2).forEach(x => out.push(x));
+  });
   return out;
+}
+
+/** 損益フォルダ。スクリプト プロパティ PL_FOLDER_ID（カンマ区切りで複数可）。未設定なら髙谷エリアの損益フォルダ */
+const PL_FOLDER_DEFAULT = '1nO9ZuJcdIC7KSLES0pHB-Po8QmugOGqq';
+function plFolderIds_() {
+  const v = PropertiesService.getScriptProperties().getProperty('PL_FOLDER_ID');
+  return String(v == null ? PL_FOLDER_DEFAULT : v).split(',').map(x => x.trim()).filter(Boolean);
 }
 
 /**

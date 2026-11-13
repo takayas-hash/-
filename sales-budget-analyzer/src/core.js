@@ -366,6 +366,118 @@ function extractInventory(XLSX, ws) {
   };
 }
 
+/* ===== 損益（部門別推移表）：店舗ごとのシート。期の各月の「前年実績・予算・実績」 ===== */
+const PL_ITEMS = { preSales: '値引前売上高', disc: '値引額', sales: '値引後売上高', cust: '来客数', cost: '売上原価', labor: '人件費計', staff: '社員人件費', wage: 'パートナー等給与', profit: '営業利益' };
+const plTxt = v => String(v == null ? '' : v).trim();
+/** "1,234" "△31.25" "44.2%" "-" → 数値（"-" は 0） */
+function plNum(v) {
+  if (typeof v === 'number') return v;
+  let t = plTxt(v).replace(/,/g, ''); if (!t || t === '-' || t === '－') return 0;
+  let neg = false; if (/^[△▲]/.test(t)) { neg = true; t = t.slice(1); }
+  let x = parseFloat(t); if (isNaN(x)) return 0; if (/%$/.test(t)) x /= 100;
+  return neg ? -x : x;
+}
+function isPLSheet(XLSX, ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, sheetRows: 8 });
+  return aoa.some(r => r && r.some(v => plTxt(v) === '部門別推移表')) && aoa.some(r => r && r.some(v => plTxt(v) === '科目'));
+}
+function extractPL(XLSX, ws, sheetName) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  const find = re => { for (const r of aoa.slice(0, 8)) for (const v of (r || [])) { const m = plTxt(v).match(re); if (m) return m; } return null; };
+  const dm = find(/部門\s*[:：]\s*\[\s*0*(\d+)\s*\]\s*(.*)$/); if (!dm) return null;
+  const om = find(/出力日\s*[:：]\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/), pm = find(/第\s*(\d+)\s*期/);
+  const hr = aoa.findIndex(r => r && r.some(v => plTxt(v) === '科目')); if (hr < 1) return null;
+  const P = aoa[hr - 1] || [], H = aoa[hr], lc = H.findIndex(v => plTxt(v) === '科目');
+  const rowOf = {}; aoa.slice(hr + 1).forEach(r => { if (!r) return; const k = plTxt(r[lc]); if (k && rowOf[k] == null) rowOf[k] = r; });
+  const blocks = [];
+  P.forEach((v, j) => {
+    const m = plTxt(v).match(/^(\d{1,2})月$/); if (!m) return;
+    const off = {}; for (let c = j; c < j + 8 && c < H.length; c++) { const h = plTxt(H[c]); if (h === '前年実績' || h === '予算' || h === '実績') if (off[h] == null) off[h] = c; }
+    if (off['実績'] == null || off['予算'] == null) return;
+    const val = col => { const o = {}; for (const [k, lab] of Object.entries(PL_ITEMS)) o[k] = col == null || !rowOf[lab] ? null : plNum(rowOf[lab][col]); return o; };
+    blocks.push({ mo: +m[1], prev: val(off['前年実績']), budget: val(off['予算']), act: val(off['実績']) });
+  });
+  if (!blocks.length) return null;
+  // 年：実績のある最後の月を、出力日から決める（出力日が月の後なので、その月以前のいちばん近い年）
+  let li = -1; blocks.forEach((b, i) => { if (b.act.sales) li = i; });
+  const now = om ? new Date(+om[1], +om[2] - 1, +om[3]) : new Date();
+  const base = li >= 0 ? li : 0, bm = blocks[base].mo, by = bm <= now.getMonth() + 1 ? now.getFullYear() : now.getFullYear() - 1;
+  const months = {};
+  blocks.forEach((b, i) => {
+    const d = new Date(by, bm - 1 + (i - base), 1), key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (d.getMonth() + 1 !== b.mo) return; // 月の並びが想定外
+    months[key] = { prev: b.prev, budget: b.budget, act: b.act.sales ? b.act : null };
+  });
+  const keys = Object.keys(months).filter(k => months[k].act).sort();
+  return { code: dm[1], name: plTxt(sheetName) || dm[2].replace(/^焼肉きんぐ|店$/g, ''), period: pm ? +pm[1] : null, lastAct: keys.length ? keys[keys.length - 1] : '', months };
+}
+/** 費用の差（＋＝予算より多い）。売上用の色分け（＋青・▲赤）にならないよう全角の＋／－ */
+const cman = v => (v >= 0 ? '＋' : '－') + man(Math.abs(v)), cpt = v => (v >= 0 ? '＋' : '－') + Math.abs(v * 100).toFixed(2) + 'pt';
+const plYm = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+/**
+ * 損益の予算と比べる（直営のみ：損益ファイルにある店だけ）
+ * 確定月：損益の実績（なければ原価管理表）。月の途中：着地見込みから原価・雑給の見込みを出して予算と比べる
+ */
+function plCost(s, p, prevInvRow, full) {
+  const mo = p && p.months[plYm(s.lastDate)]; if (!mo || !mo.budget || !mo.budget.sales) return null;
+  const B = mo.budget, pr = mo.prev, out = { bSales: B.sales, bCost: B.cost, bRate: B.cost / B.sales, pRate: pr && pr.sales ? pr.cost / pr.sales : null, bWage: B.wage, prevWage: pr ? pr.wage : null, pSales: pr ? pr.sales : null };
+  if (full) {
+    if (mo.act) Object.assign(out, { mode: 'act', src: '損益', sales: mo.act.sales, cost: mo.act.cost, wage: mo.act.wage });
+    else if (s.inv && s.inv.sales && s.inv.cost != null) Object.assign(out, { mode: 'act', src: '原価管理表', sales: s.inv.sales, cost: s.inv.cost });
+    else return Object.assign(out, { mode: 'none' });
+  } else if (s.fc && s.sales) {
+    const landPre = s.fc.landing * ((s.preSales || s.sales) / s.sales);
+    let preRate = null, how = '';
+    if (s.costRate != null) {
+      const tr = prevInvRow && prevInvRow.trend ? prevInvRow.trend.slice(-3).map(x => x.gapExLoss).filter(v => v != null) : [];
+      const g3 = tr.length ? tr.reduce((a, b) => a + b, 0) / tr.length : null;
+      preRate = s.costRate + (s.lossRate || 0) + (g3 || 0);
+      how = `着地見込みの値引前売上×（理論原価率${s.lossRate != null ? '＋ロス率' : ''}${g3 != null ? '＋直近3か月のロス込理論差の平均' : ''}）`;
+      out.g3 = g3;
+    } else {
+      // 理論原価率がないとき：損益の直近3か月の実績の値引前原価率
+      const ks = Object.keys(p.months).filter(k => p.months[k].act && k < plYm(s.lastDate)).sort().slice(-3);
+      const pre = ks.reduce((a, k) => a + p.months[k].act.preSales, 0), c = ks.reduce((a, k) => a + p.months[k].act.cost, 0);
+      if (pre) { preRate = c / pre; how = `着地見込みの値引前売上×損益の直近${ks.length}か月の値引前原価率`; }
+    }
+    if (preRate == null) return Object.assign(out, { mode: 'none' });
+    Object.assign(out, { mode: 'land', src: '見込み', sales: s.fc.landing, cost: landPre * preRate, how });
+  } else return null;
+  if (out.sales) { out.rate = out.cost / out.sales; out.diff = out.cost - out.bCost; out.salesEff = (out.sales - out.bSales) * out.bRate; out.rateEff = (out.rate - out.bRate) * out.sales; }
+  return out;
+}
+function plSum(xs) {
+  const T = k => xs.reduce((a, x) => a + (x[k] || 0), 0), o = { n: xs.length, mode: xs[0].mode, bSales: T('bSales'), bCost: T('bCost'), sales: T('sales'), cost: T('cost'), bWage: T('bWage') };
+  o.bRate = o.bCost / o.bSales; const wp = xs.filter(x => x.pRate != null && x.pSales); if (wp.length === xs.length) o.pRate = wp.reduce((a, x) => a + x.pRate * x.pSales, 0) / T('pSales');
+  if (o.sales) { o.rate = o.cost / o.sales; o.diff = o.cost - o.bCost; o.salesEff = (o.sales - o.bSales) * o.bRate; o.rateEff = (o.rate - o.bRate) * o.sales; }
+  return o;
+}
+/** 原価の予算差（値引後原価率）のコメント */
+function plCostLines(c, name) {
+  if (!c) return [];
+  if (c.mode === 'none') return [{ t: `・原価予算：予算の値引後原価率${pct(c.bRate)}・原価${man(c.bCost)}（実績は損益・原価管理表が入ると出ます）。`, d: true }];
+  const lab = c.mode === 'land' ? '見込み' : '実績', diffTxt = cpt;
+  let t = `・値引後原価率${c.mode === 'land' ? 'の見込み' : `（${c.src || '損益'}）`}：${lab}${pct(c.rate)}（予算${pct(c.bRate)}・${diffTxt(c.rate - c.bRate)}${c.pRate != null ? `／前年${pct(c.pRate)}` : ''}）。`;
+  t += `原価${c.mode === 'land' ? 'の見込み' : ''}${man(c.cost)}は予算${man(c.bCost)}に対して${cman(c.diff)}（売上の差による分${cman(c.salesEff)}、原価率の差による分${cman(c.rateEff)}）`;
+  if (c.rate - c.bRate >= 0.005) t += `。原価率が予算を${Math.abs((c.rate - c.bRate) * 100).toFixed(1)}pt上回る${c.mode === 'land' ? '見込み。残りの日の値引・盛り付け・ロスを確認' : '。値引・盛り付け・ロス・棚卸を確認'}`;
+  const L = [{ t: t + '。', d: false }];
+  if (c.how) L.push({ t: `　※見込み＝${c.how}。値引後の売上で割っています。`, d: true });
+  return L;
+}
+/** 雑給（パートナー等給与）の予算差のコメント。land：着地見込みの雑給（時給×勤務時間） */
+function plWageLines(c, landWage, landSales, full) {
+  if (!c || !c.bWage) return [];
+  const bR = c.bSales ? c.bWage / c.bSales : null;
+  if (full) {
+    if (c.wage == null) return [{ t: `・雑給の予算（損益のパートナー等給与）：${man(c.bWage)}${bR != null ? `（雑給率${pct(bR)}）` : ''}。実績は損益が入ると出ます。`, d: true }];
+    return [{ t: `・雑給（損益のパートナー等給与）：実績${man(c.wage)}、予算${man(c.bWage)}に対して${cman(c.wage - c.bWage)}。雑給率${pct(c.wage / c.sales)}（予算${pct(bR)}）${c.prevWage ? `、前年${man(c.prevWage)}` : ''}。`, d: false }];
+  }
+  if (landWage == null) return [{ t: `・雑給の予算（損益のパートナー等給与）：${man(c.bWage)}${bR != null ? `（雑給率${pct(bR)}）` : ''}。タイムカード表・勤務スケジュール表と時給データを入れると、着地見込みとの予算差が出ます。`, d: true }];
+  const d = landWage - c.bWage;
+  return [{ t: `・雑給の予算差異見込み：着地見込み${man(landWage)}、予算${man(c.bWage)}に対して${cman(d)}。雑給率の見込み${landSales ? pct(landWage / landSales) : '－'}（予算${pct(bR)}）${d > 0 ? '。予算内に収めるには残りの日の勤務を見直し' : ''}。`, d: false },
+    { t: '　※着地見込みは時給×勤務時間（実績＋勤務予定）。交通費・手当などは入らないため、損益の金額より少なめに出ます。', d: true }];
+}
+
 /* ===== メニュー別（原価・喫食量・皿数） ===== */
 /** 中分類 → 区分：食べ放題フード／食べ放題ドリンク／単品／コース／対象外 */
 function menuGroup(cat) {
@@ -1402,6 +1514,13 @@ function analyze(curRows, prevRows, extra) {
   };
   stores.forEach(s => { const p = prevInv.find(r => r.code === s.code); s.stock = p ? stockOf(s, p.close) : null; });
   { const ws = stores.filter(s => s.stock); if (ws.length) { const T = k => sum(ws, s => s.stock[k] || 0); area.stock = { open: T('open'), buy: T('buy'), use: T('use'), loss: T('loss'), now: T('now'), delta: T('delta'), n: ws.length, remainBuy: ws.every(s => s.stock.remainBuy != null) ? T('remainBuy') : null, remDays: ws[0].stock.remDays }; } }
+  // 損益の予算（直営のみ）：値引後原価率・原価予算差（確定月は実績、月の途中は見込み）
+  const plRows = extra.pl || [];
+  if (plRows.length) {
+    stores.forEach(s => { s.lastDate = lastDate; const p = plRows.find(r => r.code === s.code); s.plc = p ? plCost(s, p, prevInv.find(r => r.code === s.code), isFullMonth) : null; delete s.lastDate; });
+    const wp = stores.filter(s => s.plc && s.plc.mode !== 'none' && s.plc.sales);
+    if (wp.length) area.plc = plSum(wp.map(s => s.plc));
+  }
   const withInv = stores.filter(s => s.inv);
   if (withInv.length) {
     const T = (f) => sum(withInv, s => f(s.inv));
@@ -1497,6 +1616,28 @@ function analyze(curRows, prevRows, extra) {
     }
     const est = fs.filter(s => s.labor.estDays).map(s => `${s.name}${s.labor.estDays}日`);
     if (est.length) area.laborLines.push({ t: `・${labor.fromSummary ? '計画の労働時間がない日' : '勤務予定の未作成'}：${est.join('、')}（実績平均で補っています）。`, d: true });
+  }
+  // 雑給の予算差（損益のパートナー等給与）
+  if (plRows.length) {
+    const okL = s => s.labor && !s.labor.wageless && labor && labor.hasWage;
+    stores.forEach(s => { if (!s.plc) return; const w = plWageLines(s.plc, okL(s) ? s.labor.landCost : null, s.fc ? s.fc.landing : null, isFullMonth); if (w.length) s.laborLines = (s.laborLines || []).concat(w); });
+    const ws = stores.filter(s => s.plc && s.plc.bWage);
+    if (ws.length) {
+      const bW = sum(ws, s => s.plc.bWage), bS = sum(ws, s => s.plc.bSales), L = [];
+      if (isFullMonth) {
+        const wa = ws.filter(s => s.plc.wage != null);
+        if (wa.length === ws.length) { const w = sum(wa, s => s.plc.wage), sl = sum(wa, s => s.plc.sales); L.push({ t: `・雑給（損益・直営${ws.length}店）：実績${man(w)}、予算${man(bW)}に対して${cman(w - bW)}。雑給率${pct(w / sl)}（予算${pct(bW / bS)}）。${ws.length > 1 ? `予算を上回った店：${wa.filter(s => s.plc.wage > s.plc.bWage).sort((a, b) => (b.plc.wage - b.plc.bWage) - (a.plc.wage - a.plc.bWage)).slice(0, 3).map(s => `${s.name}${cman(s.plc.wage - s.plc.bWage)}`).join('、') || 'なし'}。` : ''}`, d: false }); }
+      } else {
+        const wl = ws.filter(okL);
+        if (wl.length) {
+          const lw = sum(wl, s => s.labor.landCost), ls = sum(wl, s => s.fc ? s.fc.landing : 0), bW2 = sum(wl, s => s.plc.bWage), bS2 = sum(wl, s => s.plc.bSales);
+          const miss = ws.filter(s => !okL(s)).map(s => s.name);
+          L.push({ t: `・雑給の予算差異見込み（直営${wl.length}店${miss.length ? `。勤怠・時給のない${miss.join('、')}は除く` : ''}）：着地見込み${man(lw)}、予算${man(bW2)}に対して${cman(lw - bW2)}。雑給率の見込み${ls ? pct(lw / ls) : '－'}（予算${pct(bW2 / bS2)}）。${ws.length > 1 ? `予算を上回る見込みの店：${wl.filter(s => s.labor.landCost > s.plc.bWage).sort((a, b) => (b.labor.landCost - b.plc.bWage) - (a.labor.landCost - a.plc.bWage)).slice(0, 3).map(s => `${s.name}${cman(s.labor.landCost - s.plc.bWage)}`).join('、') || 'なし'}。` : ''}`, d: false });
+          L.push({ t: '　※着地見込みは時給×勤務時間。交通費・手当などは入らないため、損益の金額より少なめに出ます。', d: true });
+        } else L.push({ t: `・雑給の予算（損益・直営${ws.length}店）：${man(bW)}（雑給率${pct(bW / bS)}）。`, d: true });
+      }
+      if (L.length) area.laborLines = (area.laborLines || []).concat(L);
+    }
   }
   area.costLines = areaCostComment(area, stores, ctx);
   // 採用・定着（履歴があるとき）
@@ -1828,8 +1969,11 @@ function costComment(s, ctx) {
   if (s.lossRate != null) head.push(`ロス率${pct2(s.lossRate)}`);
   if (s.inv) head.push(`ロス込原価率理論差${pt2(s.inv.gapExLoss)}`);
   else if (s.buyRate != null) head.push(`仕入率${pct(s.buyRate)}`);
+  if (s.plc && s.plc.rate != null) head.unshift(`値引後原価率${s.plc.mode === 'land' ? '（見込み）' : ''}${pct(s.plc.rate)}（予算${pct(s.plc.bRate)}）`);
+  if (!head.length && s.plc) return plCostLines(s.plc);
   if (!head.length) return [{ t: '原価のデータがありません（売上集計表の「原価」「仕入高」「廃棄額」列とメニュー別データを読み込むと表示されます）。', d: false }];
   L.push({ t: `【原価】${head.join('／')}`, d: false });
+  for (const x of plCostLines(s.plc)) L.push(x);
   for (const x of costLines(s, ctx)) L.push(x);
   for (const x of lossLines(s, ctx)) L.push(x);
   for (const x of stockLines(s.stock, ctx)) L.push(x);
@@ -1901,6 +2045,11 @@ function areaCostComment(a, stores, ctx) {
   const L = [];
   const P = L.push.bind(L);
   L.push = t => P({ t, d: false });
+  if (a.plc) {
+    const c = a.plc, ws = stores.filter(x => x.plc && x.plc.rate != null), lab = c.mode === 'land' ? '見込み' : '実績';
+    const over = ws.filter(x => x.plc.rate - x.plc.bRate >= 0.003).sort((x, y) => (y.plc.rate - y.plc.bRate) - (x.plc.rate - x.plc.bRate));
+    L.push(`・値引後原価率${c.mode === 'land' ? 'の見込み' : ''}（直営${c.n}店・損益の予算と比較）：${lab}${pct(c.rate)}（予算${pct(c.bRate)}・${cpt(c.rate - c.bRate)}${c.pRate != null ? `／前年${pct(c.pRate)}` : ''}）。原価${c.mode === 'land' ? 'の見込み' : ''}${man(c.cost)}は予算${man(c.bCost)}に対して${cman(c.diff)}（売上の差による分${cman(c.salesEff)}、原価率の差による分${cman(c.rateEff)}）。${ws.length > 1 ? `予算の原価率を上回る${c.mode === 'land' ? '見込みの' : ''}店：${over.slice(0, 3).map(x => `${x.name}${cpt(x.plc.rate - x.plc.bRate)}（${cman(x.plc.rateEff)}）`).join('、') || 'なし'}。` : ''}`);
+  }
   if (a.stock) { const up = stores.filter(x => x.stock && x.stock.open && x.stock.delta / x.stock.open >= 0.1).sort((x, y) => y.stock.delta - x.stock.delta); L.push(`・在庫（${a.stock.n}店・月初在庫＝前月の棚卸）：月初${man(a.stock.open)}→今の理論在庫${man(a.stock.now)}（${sman(a.stock.delta)}）。${up.length ? `月初より10%以上増えている店：${up.slice(0, 3).map(x => `${x.name}${sman(x.stock.delta)}`).join('、')}。` : ''}${a.stock.remainBuy != null && a.stock.remDays > 0 ? `月末を月初の在庫で締める残りの仕入の目安は${man(Math.max(0, a.stock.remainBuy))}（残り${a.stock.remDays}日）。` : ''}`); }
   // ブロック長向け：営業部ごとの原価指標
   if (ctx.multiArea) {
@@ -2009,4 +2158,4 @@ function companyLines(c, isFullMonth) {
 }
 function commentText(lines, detail) { return lines.filter(l => detail || !l.d).map(l => l.t).join('\n'); }
 
-if (typeof module !== 'undefined') module.exports = { perfStoreDays, perfReport, extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };
+if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNum, plCost, perfStoreDays, perfReport, extractMenuDaily, qscLines, npsYm, npsSnapshot, npsSeries, isNpsBook, extractNps, NPS_QSC, isMasterSheet, extractMaster, companyLines, followUp, followUpLine, tcSummary, wageSnapshot, mergeHistory, analyzeTenure, tenureLines, combineStd, isStdBook, extractStd, stdHours, analyzeStd, STD_DEFAULT, extractTimecard, extractSchedule, extractWage, analyzeLabor, forecastStore, forecastSum, pt2, extractInventory, isInventorySheet, extractMenu, menuAgg, scopeCounts, listAreas, sheetKind, extractHourly, extractPayments, commentText, SHEET_CUR, SHEET_PREV, findSheet, extractRows, analyze, DAYTYPES, BANDS };

@@ -620,6 +620,9 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (isStdBook(wb)) return { name: f.name, std: extractStd(XLSX, wb) };
     // NPS（お客様アンケート）
     if (isNpsBook(XLSX, wb)) return { name: f.name, nps: extractNps(XLSX, wb) };
+    // 損益（部門別推移表）：店舗ごとのシート。期の各月の前年実績・予算・実績
+    const pls = wb.SheetNames.filter(n => isPLSheet(XLSX, wb.Sheets[n])).map(n => extractPL(XLSX, wb.Sheets[n], n)).filter(Boolean);
+    if (pls.length) return { name: f.name, pl: pls };
     // 原価管理表：店舗ごとのシートをまとめて読む
     const invs = wb.SheetNames.filter(n => isInventorySheet(XLSX, wb.Sheets[n])).map(n => extractInventory(XLSX, wb.Sheets[n])).filter(Boolean);
     if (invs.length) return { name: f.name, inv: invs };
@@ -699,7 +702,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   let STORE = null; // 保存データ {months:{月:{cur, prev, menu…}}, wage, stdBook, stdLane, active}
   const kYM = k => `${Math.floor(k / 12)}年${k % 12 + 1}月`;
   /** 表示する月のデータ（時給・標準比マスタは全部の月で共通） */
-  const viewOf = (ST, k) => ({ ...ST.months[k], nps: ST.nps, master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane, savedAt: ST.savedAt, v: ST.v, k });
+  const viewOf = (ST, k) => ({ ...ST.months[k], nps: ST.nps, master: ST.master, pl: ST.pl, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane, savedAt: ST.savedAt, v: ST.v, k });
   /** 以前の形式（1か月分だけ）の保存データを月ごとの形に直す */
   function toStore(v) {
     if (!v) return null;
@@ -707,16 +710,16 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     if (!v.cur) return null;
     const k = mKey(v.cur.rows), m = {};
     ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (v[x]) m[x] = v[x]; });
-    return { months: { [k]: m }, nps: v.nps, master: v.master, wage: v.wage, stdBook: v.stdBook, stdLane: v.stdLane, savedAt: v.savedAt, v: v.v, active: k };
+    return { months: { [k]: m }, nps: v.nps, master: v.master, pl: v.pl, wage: v.wage, stdBook: v.stdBook, stdLane: v.stdLane, savedAt: v.savedAt, v: v.v, active: k };
   }
   async function reparseStore(ST) {
     const out = { ...ST, months: {} };
     for (const k of Object.keys(ST.months)) {
       const m = ST.months[k];
-      const N = await reparse({ ...m, nps: ST.nps, master: ST.master, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane });
+      const N = await reparse({ ...m, nps: ST.nps, master: ST.master, pl: ST.pl, wage: ST.wage, stdBook: ST.stdBook, stdLane: ST.stdLane });
       if (!N) return null;
       const keep = {}; ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'invFiles'].forEach(x => { if (N[x]) keep[x] = N[x]; });
-      out.months[k] = keep; out.nps = N.nps; out.master = N.master; out.wage = N.wage; out.stdBook = N.stdBook; out.stdLane = N.stdLane;
+      out.months[k] = keep; out.nps = N.nps; out.master = N.master; out.pl = N.pl; out.wage = N.wage; out.stdBook = N.stdBook; out.stdLane = N.stdLane;
     }
     out.v = DATA_VERSION;
     return out;
@@ -725,7 +728,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   // 読み取り処理を変えたら数字を上げる。保存してある元ファイルから自動で読み直す
   const DATA_VERSION = 3;
   async function reparse(v) {
-    const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage', 'master'];
+    const slots = ['cur', 'prev', 'pays', 'pPays', 'menu', 'pMenu', 'hourly', 'tc', 'ws', 'wage', 'master', 'pl'];
     const all = [...slots.map(k => v[k]).filter(Boolean), ...(v.invFiles || []), ...(v.stdBook ? [v.stdBook] : []), ...(v.stdLane ? [v.stdLane] : []), ...(v.nps ? [v.nps] : [])];
     if (!all.length || all.some(x => !x.file || !x.file.raw)) return null; // 元ファイルがない古い保存形式
     const cache = new Map();
@@ -734,7 +737,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     for (const k of slots) {
       const x = v[k]; if (!x) continue;
       const g = await parse(x.file);
-      const rows = k === 'cur' ? (g.cur || g.raw) : k === 'prev' ? (x.sheet === 'prev' ? g.prev : g.raw) : (g.pays || g.menu || g.hourly || g.tc || g.ws || g.wage || g.master);
+      const rows = k === 'cur' ? (g.cur || g.raw) : k === 'prev' ? (x.sheet === 'prev' ? g.prev : g.raw) : (g.pays || g.menu || g.hourly || g.tc || g.ws || g.wage || g.master || g.pl);
       N[k] = { ...x, rows: rows || [] };
     }
     delete N.usage;
@@ -763,6 +766,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
       + (HIST && Object.keys(HIST.tc).length ? `<li><span class="label">採用・定着の履歴</span> タイムカード ${[...new Set(Object.values(HIST.tc).map(x => x.ym))].sort().map(ymTxt).join('・')}<span class="muted">／時給データ ${[...new Set(Object.values(HIST.wage).map(x => x.ym))].sort().map(ymTxt).join('・') || 'なし'}</span></li>` : '')
       + item('タイムカード', S.tc) + item('勤務スケジュール', S.ws) + (S.wage ? `<li><span class="label">時給データ</span> ${esc(S.wage.name)} <span class="muted">${S.wage.rows.length.toLocaleString('ja-JP')}名</span></li>` : '<li class="muted"><span class="label">時給データ</span> なし</li>')
       + (S.nps ? `<li><span class="label">NPS</span> ${esc(S.nps.name)} <span class="muted">${esc(S.nps.data.period)}・${Object.keys(S.nps.data.stores).length}店</span></li>` : '<li class="muted"><span class="label">NPS（訪問資料に使う）</span> なし</li>')
+      + (S.pl ? `<li><span class="label">損益（予算）</span> ${esc(S.pl.name)} <span class="muted">${S.pl.rows.length}店・実績は${(r => r ? r.replace('-', '年').replace(/^(\d+年)0?/, '$1') + '月' : 'なし')(S.pl.rows.reduce((m, r) => r.lastAct > m ? r.lastAct : m, ''))}まで</span></li>` : '<li class="muted"><span class="label">損益（原価・雑給の予算）</span> なし</li>')
       + (S.master ? `<li><span class="label">店舗情報</span> ${esc(S.master.name)} <span class="muted">${S.master.rows.length}店・FC企業${new Set(S.master.rows.filter(r => r.company).map(r => r.company)).size}社</span></li>` : '<li class="muted"><span class="label">店舗情報（FC企業別に使う）</span> なし</li>')
       + ((S.invFiles || []).length ? `<li><span class="label">原価管理表</span> ${S.invFiles.map(x => esc(x.name)).join('、')} <span class="muted">${sum(S.invFiles, x => x.rows.length)}店・${fmtYM(S.invFiles[0].rows)}</span></li>` : '<li class="muted"><span class="label">原価管理表</span> なし</li>');
     $('savedAt').textContent = GAS ? `読み込み ${fmtTime(new Date(S.savedAt))}` : `保存日時 ${fmtTime(new Date(S.savedAt))}`;
@@ -803,7 +807,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   function runSaved() {
     syncMonthSel();
     const curRows = planRows(S.cur.rows);
-    run(curRows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: PLAN ? [] : S.pays ? S.pays.rows : [], pPays: PLAN ? [] : S.pPays ? S.pPays.rows : [], menu: PLAN ? [] : S.menu ? S.menu.rows : [], pMenu: PLAN ? [] : S.pMenu ? S.pMenu.rows : [], planMode: !!PLAN, tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], master: S.master ? S.master.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: PLAN ? null : HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows), prevInv: STORE && STORE.months[S.k - 1] ? (STORE.months[S.k - 1].invFiles || []).flatMap(x => x.rows) : [] });
+    run(curRows, S.prev ? S.prev.rows : [], { hourly: S.hourly ? S.hourly.rows : [], pays: PLAN ? [] : S.pays ? S.pays.rows : [], pPays: PLAN ? [] : S.pPays ? S.pPays.rows : [], menu: PLAN ? [] : S.menu ? S.menu.rows : [], pMenu: PLAN ? [] : S.pMenu ? S.pMenu.rows : [], planMode: !!PLAN, tc: S.tc ? S.tc.rows : [], ws: S.ws ? S.ws.rows : [], wage: S.wage ? S.wage.rows : [], master: S.master ? S.master.rows : [], pl: S.pl ? S.pl.rows : [], std: combineStd(S.stdBook ? S.stdBook.data : null, S.stdLane ? S.stdLane.data : null), history: PLAN ? null : HIST, stdSettings: stdSettingsAll(), inv: (S.invFiles || []).flatMap(x => x.rows), prevInv: STORE && STORE.months[S.k - 1] ? (STORE.months[S.k - 1].invFiles || []).flatMap(x => x.rows) : [] });
     $('sampleBanner').hidden = true;
     renderSaved();
   }
@@ -920,6 +924,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         // 時給データ・標準比マスタは全部の月で共通（新しいファイルで差し替え）
         // 店舗情報（経営企業名・担当AM）も全部の月で共通
         else if (g.nps) npsGot.push({ name: g.name, data: g.nps, file: g.file, mtime: g.mtime }); // 月を決めてから、いちばん新しい月を使う（下）
+        // 損益：いちばん新しい月まで実績のあるファイルを使う（期の全部の月の予算・前年が入っている）
+        else if (g.pl) { const la = x => (x && x.rows && x.rows.reduce((m, r) => r.lastAct > m ? r.lastAct : m, '')) || '', nw = { name: g.name, rows: g.pl, file: g.file, mtime: g.mtime }; if (!ST.pl || la(nw) > la(ST.pl) || (la(nw) === la(ST.pl) && (nw.mtime || 0) >= (ST.pl.mtime || 0))) ST.pl = nw; }
         else if (g.master) { if (!(opt.fresh && ST.master && (ST.master.mtime || 0) >= (g.mtime || 0))) ST.master = { name: g.name, rows: g.master, file: g.file, mtime: g.mtime }; }
         else if (g.wage) {
           // いちばん新しい月の時給データを使う（月がわからないときは更新日時の新しい方）
@@ -1250,7 +1256,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
    */
   const CM_SECTIONS = [
     ['NPS・QSCs', /^NPS|QSC/],
-    ['前月の課題', /課題のその後|課題の.*状況/], ['着地見込み', /^着地見込み/], ['客数・客単価・値引', /要因分解|値引|誘客|客単価/],
+    ['前月の課題', /課題のその後|課題の.*状況/], ['着地見込み', /^着地見込み/], ['原価（予算差）', /値引後原価率|原価予算/], ['客数・客単価・値引', /要因分解|値引|誘客|客単価/],
     ['曜日・時間帯', /曜日|時間帯/], ['特異日・データ確認', /不振日|未達が大きかった日|上振れが大きかった日|売上0の日/],
     ['労働時間・雑給', /労働時間|雑給|勤務予定/], ['残業', /残業/], ['標準比', /標準比/], ['採用・定着', /勤務期間|戦力化|新規採用|退社|減り方|入社月/],
     ['営業部・店舗の比較', /営業部別|未達額上位|達成額上位|挽回|の高い店|店舗別|プレミアム比率/], ['原価', /^原価|理論差|喫食|平均との差|コース構成|食べ放題/], ['ロス', /ロス/], ['FC企業別', /株式会社|有限会社|合同会社|（株）|\(株\)|㈱|^企業/],
