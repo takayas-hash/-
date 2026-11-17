@@ -23,7 +23,7 @@ import openpyxl
 SRC = os.path.join(os.path.dirname(__file__), "data", "src")
 MESH_DIR = os.path.join(os.path.dirname(__file__), "data", "mesh")
 MESH_URL = "https://www.e-stat.go.jp/gis/statmap-search/data?statsId=T001141&code={code}&downloadType=2"
-RADII_KM = (3, 5)
+RADII_KM = (3, 5, 10)
 
 # 住宅・土地統計調査 世帯の年間収入階級(10区分) の階級値（万円）。最上位は仮定値。
 INCOME_CLASSES = [
