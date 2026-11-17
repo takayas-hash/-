@@ -64,6 +64,7 @@ def load(months, open_before):
             continue
         rows.append(dict(
             店舗コード=code, 店舗名=name, 営業部=next(iter(ms.values()))["営業部名称"].strip(), 直営FC=t["直営FC"],
+            ブロック=t.get("ブロック") or "（未設定）",
             市区町村=t["市区町村名"], 席数=float(t["席数"] or 0) or None,
             人口5km=float(t["商圏5km_人口"]), 世帯5km=float(t["商圏5km_世帯数"]), 人口3km=float(t["商圏3km_人口"]),
             年収5km=float(t["商圏5km_推計平均世帯年収_万円"] or 0) or None, 高齢5km=float(t["商圏5km_65歳以上比率%"]),
@@ -114,38 +115,44 @@ def style_head(ws, row):
 
 def write_xlsx(path, rows, excluded, months):
     wb = Workbook()
-    # ---- 店舗別（元データ＋数式）
+    # ---- 店舗別（元データ＋数式）。列: A コード B 店舗名 C ブロック D AMエリア E 直営FC F 市区町村 G 席数
+    # H 5km人口 I 5km世帯 J 3km人口 K 年収 L 高齢 M 月商 N 人口帯 O ln P 期待 Q 差 R 達成率 S 全店順位 T ブロック内 U AM内
     ws = wb.create_sheet("店舗別の期待月商")
-    cols = ["店舗コード", "店舗名", "営業部", "直営FC", "市区町村", "席数", "5km人口", "5km世帯数", "3km人口",
+    cols = ["店舗コード", "店舗名", "ブロック", "AMエリア", "直営FC", "市区町村", "席数", "5km人口", "5km世帯数", "3km人口",
             "5km推計世帯年収(万円)", "5km 65歳以上比率%", "実績月商(円)", "人口帯", "ln(5km人口)", "期待月商(円)",
-            "差(実績−期待, 円)", "達成率(実績÷期待)", "達成率の順位(高い順)"]
+            "差(実績−期待, 円)", "達成率(実績÷期待)", "達成率の順位(全店)", "ブロック内の順位", "AMエリア内の順位"]
     ws.append(cols)
     style_head(ws, 1)
     n = len(rows)
     last = n + 1
-    rows_sorted = sorted(rows, key=lambda r: int(r["店舗コード"]))
+    R = lambda c: f"${c}$2:${c}${last}"  # noqa: E731
+    rows_sorted = sorted(rows, key=lambda r: (r["ブロック"], r["営業部"], -r["達成率"]))
     for i, r in enumerate(rows_sorted, start=2):
-        ws.append([int(r["店舗コード"]), r["店舗名"], r["営業部"], r["直営FC"], r["市区町村"], r["席数"], r["人口5km"],
-                   r["世帯5km"], r["人口3km"], r["年収5km"], r["高齢5km"], round(r["月商"]),
-                   f'=IF(G{i}<100000,"10万未満",IF(G{i}<150000,"10万〜15万未満",IF(G{i}<200000,"15万〜20万未満",'
-                   f'IF(G{i}<300000,"20万〜30万未満",IF(G{i}<500000,"30万〜50万未満",IF(G{i}<1000000,"50万〜100万未満","100万以上"))))))',
-                   f"=LN(G{i})", f"=係数!$B$3+係数!$B$4*N{i}", f"=L{i}-O{i}", f"=L{i}/O{i}", f"=RANK(Q{i},$Q$2:$Q${last},0)"])
-        for c, fmt in ((7, "#,##0"), (8, "#,##0"), (9, "#,##0"), (12, "#,##0"), (14, "0.000"), (15, "#,##0"),
-                       (16, "#,##0;[Red]-#,##0"), (17, "0.0%")):
+        ws.append([int(r["店舗コード"]), r["店舗名"], r["ブロック"], r["営業部"], r["直営FC"], r["市区町村"], r["席数"],
+                   r["人口5km"], r["世帯5km"], r["人口3km"], r["年収5km"], r["高齢5km"], round(r["月商"]),
+                   f'=IF(H{i}<100000,"10万未満",IF(H{i}<150000,"10万〜15万未満",IF(H{i}<200000,"15万〜20万未満",'
+                   f'IF(H{i}<300000,"20万〜30万未満",IF(H{i}<500000,"30万〜50万未満",IF(H{i}<1000000,"50万〜100万未満","100万以上"))))))',
+                   f"=LN(H{i})", f"=係数!$B$3+係数!$B$4*O{i}", f"=M{i}-P{i}", f"=M{i}/P{i}",
+                   f"=RANK(R{i},{R('R')},0)",
+                   f'=COUNTIFS({R("C")},C{i},{R("R")},">"&R{i})+1',
+                   f'=COUNTIFS({R("D")},D{i},{R("R")},">"&R{i})+1'])
+        for c, fmt in ((8, "#,##0"), (9, "#,##0"), (10, "#,##0"), (13, "#,##0"), (15, "0.000"), (16, "#,##0"),
+                       (17, "#,##0;[Red]-#,##0"), (18, "0.0%")):
             ws.cell(i, c).number_format = fmt
-    ws.conditional_formatting.add(f"Q2:Q{last}", ColorScaleRule(
+    ws.conditional_formatting.add(f"R2:R{last}", ColorScaleRule(
         start_type="num", start_value=0.7, start_color="F8696B", mid_type="num", mid_value=1, mid_color="FFFFFF",
         end_type="num", end_value=1.3, end_color="63BE7B"))
     ws.freeze_panes = "C2"
-    ws.auto_filter.ref = f"A1:R{last}"
-    widths = [9, 26, 14, 7, 22, 7, 11, 11, 11, 11, 10, 13, 15, 9, 13, 14, 11, 10]
+    ws.auto_filter.ref = f"A1:U{last}"
+    widths = [9, 26, 8, 14, 7, 22, 7, 11, 11, 11, 11, 10, 13, 15, 9, 13, 14, 11, 9, 9, 9]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.row_dimensions[1].height = 42
+    S = "店舗別の期待月商!"
 
     # ---- 係数
     wc = wb.create_sheet("係数", 0)
-    rng_x, rng_y = f"店舗別の期待月商!$N$2:$N${last}", f"店舗別の期待月商!$L$2:$L${last}"
+    rng_x, rng_y = f"{S}{R('O')}", f"{S}{R('M')}"
     wc.append(["期待月商の計算式：期待月商 ＝ a ＋ b × ln(5km人口)（全店の実績に当てはめた線）"])
     wc.append([])
     wc.append(["a（切片）", f"=INTERCEPT({rng_y},{rng_x})"])
@@ -166,6 +173,7 @@ def write_xlsx(path, rows, excluded, months):
     wc.append([f"実績月商：{', '.join(m[:4] + '年' + m[4:].lstrip('0') + '月' for m in months)} の平均（7月はコース値上げ月のため除外）。"
                "全月とも休業日のない、2025年3月末までに開店した営業中の店が対象。"])
     wc.append(["ln は自然対数。人口が2倍になると期待月商は b×0.69 だけ増える（人口が増えるほど伸びは緩やか）。"])
+    wc.append(["絞り込み：「店舗別の期待月商」シートの見出しのフィルタで、ブロック・AMエリアを選ぶ。達成率の列で並べ替えると、その中で期待との差が大きい順に並ぶ。"])
     wc.column_dimensions["A"].width = 44
     wc.column_dimensions["B"].width = 18
     for row in wc.iter_rows():
@@ -178,52 +186,76 @@ def write_xlsx(path, rows, excluded, months):
     wb_.append(["5km人口の帯", "店数", "平均 5km人口", "平均 5km世帯数", "平均 月商(円)", "月商 中央値(円)", "月商 最小(円)",
                 "月商 最大(円)", "平均 席数", "1席当たり月商(円)", "人口1人当たり月商(円)"])
     style_head(wb_, 1)
-    S = "店舗別の期待月商!"
     labels = ["10万未満", "10万〜15万未満", "15万〜20万未満", "20万〜30万未満", "30万〜50万未満", "50万〜100万未満", "100万以上"]
     for i, lab in enumerate(labels, start=2):
-        crit = f'{S}$M$2:$M${last},$A{i}'
-        wb_.append([lab, f"=COUNTIF({crit})", f"=AVERAGEIF({crit.replace(',$A', ',$A')},{S}$G$2:$G${last})",
-                    f"=AVERAGEIF({crit},{S}$H$2:$H${last})", f"=AVERAGEIF({crit},{S}$L$2:$L${last})",
-                    None,  # 中央値は下で配列数式として入れる
-                    f"=_xlfn.MINIFS({S}$L$2:$L${last},{crit})", f"=_xlfn.MAXIFS({S}$L$2:$L${last},{crit})",
-                    f"=AVERAGEIF({crit},{S}$F$2:$F${last})", f"=E{i}/I{i}", f"=E{i}/C{i}"])
-        wb_.cell(i, 6).value = ArrayFormula(f"F{i}", f"=MEDIAN(IF({S}$M$2:$M${last}=$A{i},{S}$L$2:$L${last}))")
+        crit = f"{S}{R('N')},$A{i}"
+        wb_.append([lab, f"=COUNTIF({crit})", f"=AVERAGEIF({crit},{S}{R('H')})",
+                    f"=AVERAGEIF({crit},{S}{R('I')})", f"=AVERAGEIF({crit},{S}{R('M')})",
+                    None,
+                    f"=_xlfn.MINIFS({S}{R('M')},{crit})", f"=_xlfn.MAXIFS({S}{R('M')},{crit})",
+                    f"=AVERAGEIF({crit},{S}{R('G')})", f"=E{i}/I{i}", f"=E{i}/C{i}"])
+        wb_.cell(i, 6).value = ArrayFormula(f"F{i}", f"=MEDIAN(IF({S}{R('N')}=$A{i},{S}{R('M')}))")
     t = len(labels) + 2
-    wb_.append(["全店", f"=SUM(B2:B{t - 1})", f"=AVERAGE({S}G2:G{last})", f"=AVERAGE({S}H2:H{last})",
-                f"=AVERAGE({S}L2:L{last})", f"=MEDIAN({S}L2:L{last})", f"=MIN({S}L2:L{last})", f"=MAX({S}L2:L{last})",
-                f"=AVERAGE({S}F2:F{last})", f"=E{t}/I{t}", f"=E{t}/C{t}"])
+    wb_.append(["全店", f"=SUM(B2:B{t - 1})", f"=AVERAGE({S}{R('H')})", f"=AVERAGE({S}{R('I')})",
+                f"=AVERAGE({S}{R('M')})", f"=MEDIAN({S}{R('M')})", f"=MIN({S}{R('M')})", f"=MAX({S}{R('M')})",
+                f"=AVERAGE({S}{R('G')})", f"=E{t}/I{t}", f"=E{t}/C{t}"])
     for r_ in range(2, t + 1):
         for c in range(3, 12):
             wb_.cell(r_, c).number_format = "#,##0.0" if c == 9 else "#,##0"
-        wb_.cell(t, 1).font = Font(name=FONT, bold=True)
+    wb_.cell(t, 1).font = Font(name=FONT, bold=True)
     for i, w in enumerate([16, 7, 13, 13, 14, 14, 13, 13, 9, 13, 13], 1):
         wb_.column_dimensions[get_column_letter(i)].width = w
     wb_.row_dimensions[1].height = 32
 
-    # ---- 上位・下位
-    wr = wb.create_sheet("差の大きい店", 2)
+    # ---- ブロック・AM別のまとめ
+    wg = wb.create_sheet("ブロック・AM別", 2)
+    ghead = ["区分", "名前", "店数", "平均 5km人口", "平均 月商(円)", "平均 期待月商(円)", "平均 達成率",
+             "最高の達成率", "最低の達成率", "達成率100%未満の店数", "達成率が最も高い店", "達成率が最も低い店"]
+    wg.append(ghead)
+    style_head(wg, 1)
+    groups = [("ブロック", "C", sorted({r["ブロック"] for r in rows})), ("AMエリア", "D", sorted({r["営業部"] for r in rows}))]
+    for kind, col, names in groups:
+        for name in names:
+            i = wg.max_row + 1
+            crit = f"{S}{R(col)},$B{i}"
+            wg.append([kind, name, f"=COUNTIF({crit})", f"=AVERAGEIF({crit},{S}{R('H')})",
+                       f"=AVERAGEIF({crit},{S}{R('M')})", f"=AVERAGEIF({crit},{S}{R('P')})",
+                       f"=AVERAGEIF({crit},{S}{R('R')})", f"=_xlfn.MAXIFS({S}{R('R')},{crit})",
+                       f"=_xlfn.MINIFS({S}{R('R')},{crit})", f'=COUNTIFS({crit},{S}{R("R")},"<1")', None, None])
+            wg.cell(i, 11).value = ArrayFormula(
+                f"K{i}", f"=INDEX({S}{R('B')},MATCH(1,({S}{R(col)}=$B{i})*({S}{R('R')}=H{i}),0))")
+            wg.cell(i, 12).value = ArrayFormula(
+                f"L{i}", f"=INDEX({S}{R('B')},MATCH(1,({S}{R(col)}=$B{i})*({S}{R('R')}=I{i}),0))")
+            for c, fmt in ((4, "#,##0"), (5, "#,##0"), (6, "#,##0"), (7, "0.0%"), (8, "0.0%"), (9, "0.0%")):
+                wg.cell(i, c).number_format = fmt
+    gl = wg.max_row
+    wg.conditional_formatting.add(f"G2:G{gl}", ColorScaleRule(
+        start_type="num", start_value=0.85, start_color="F8696B", mid_type="num", mid_value=1, mid_color="FFFFFF",
+        end_type="num", end_value=1.15, end_color="63BE7B"))
+    wg.auto_filter.ref = f"A1:L{gl}"
+    wg.freeze_panes = "C2"
+    for i, w in enumerate([10, 16, 6, 12, 13, 13, 9, 9, 9, 10, 24, 24], 1):
+        wg.column_dimensions[get_column_letter(i)].width = w
+    wg.row_dimensions[1].height = 32
+
+    # ---- 上位・下位（全店）
+    wr = wb.create_sheet("差の大きい店", 3)
     rs = sorted(rows, key=lambda r: r["達成率"])
-    head = ["区分", "順位", "店舗コード", "店舗名", "営業部", "5km人口", "実績月商(円)", "期待月商(円)", "差(円)", "達成率", "席数"]
-
-    def block(title, items):
-        wr.append([title])
-        wr.cell(wr.max_row, 1).font = Font(name=FONT, bold=True, size=11)
-        wr.append(head)
-        style_head(wr, wr.max_row)
+    head = ["区分", "順位", "店舗コード", "店舗名", "ブロック", "AMエリア", "5km人口", "実績月商(円)", "期待月商(円)", "差(円)", "達成率", "席数"]
+    wr.append(head)
+    style_head(wr, 1)
+    for title, items in (("期待より大きい（上位20）", rs[::-1][:20]), ("期待より小さい（下位20）", rs[:20])):
         for k, r in enumerate(items, 1):
-            # 店舗別シートの数式セルを参照（店舗コードで検索）
-            row_ref = f"MATCH({int(r['店舗コード'])},{S}$A$2:$A${last},0)"
-            wr.append([title.split("（")[0], k, int(r["店舗コード"]), r["店舗名"], r["営業部"], r["人口5km"],
-                       f"=INDEX({S}$L$2:$L${last},{row_ref})", f"=INDEX({S}$O$2:$O${last},{row_ref})",
-                       f"=G{wr.max_row + 1}-H{wr.max_row + 1}", f"=G{wr.max_row + 1}/H{wr.max_row + 1}", r["席数"]])
-            rr = wr.max_row
-            for c, fmt in ((6, "#,##0"), (7, "#,##0"), (8, "#,##0"), (9, "#,##0;[Red]-#,##0"), (10, "0.0%")):
-                wr.cell(rr, c).number_format = fmt
-        wr.append([])
-
-    block("期待より売上が大きい店（上位20）", rs[::-1][:20])
-    block("期待より売上が小さい店（下位20）", rs[:20])
-    for i, w in enumerate([22, 6, 10, 26, 14, 11, 13, 13, 13, 9, 7], 1):
+            j = wr.max_row + 1
+            row_ref = f"MATCH($C{j},{S}{R('A')},0)"
+            wr.append([title, k, int(r["店舗コード"]), r["店舗名"], r["ブロック"], r["営業部"], r["人口5km"],
+                       f"=INDEX({S}{R('M')},{row_ref})", f"=INDEX({S}{R('P')},{row_ref})",
+                       f"=H{j}-I{j}", f"=H{j}/I{j}", r["席数"]])
+            for c, fmt in ((7, "#,##0"), (8, "#,##0"), (9, "#,##0"), (10, "#,##0;[Red]-#,##0"), (11, "0.0%")):
+                wr.cell(j, c).number_format = fmt
+    wr.auto_filter.ref = f"A1:L{wr.max_row}"
+    wr.freeze_panes = "E2"
+    for i, w in enumerate([20, 6, 10, 26, 8, 14, 11, 13, 13, 13, 9, 7], 1):
         wr.column_dimensions[get_column_letter(i)].width = w
 
     # ---- 除外
