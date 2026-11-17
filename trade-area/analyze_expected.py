@@ -22,12 +22,12 @@ from openpyxl.utils import get_column_letter
 FONT = "Arial"
 HEAD = PatternFill("solid", fgColor="1F3864")
 INPUT = PatternFill("solid", fgColor="FFF2CC")
-BANDS = [(0, 100_000), (100_000, 150_000), (150_000, 200_000), (200_000, 300_000),
+BANDS = [(0, 75_000), (75_000, 100_000), (100_000, 150_000), (150_000, 200_000), (200_000, 300_000),
          (300_000, 500_000), (500_000, 1_000_000), (1_000_000, 10_000_000)]
 
 
 def band_label(lo, hi):
-    f = lambda v: f"{v // 10000}万"  # noqa: E731
+    f = lambda v: f"{v / 10000:g}万"  # noqa: E731
     return f"{f(lo)}〜{f(hi)}未満" if lo and hi < 10_000_000 else (f"{f(hi)}未満" if not lo else f"{f(lo)}以上")
 
 
@@ -130,8 +130,8 @@ def write_xlsx(path, rows, excluded, months):
     for i, r in enumerate(rows_sorted, start=2):
         ws.append([int(r["店舗コード"]), r["店舗名"], r["ブロック"], r["営業部"], r["直営FC"], r["市区町村"], r["席数"],
                    r["人口5km"], r["世帯5km"], r["人口3km"], r["年収5km"], r["高齢5km"], round(r["月商"]),
-                   f'=IF(H{i}<100000,"10万未満",IF(H{i}<150000,"10万〜15万未満",IF(H{i}<200000,"15万〜20万未満",'
-                   f'IF(H{i}<300000,"20万〜30万未満",IF(H{i}<500000,"30万〜50万未満",IF(H{i}<1000000,"50万〜100万未満","100万以上"))))))',
+                   f'=IF(H{i}<75000,"7.5万未満",IF(H{i}<100000,"7.5万〜10万未満",IF(H{i}<150000,"10万〜15万未満",IF(H{i}<200000,"15万〜20万未満",'
+                   f'IF(H{i}<300000,"20万〜30万未満",IF(H{i}<500000,"30万〜50万未満",IF(H{i}<1000000,"50万〜100万未満","100万以上")))))))',
                    f"=LN(H{i})", f"=係数!$B$3+係数!$B$4*O{i}", f"=M{i}-P{i}", f"=M{i}/P{i}",
                    f"=RANK(R{i},{R('R')},0)",
                    f'=COUNTIFS({R("C")},C{i},{R("R")},">"&R{i})+1',
@@ -186,7 +186,7 @@ def write_xlsx(path, rows, excluded, months):
     wb_.append(["5km人口の帯", "店数", "平均 5km人口", "平均 5km世帯数", "平均 月商(円)", "月商 中央値(円)", "月商 最小(円)",
                 "月商 最大(円)", "平均 席数", "1席当たり月商(円)", "人口1人当たり月商(円)"])
     style_head(wb_, 1)
-    labels = ["10万未満", "10万〜15万未満", "15万〜20万未満", "20万〜30万未満", "30万〜50万未満", "50万〜100万未満", "100万以上"]
+    labels = ["7.5万未満", "7.5万〜10万未満", "10万〜15万未満", "15万〜20万未満", "20万〜30万未満", "30万〜50万未満", "50万〜100万未満", "100万以上"]
     for i, lab in enumerate(labels, start=2):
         crit = f"{S}{R('N')},$A{i}"
         wb_.append([lab, f"=COUNTIF({crit})", f"=AVERAGEIF({crit},{S}{R('H')})",
