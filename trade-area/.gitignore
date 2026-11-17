@@ -1,0 +1,9 @@
+# 店舗一覧・統計の元データ・結果の表はコミットしない（スクリプトのみ管理）
+data/
+output/
+*.csv
+*.xlsx
+*.xls
+*.zip
+*.json
+__pycache__/
