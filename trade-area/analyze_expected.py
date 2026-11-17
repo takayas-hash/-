@@ -123,6 +123,18 @@ def main():
     rs2 = sorted(rows, key=lambda r: r["達成率2"])
     print("カニバリ考慮 下位:", [(r["店舗名"], round(r["達成率2"] * 100)) for r in rs2[:10]])
     print("カニバリ考慮 上位:", [(r["店舗名"], round(r["達成率2"] * 100)) for r in rs2[-10:][::-1]])
+    # 席数込み: 月商 = a + b × ln(実質人口) + c × 席数
+    X = np.column_stack([np.ones(len(rows)), xe, [r["席数"] for r in rows]])
+    yv = np.array([r["月商"] for r in rows])
+    coef, *_ = np.linalg.lstsq(X, yv, rcond=None)
+    p3 = X @ coef
+    print(f"席数込み R²={1 - ((yv - p3) ** 2).sum() / ((yv - yv.mean()) ** 2).sum():.3f} coef={coef.round(0)}")
+    for r, v in zip(rows, p3):
+        r["期待月商3"] = v
+        r["達成率3"] = r["月商"] / v
+    rs3 = sorted(rows, key=lambda r: r["達成率3"])
+    print("席数込み 下位:", [(r["店舗名"], round(r["達成率3"] * 100)) for r in rs3[:12]])
+    print("席数込み 上位:", [(r["店舗名"], round(r["達成率3"] * 100)) for r in rs3[-12:][::-1]])
 
     x = np.log([r["人口5km"] for r in rows])
     y = np.array([r["月商"] for r in rows])
@@ -165,7 +177,9 @@ def write_xlsx(path, rows, excluded, months):
             "差(実績−期待, 円)", "達成率(実績÷期待)", "達成率の順位(全店)", "ブロック内の順位", "AMエリア内の順位",
             "最寄りのきんぐまでの距離km", f"{KM}km以内の他のきんぐ数", f"{KM}km商圏で他店と重なる人口の割合%",
             f"実質{KM}km人口(自社店で分け合った後)", f"ln(実質{KM}km人口)", "期待月商・カニバリ考慮(円)", "差・カニバリ考慮(円)",
-            "達成率・カニバリ考慮", "同 順位(全店)", "同 ブロック内の順位", "同 AMエリア内の順位", f"実質{KM}km人口の帯"]
+            "達成率・カニバリ考慮", "同 順位(全店)", "同 ブロック内の順位", "同 AMエリア内の順位", f"実質{KM}km人口の帯",
+            f"ln(実質{KM}km人口)(計算用)", "席数(計算用)", "期待月商・カニバリ＋席数(円)", "差・カニバリ＋席数(円)",
+            "達成率・カニバリ＋席数", "同 順位(全店)", "同 ブロック内の順位", "同 AMエリア内の順位"]
     ws.append(cols)
     style_head(ws, 1)
     n = len(rows)
@@ -184,7 +198,13 @@ def write_xlsx(path, rows, excluded, months):
                    f"=係数!$E$3+係数!$E$4*Z{i}", f"=M{i}-AA{i}", f"=M{i}/AA{i}", f"=RANK(AC{i},{R('AC')},0)",
                    f'=COUNTIFS({R("C")},C{i},{R("AC")},">"&AC{i})+1',
                    f'=COUNTIFS({R("D")},D{i},{R("AC")},">"&AC{i})+1',
-                   band_formula(i, "Y", EFF_BANDS)])
+                   band_formula(i, "Y", EFF_BANDS),
+                   f"=Z{i}", f"=G{i}", f"=係数!$H$3+係数!$H$4*AH{i}+係数!$H$5*AI{i}", f"=M{i}-AJ{i}", f"=M{i}/AJ{i}",
+                   f"=RANK(AL{i},{R('AL')},0)",
+                   f'=COUNTIFS({R("C")},C{i},{R("AL")},">"&AL{i})+1',
+                   f'=COUNTIFS({R("D")},D{i},{R("AL")},">"&AL{i})+1'])
+        for c, fmt in ((34, "0.000"), (36, "#,##0"), (37, "#,##0;[Red]-#,##0"), (38, "0.0%")):
+            ws.cell(i, c).number_format = fmt
         for c, fmt in ((8, "#,##0"), (9, "#,##0"), (10, "#,##0"), (13, "#,##0"), (15, "0.000"), (16, "#,##0"),
                        (17, "#,##0;[Red]-#,##0"), (18, "0.0%"), (25, "#,##0"), (26, "0.000"), (27, "#,##0"),
                        (28, "#,##0;[Red]-#,##0"), (29, "0.0%")):
@@ -196,9 +216,12 @@ def write_xlsx(path, rows, excluded, months):
         start_type="num", start_value=0.7, start_color="F8696B", mid_type="num", mid_value=1, mid_color="FFFFFF",
         end_type="num", end_value=1.3, end_color="63BE7B"))
     ws.freeze_panes = "C2"
-    ws.auto_filter.ref = f"A1:AG{last}"
+    ws.conditional_formatting.add(f"AL2:AL{last}", ColorScaleRule(
+        start_type="num", start_value=0.7, start_color="F8696B", mid_type="num", mid_value=1, mid_color="FFFFFF",
+        end_type="num", end_value=1.3, end_color="63BE7B"))
+    ws.auto_filter.ref = f"A1:AO{last}"
     widths = [9, 26, 8, 14, 7, 22, 7, 11, 11, 11, 11, 10, 13, 15, 9, 13, 14, 11, 9, 9, 9,
-              10, 9, 11, 12, 9, 13, 14, 11, 9, 9, 9, 15]
+              10, 9, 11, 12, 9, 13, 14, 11, 9, 9, 9, 15, 9, 7, 14, 14, 11, 9, 9, 9]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.row_dimensions[1].height = 42
@@ -220,6 +243,17 @@ def write_xlsx(path, rows, excluded, months):
     wc["D5"], wc["E5"] = "当てはまり R²", f"=RSQ({S}{R('M')},{S}{R('Z')})"
     wc["E3"].number_format = wc["E4"].number_format = "#,##0"
     wc["E5"].number_format = "0.000"
+    lx = f"{S}$AH$2:$AI${last}"
+    wc["G1"] = f"カニバリ＋席数：期待月商 ＝ a ＋ b × ln(実質{KM}km人口) ＋ c × 席数"
+    wc["G3"], wc["H3"] = "a（切片）", f"=INDEX(LINEST({S}{R('M')},{lx}),1,3)"
+    wc["G4"], wc["H4"] = "b（人口の効き方）", f"=INDEX(LINEST({S}{R('M')},{lx}),1,2)"
+    wc["G5"], wc["H5"] = "c（1席当たり）", f"=INDEX(LINEST({S}{R('M')},{lx}),1,1)"
+    wc["G6"], wc["H6"] = "当てはまり R²", f"=INDEX(LINEST({S}{R('M')},{lx},TRUE,TRUE),3,1)"
+    for c in ("H3", "H4", "H5"):
+        wc[c].number_format = "#,##0"
+    wc["H6"].number_format = "0.000"
+    wc.column_dimensions["G"].width = 30
+    wc.column_dimensions["H"].width = 16
     wc.append([f"{KM}km人口の例", "期待月商(円)"])
     style_head(wc, 8)
     for i, p in enumerate([50_000, 100_000, 150_000, 200_000, 300_000, 500_000, 1_000_000], start=9):
@@ -297,7 +331,7 @@ def write_xlsx(path, rows, excluded, months):
     wg = wb.create_sheet("ブロック・AM別", 2)
     ghead = ["区分", "名前", "店数", f"平均 {KM}km人口", "平均 月商(円)", "平均 期待月商(円)", "平均 達成率",
              "最高の達成率", "最低の達成率", "達成率100%未満の店数", "達成率が最も高い店", "達成率が最も低い店",
-             "平均 達成率・カニバリ考慮", f"平均 {KM}km以内の他のきんぐ数"]
+             "平均 達成率・カニバリ考慮", f"平均 {KM}km以内の他のきんぐ数", "平均 達成率・カニバリ＋席数"]
     wg.append(ghead)
     style_head(wg, 1)
     groups = [("ブロック", "C", sorted({r["ブロック"] for r in rows})), ("AMエリア", "D", sorted({r["営業部"] for r in rows}))]
@@ -315,6 +349,8 @@ def write_xlsx(path, rows, excluded, months):
                 f"L{i}", f"=INDEX({S}{R('B')},MATCH(1,({S}{R(col)}=$B{i})*({S}{R('R')}=I{i}),0))")
             wg.cell(i, 13).value = f"=AVERAGEIF({crit},{S}{R('AC')})"
             wg.cell(i, 14).value = f"=AVERAGEIF({crit},{S}{R('W')})"
+            wg.cell(i, 15).value = f"=AVERAGEIF({crit},{S}{R('AL')})"
+            wg.cell(i, 15).number_format = "0.0%"
             for c, fmt in ((4, "#,##0"), (5, "#,##0"), (6, "#,##0"), (7, "0.0%"), (8, "0.0%"), (9, "0.0%"), (13, "0.0%"), (14, "0.0")):
                 wg.cell(i, c).number_format = fmt
     gl = wg.max_row
@@ -324,9 +360,12 @@ def write_xlsx(path, rows, excluded, months):
     wg.conditional_formatting.add(f"M2:M{gl}", ColorScaleRule(
         start_type="num", start_value=0.85, start_color="F8696B", mid_type="num", mid_value=1, mid_color="FFFFFF",
         end_type="num", end_value=1.15, end_color="63BE7B"))
-    wg.auto_filter.ref = f"A1:N{gl}"
+    wg.conditional_formatting.add(f"O2:O{gl}", ColorScaleRule(
+        start_type="num", start_value=0.85, start_color="F8696B", mid_type="num", mid_value=1, mid_color="FFFFFF",
+        end_type="num", end_value=1.15, end_color="63BE7B"))
+    wg.auto_filter.ref = f"A1:O{gl}"
     wg.freeze_panes = "C2"
-    for i, w in enumerate([10, 16, 6, 12, 13, 13, 9, 9, 9, 10, 24, 24, 11, 10], 1):
+    for i, w in enumerate([10, 16, 6, 12, 13, 13, 9, 9, 9, 10, 24, 24, 11, 10, 11], 1):
         wg.column_dimensions[get_column_letter(i)].width = w
     wg.row_dimensions[1].height = 32
 
@@ -370,6 +409,27 @@ def write_xlsx(path, rows, excluded, months):
     for i, w in enumerate([20, 6, 10, 26, 8, 14, 11, 11, 9, 13, 13, 13, 10, 10, 7], 1):
         wr2.column_dimensions[get_column_letter(i)].width = w
     wr2.row_dimensions[1].height = 32
+
+    # ---- 上位・下位（カニバリ＋席数）
+    wr3 = wb.create_sheet("差の大きい店(カニバリ＋席数)", 3)
+    rs3 = sorted(rows, key=lambda r: r["達成率3"])
+    wr3.append(["区分", "順位", "店舗コード", "店舗名", "ブロック", "AMエリア", f"実質{KM}km人口", "席数",
+                "実績月商(円)", "期待月商・カニバリ＋席数(円)", "差(円)", "達成率・カニバリ＋席数", "達成率(人口のみ)"])
+    style_head(wr3, 1)
+    for title, items in (("期待より大きい（上位20）", rs3[::-1][:20]), ("期待より小さい（下位20）", rs3[:20])):
+        for k, r in enumerate(items, 1):
+            j = wr3.max_row + 1
+            ref = f"MATCH($C{j},{S}{R('A')},0)"
+            wr3.append([title, k, int(r["店舗コード"]), r["店舗名"], r["ブロック"], r["営業部"], r["実質人口"], r["席数"],
+                        f"=INDEX({S}{R('M')},{ref})", f"=INDEX({S}{R('AJ')},{ref})", f"=I{j}-J{j}", f"=I{j}/J{j}",
+                        f"=INDEX({S}{R('R')},{ref})"])
+            for c, fmt in ((7, "#,##0"), (9, "#,##0"), (10, "#,##0"), (11, "#,##0;[Red]-#,##0"), (12, "0.0%"), (13, "0.0%")):
+                wr3.cell(j, c).number_format = fmt
+    wr3.auto_filter.ref = f"A1:M{wr3.max_row}"
+    wr3.freeze_panes = "E2"
+    for i, w in enumerate([20, 6, 10, 26, 8, 14, 11, 7, 13, 14, 13, 11, 10], 1):
+        wr3.column_dimensions[get_column_letter(i)].width = w
+    wr3.row_dimensions[1].height = 32
 
     # ---- 除外
     we = wb.create_sheet("対象外の店")
