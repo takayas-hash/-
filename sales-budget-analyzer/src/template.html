@@ -63,7 +63,10 @@ header.top p { margin: 4px 0 0; max-width: 60ch; }
 .gb .bars div { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .gb .bars b { display: block; height: 12px; border-radius: 0 4px 4px 0; flex: none; }
 .gb .bars em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--muted); font-size: .75rem; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--line); }
+.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--line); flex-wrap: wrap; }
+/* 下までスクロールしてもタブを切り替えられるよう、画面の上に固定 */
+.tabs { position: sticky; top: 0; z-index: 30; background: var(--bg); padding-top: 6px; box-shadow: 0 6px 8px -8px rgba(0,0,0,.25); }
+.card { scroll-margin-top: 64px; }
 .tabs button { font: inherit; font-family: var(--font-display); font-weight: 700; font-size: 1rem; background: transparent; color: var(--muted); border: 0; border-bottom: 3px solid transparent; margin-bottom: -2px; padding: 8px 16px; cursor: pointer; }
 .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
 .tabs button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
@@ -2563,7 +2566,19 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   $('editStore').addEventListener('click', e => toggleEdit('storeComment', e.currentTarget));
   $('copyArea').addEventListener('click', e => copy($('areaComment').value, e.currentTarget));
   $('copyStore').addEventListener('click', e => copy($('storeComment').value, e.currentTarget));
-  function setTab(tb) { tab = tb; pref.set('tab', tb); render(); }
+  /**
+   * タブの切り替え：スクロールした位置からそのまま切り替える。店舗詳細を見ていたら切り替え後も店舗詳細の先頭、
+   * 全体の欄を見ていたら全体の欄の先頭へ（タブは画面の上に固定）
+   */
+  function setTab(tb) {
+    const tabsEl = document.querySelector('.tabs'), stick = tabsEl.getBoundingClientRect().height;
+    const sc = $('storeCard'), inStore = sc && !sc.hidden && sc.getBoundingClientRect().top < stick + 80;
+    const scrolled = tabsEl.getBoundingClientRect().top <= 1 && window.scrollY > tabsEl.offsetTop + 10;
+    tab = tb; pref.set('tab', tb); render();
+    const behavior = 'auto';
+    if (inStore && !$('storeCard').hidden) $('storeCard').scrollIntoView({ behavior, block: 'start' });
+    else if (scrolled) { const a = [...document.querySelectorAll('section.card')].find(e => !e.hidden && e.offsetParent !== null && e.offsetTop > tabsEl.offsetTop); if (a) a.scrollIntoView({ behavior, block: 'start' }); }
+  }
   $('tabSales').addEventListener('click', () => setTab('sales'));
   $('tabCost').addEventListener('click', () => setTab('cost'));
   $('tabLabor').addEventListener('click', () => setTab('labor'));

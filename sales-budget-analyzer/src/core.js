@@ -1518,9 +1518,22 @@ function analyze(curRows, prevRows, extra) {
   area.fc = isFullMonth ? null : forecastSum(stores.map(s => s.fc), area);
   // 人：労働時間・雑給・残業
   let labor = null;
-  if (tc.length || wsch.length) {
+  const tcP = tc.filter(r => pick.has(r.code)), wsP = wsch.filter(r => pick.has(r.code));
+  if (tcP.length || wsP.length) {
     const dtByDate = {}; curRows.forEach(r => { dtByDate[+r.date] = r.dt; });
-    labor = analyzeLabor(tc, wsch, wage, { pick, dtByDate });
+    labor = analyzeLabor(tcP, wsP, wage, { pick, dtByDate });
+    // 勤怠（タイムカード・勤務スケジュール）のない店（FCなど）は、売上集計表の労働時間（実績・計画）で補う
+    if (labor) {
+      const have = new Set(labor.stores.map(x => x.code)), rest = curRows.filter(r => !have.has(r.code));
+      const ls = rest.length ? laborFromSummary(rest, lastDate) : null;
+      if (ls && ls.stores.length) {
+        // 時給がないので雑給は計算しない（雑給率などの合計からは除く）。労働時間は全体の合計に含める
+        ls.stores.forEach(x => { x.fromSummary = true; x.wageless = true; x.wagelessNames = ['売上集計表の労働時間']; });
+        labor.stores = labor.stores.concat(ls.stores); labor.summaryStores = ls.stores.length;
+        const A = labor.area; ['mins', 'staffMins', 'planMins', 'landMins', 'planStaffMins'].forEach(k => { A[k] = (A[k] || 0) + sum(ls.stores, x => x[k] || 0); });
+        A.wageless = (A.wageless || 0) + ls.stores.length; A.wagelessNames = (A.wagelessNames || []).concat(ls.stores.map(x => x.name));
+      }
+    }
   } else labor = laborFromSummary(curRows, lastDate); // タイムカードなどがなければ売上集計表の労働時間（実績・日別予測）
     const byDate = {};
   cur.forEach(r => { if (r.sales > 0 && r.budget > 0) (byDate[+r.date] = byDate[+r.date] || []).push(r); });
@@ -1625,10 +1638,12 @@ function analyze(curRows, prevRows, extra) {
     const std = extra.std || null, cutTxt = `${labor.mo + 1}/${labor.cut}時点`;
     stores.forEach(s => {
       s.labor = labor.stores.find(x => x.code === s.code) || null;
-      s.std = std && s.labor ? analyzeStd(s, s.labor, labor, std, extra.stdSettings, lastDate.getMonth() === labor.mo ? lastDate.getDate() : 0, curRows.filter(r => r.code === s.code)) : null;
+      // 勤怠のない店（FCなど）は売上集計表の労働時間で（確定日もその店の実績まで）
+      const LL = s.labor && s.labor.fromSummary ? { ...labor, fromSummary: true, hasWage: false, cut: s.labor.cut, N: s.labor.N } : labor;
+      s.std = std && s.labor ? analyzeStd(s, s.labor, LL, std, extra.stdSettings, lastDate.getMonth() === labor.mo ? lastDate.getDate() : 0, curRows.filter(r => r.code === s.code)) : null;
       // 予測月（実績のない月）：客数・売上は見込み。雑給率は売上見込みで
       if (extra.planMode && s.std && s.std.days) s.std.days.forEach(d => { d.custEst = true; });
-      s.laborLines = s.labor ? laborLines(s.labor, labor, extra.planMode ? { landing: s.sales } : s.fc, sameCut ? s.sales : null, ctx).concat(stdLines(s.std, { cutTxt })) : [{ t: '勤怠データにこの店舗がありません。', d: false }];
+      s.laborLines = s.labor ? laborLines(s.labor, LL, extra.planMode ? { landing: s.sales } : s.fc, LL === labor && sameCut ? s.sales : null, ctx).concat(stdLines(s.std, { cutTxt: LL === labor ? cutTxt : `${LL.mo + 1}/${LL.cut}時点` })) : [{ t: '勤怠データにこの店舗がありません。', d: false }];
     });
     const a = labor.area, fs = stores.filter(s => s.labor);
     area.labor = a;
