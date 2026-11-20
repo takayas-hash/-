@@ -67,8 +67,10 @@ header.top p { margin: 4px 0 0; max-width: 60ch; }
 .gb .bars em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--muted); font-size: .75rem; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--line); flex-wrap: wrap; }
 /* 下までスクロールしてもタブを切り替えられるよう、画面の上に固定 */
-.tabs { position: sticky; top: 0; z-index: 30; background: var(--bg); padding-top: 6px; box-shadow: 0 6px 8px -8px rgba(0,0,0,.25); }
-.card { scroll-margin-top: 64px; }
+.topbar { position: sticky; top: 0; z-index: 30; background: var(--bg); padding-top: 8px; box-shadow: 0 6px 8px -8px rgba(0,0,0,.25); }
+.ctrlbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.ctrlbar .seg button, .ctrlbar select { font-size: .85rem; }
+.card { scroll-margin-top: var(--topH, 130px); }
 .tabs button { font: inherit; font-family: var(--font-display); font-weight: 700; font-size: 1rem; background: transparent; color: var(--muted); border: 0; border-bottom: 3px solid transparent; margin-bottom: -2px; padding: 8px 16px; cursor: pointer; }
 .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
 .tabs button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
@@ -319,6 +321,24 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   </div>
   <div class="banner" id="sampleBanner">いま表示しているのは<b>サンプルデータ</b>（架空の直営3店・FC1店、10月20日までの途中経過）です。売上集計表を読み込むと置き換わり、このブラウザに保存されます。</div>
 
+  <div class="topbar">
+  <div class="ctrlbar">
+    <select id="monthSel" class="btn" aria-label="分析する月" hidden></select>
+    <select id="areaSel" class="btn ghost" aria-label="営業部" hidden></select>
+    <div class="seg" role="group" aria-label="対象店舗">
+      <button type="button" id="scDirect" aria-pressed="true">直営のみ</button>
+      <button type="button" id="scFc" aria-pressed="false">FCのみ</button>
+      <button type="button" id="scAll" aria-pressed="false">全店</button>
+    </div>
+    <div class="seg" role="group" aria-label="コメントの長さ">
+      <button type="button" id="mShort" aria-pressed="true">簡潔版</button>
+      <button type="button" id="mLong" aria-pressed="false">詳細版</button>
+    </div>
+    <div class="seg" role="group" aria-label="前年比の基準" id="ybSeg">
+      <button type="button" id="ybCust" aria-pressed="true">前年比：客数</button>
+      <button type="button" id="ybSales" aria-pressed="false">売上</button>
+    </div>
+  </div>
   <div class="tabs" role="tablist" aria-label="分析の種類">
     <button type="button" role="tab" id="tabSales" aria-selected="true">売上分析</button>
     <button type="button" role="tab" id="tabCost" aria-selected="false">原価分析</button>
@@ -327,27 +347,13 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
     <button type="button" role="tab" id="tabCompany" aria-selected="false">FC企業別</button>
     <button type="button" role="tab" id="tabPerf" aria-selected="false" hidden>業績速報</button>
   </div>
+  </div>
 
   <div class="note" id="planBanner" hidden></div>
   <section class="card" id="areaCard">
     <div class="row">
       <div><div class="label" id="period"></div><h2 id="areaTitle">直営店全体</h2></div>
       <div class="row" style="gap:8px">
-        <select id="monthSel" class="btn" aria-label="分析する月" hidden></select>
-        <select id="areaSel" class="btn ghost" aria-label="営業部" hidden></select>
-        <div class="seg" role="group" aria-label="対象店舗">
-          <button type="button" id="scDirect" aria-pressed="true">直営のみ</button>
-          <button type="button" id="scFc" aria-pressed="false">FCのみ</button>
-          <button type="button" id="scAll" aria-pressed="false">全店</button>
-        </div>
-        <div class="seg" role="group" aria-label="コメントの長さ">
-          <button type="button" id="mShort" aria-pressed="true">簡潔版</button>
-          <button type="button" id="mLong" aria-pressed="false">詳細版</button>
-        </div>
-        <div class="seg" role="group" aria-label="前年比の基準" id="ybSeg">
-          <button type="button" id="ybCust" aria-pressed="true">前年比：客数</button>
-          <button type="button" id="ybSales" aria-pressed="false">売上</button>
-        </div>
         <button type="button" class="btn ghost" id="copyAll">全店コメントを一括コピー</button>
         <button type="button" class="btn ghost" id="repFc">FC全店の訪問資料（PDF）</button>
       </div>
@@ -4822,8 +4828,10 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
    * タブの切り替え：スクロールした位置からそのまま切り替える。店舗詳細を見ていたら切り替え後も店舗詳細の先頭、
    * 全体の欄を見ていたら全体の欄の先頭へ（タブは画面の上に固定）
    */
+  // 固定した上の帯の高さ（折り返しで変わる）だけ、カードの先頭へ移るときに下げる
+  { const tb = document.querySelector('.topbar'), upd = () => document.documentElement.style.setProperty('--topH', (tb.offsetHeight + 8) + 'px'); upd(); if (window.ResizeObserver) new ResizeObserver(upd).observe(tb); }
   function setTab(tb) {
-    const tabsEl = document.querySelector('.tabs'), stick = tabsEl.getBoundingClientRect().height;
+    const tabsEl = document.querySelector('.topbar'), stick = tabsEl.getBoundingClientRect().height;
     const sc = $('storeCard'), inStore = sc && !sc.hidden && sc.getBoundingClientRect().top < stick + 80;
     const scrolled = tabsEl.getBoundingClientRect().top <= 1 && window.scrollY > tabsEl.offsetTop + 10;
     tab = tb; pref.set('tab', tb); render();
@@ -4905,7 +4913,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'ccadece'; // 版（build.py が書き込む）
+  const APP_VERSION = 'e9b1b85'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
