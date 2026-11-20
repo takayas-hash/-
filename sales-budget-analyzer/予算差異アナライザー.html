@@ -341,6 +341,10 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
           <button type="button" id="mShort" aria-pressed="true">簡潔版</button>
           <button type="button" id="mLong" aria-pressed="false">詳細版</button>
         </div>
+        <div class="seg" role="group" aria-label="前年比の基準" id="ybSeg">
+          <button type="button" id="ybCust" aria-pressed="true">前年比：客数</button>
+          <button type="button" id="ybSales" aria-pressed="false">売上</button>
+        </div>
         <button type="button" class="btn ghost" id="copyAll">全店コメントを一括コピー</button>
         <button type="button" class="btn ghost" id="repFc">FC全店の訪問資料（PDF）</button>
       </div>
@@ -418,6 +422,11 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         <h3>日別の予算差</h3>
         <p class="small muted" style="margin:2px 0 8px">棒の上下＝予算との差額。</p>
         <div class="chart" id="daily"></div>
+        <div id="dailyYoyBox" hidden>
+          <h3 id="dailyYoyTitle" style="margin-top:14px">日別の客数前年比</h3>
+          <p class="small muted" style="margin:2px 0 8px">前年は同じ曜日（364日前）。棒の上下＝100%からの差（青＝前年超え・赤＝前年割れ）。</p>
+          <div class="chart" id="dailyYoy"></div>
+        </div>
       </div>
     </div>
     <div id="cumBox">
@@ -1209,7 +1218,27 @@ function bandTotals(days, key) { // key: 'hourS' | 'hourC'
   return t;
 }
 
-function analyzeStore(cur, prev, monthDays) {
+const sppl = v => (v >= 0 ? '+' : '▲') + Math.abs(Math.round(v)).toLocaleString('ja-JP') + '人';
+/** 客数の前年比：全体・曜日区分（1日あたり）・時間帯・いちばん落ちている曜日区分×時間帯。stores があれば店舗の比較も */
+function custYoyLines(s, stores) {
+  if (!s.hasPrev || !s.pCust) return [];
+  const out = [];
+  const ty = s.byType.filter(t => t.custYoyDay != null && t.days);
+  let t = `・客数前年比：${pct(s.custYoy)}（${Math.round(s.cust).toLocaleString('ja-JP')}人・前年差${sppl(s.cust - s.pCust)}）`;
+  if (ty.length) t += `。曜日区分（1日あたり）：${ty.map(x => `${x.key}${pct(x.custYoyDay)}`).join('、')}`;
+  const bs = s.byBand.filter(b => b.custYoy != null && (b.pCust > s.pCust * 0.03 || b.cust > s.cust * 0.03));
+  if (bs.length) t += `。時間帯：${bs.map(b => `${b.name}${pct(b.custYoy)}`).join('、')}`;
+  out.push(t + '。');
+  let w = null;
+  s.grid.forEach((row, ti) => row.forEach((c, bi) => { if (c.custYoyDay == null || c.custDayDiff == null) return; const imp = c.custDayDiff * c.d; if (!w || imp < w.imp) w = { imp, ti, bi, c }; }));
+  if (w && w.imp < 0) out.push(`　客数が前年から最も減っているのは「${DAYTYPES[w.ti]}×${BANDS[w.bi].name}」で、1日あたり前年比${pct(w.c.custYoyDay)}（1日${sppl(w.c.custDayDiff)}、月で約${sppl(w.imp)}）。`);
+  if (stores && stores.length > 1) {
+    const ws = stores.filter(x => x.custYoy != null).sort((x, y) => x.custYoy - y.custYoy);
+    if (ws.length > 1) out.push(`　客数前年比の低い店：${ws.slice(0, 3).map(x => `${x.name}${pct(x.custYoy)}`).join('、')}／高い店：${ws.slice(-2).reverse().map(x => `${x.name}${pct(x.custYoy)}`).join('、')}。`);
+  }
+  return out;
+}
+function analyzeStore(cur, prev, monthDays, prevAll) {
   const act = cur.filter(d => d.sales > 0 || d.budget > 0);
   const sales = sum(act, d => d.sales), budget = sum(act, d => d.budget);
   const cust = sum(act, d => d.cust), custBudget = sum(act, d => d.custBudget);
@@ -1233,32 +1262,38 @@ function analyzeStore(cur, prev, monthDays) {
   const byType = DAYTYPES.map(dt => {
     const ds = act.filter(d => d.dt === dt), ps = prev.filter(d => d.dt === dt);
     const s = sum(ds, d => d.sales), b = sum(ds, d => d.budget), c = sum(ds, d => d.cust), cb = sum(ds, d => d.custBudget);
-    const pss = sum(ps, d => d.sales);
+    const pss = sum(ps, d => d.sales), pc = sum(ps, d => d.cust);
+    const cAvg = ds.length ? c / ds.length : 0, pcAvg = ps.length ? pc / ps.length : 0;
     return { key: dt, days: ds.length, pDays: ps.length, sales: s, budget: b, diff: s - b, rate: b ? s / b : null,
-      cust: c, custBudget: cb, avg: ds.length ? s / ds.length : 0, pAvg: ps.length ? pss / ps.length : 0, pSales: pss };
+      cust: c, custBudget: cb, avg: ds.length ? s / ds.length : 0, pAvg: ps.length ? pss / ps.length : 0, pSales: pss,
+      // 客数：1日あたりで前年と比べる（曜日区分ごとの日数の違いを除く）
+      pCust: pc, custAvg: cAvg, pCustAvg: pcAvg, custYoyDay: pcAvg ? cAvg / pcAvg : null, yoyDay: ps.length && pss && ds.length ? (s / ds.length) / (pss / ps.length) : null };
   });
   // 曜日別
   const byWd = WEEKDAYS.map(w => {
     const ds = act.filter(d => d.wd === w);
-    const s = sum(ds, d => d.sales), b = sum(ds, d => d.budget);
-    return { key: w, days: ds.length, sales: s, budget: b, diff: s - b, rate: b ? s / b : null };
+    const s = sum(ds, d => d.sales), b = sum(ds, d => d.budget), ps = prev.filter(d => d.wd === w), c = sum(ds, d => d.cust), pc = sum(ps, d => d.cust);
+    return { key: w, days: ds.length, sales: s, budget: b, diff: s - b, rate: b ? s / b : null, cust: c, pDays: ps.length, pCust: pc,
+      custYoyDay: ds.length && ps.length && pc ? (c / ds.length) / (pc / ps.length) : null };
   });
 
   // 時間帯別：予算を前年構成比で配分 → 区分×時間帯の予算差
-  const grid = DAYTYPES.map(() => BANDS.map(() => ({ sales: 0, budget: 0, cust: 0, pSales: 0 })));
+  const grid = DAYTYPES.map(() => BANDS.map(() => ({ sales: 0, budget: 0, cust: 0, pSales: 0, pCust: 0 })));
   act.forEach(d => {
     const ti = DAYTYPES.indexOf(d.dt);
     for (let h = 1; h <= 24; h++) { const b = HOUR_TO_BAND[h]; grid[ti][b].sales += d.hourS[h]; grid[ti][b].cust += d.hourC[h]; }
     // 時間帯別売上の合計と純売上の差（端数）は構成比で按分しない。予算は構成比で配分
     pShare[d.dt].forEach((sh, b) => { grid[ti][b].budget += d.budget * sh; });
   });
-  prev.forEach(d => { const ti = DAYTYPES.indexOf(d.dt); for (let h = 1; h <= 24; h++) grid[ti][HOUR_TO_BAND[h]].pSales += d.hourS[h]; });
+  prev.forEach(d => { const ti = DAYTYPES.indexOf(d.dt); for (let h = 1; h <= 24; h++) { grid[ti][HOUR_TO_BAND[h]].pSales += d.hourS[h]; grid[ti][HOUR_TO_BAND[h]].pCust += (d.hourC ? d.hourC[h] : 0) || 0; } });
   // 前年比は曜日区分ごとの日数の違いを除くため1日あたりで比べる
   grid.forEach((row, ti) => row.forEach(c => { const d = byType[ti].days, pd = byType[ti].pDays; c.d = d; c.pd = pd;
-    c.yoyDay = c.pSales > 0 && d && pd ? (c.sales / d) / (c.pSales / pd) : null; c.dayDiff = d && pd ? c.sales / d - c.pSales / pd : null; }));
+    c.yoyDay = c.pSales > 0 && d && pd ? (c.sales / d) / (c.pSales / pd) : null; c.dayDiff = d && pd ? c.sales / d - c.pSales / pd : null;
+    c.custYoyDay = c.pCust > 0 && d && pd ? (c.cust / d) / (c.pCust / pd) : null; c.custDayDiff = d && pd ? c.cust / d - c.pCust / pd : null; }));
   const byBand = BANDS.map((bd, b) => {
-    const s = sum(grid, r => r[b].sales), bu = sum(grid, r => r[b].budget), c = sum(grid, r => r[b].cust), p = sum(grid, r => r[b].pSales);
-    return { key: bd.key, name: bd.name, label: bd.label, sales: s, budget: bu, diff: s - bu, rate: bu ? s / bu : null, cust: c, pSales: p, yoy: p ? s / p : null, pDiff: s - p };
+    const s = sum(grid, r => r[b].sales), bu = sum(grid, r => r[b].budget), c = sum(grid, r => r[b].cust), p = sum(grid, r => r[b].pSales), pc = sum(grid, r => r[b].pCust);
+    return { key: bd.key, name: bd.name, label: bd.label, sales: s, budget: bu, diff: s - bu, rate: bu ? s / bu : null, cust: c, pSales: p, yoy: p ? s / p : null, pDiff: s - p,
+      pCust: pc, custYoy: pc ? c / pc : null, pCustDiff: c - pc };
   });
 
   // 天候
@@ -1267,7 +1302,12 @@ function analyzeStore(cur, prev, monthDays) {
   const weather = { rainDays: rain.length, rainRate: rr(rain), fineDays: fine.length, fineRate: rr(fine), rainDiff: sum(rain, d => d.sales - d.budget) };
 
   // 日別（ワースト・ベスト）
-  const daily = act.filter(d => d.budget > 0).map(d => ({ date: d.date, wd: d.wd, dt: d.dt, weather: d.weather, sales: d.sales, budget: d.budget, diff: d.sales - d.budget, rate: d.sales / d.budget, cust: d.cust, custBudget: d.custBudget, loss: d.loss }))
+  // 日別の前年（364日前）：月末は前年の翌日になるため、日付で絞る前の前年データ（同じ店の合計）を使う
+  const pByDate = {}; (prevAll || prev).forEach(d => { const k = +d.date, x = pByDate[k] || (pByDate[k] = { sales: 0, cust: 0 }); x.sales += d.sales || 0; x.cust += d.cust || 0; });
+  const p364 = d => pByDate[+new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate() - 364)] || null;
+  const daily = act.filter(d => d.budget > 0).map(d => { const p = p364(d); return { date: d.date, wd: d.wd, dt: d.dt, weather: d.weather, sales: d.sales, budget: d.budget, diff: d.sales - d.budget, rate: d.sales / d.budget, cust: d.cust, custBudget: d.custBudget, loss: d.loss,
+    // 前年は同じ曜日（364日前）
+    pSales: p ? p.sales : null, pCust: p ? p.cust : null, yoy: p && p.sales ? d.sales / p.sales : null, custYoy: p && p.cust ? d.cust / p.cust : null }; })
     .sort((a, b) => a.date - b.date);
   const worst = [...daily].sort((a, b) => a.diff - b.diff).slice(0, 3).filter(d => d.diff < 0);
   const best = [...daily].sort((a, b) => b.diff - a.diff).slice(0, 3).filter(d => d.diff > 0);
@@ -2025,12 +2065,12 @@ function analyze(curRows, prevRows, extra) {
 
   const codes = [...new Set(cur.map(r => r.code))];
   const stores = codes.map(c => {
-    const s = analyzeStore(cur.filter(r => r.code === c), prev.filter(r => r.code === c), monthEnd.getDate());
+    const s = analyzeStore(cur.filter(r => r.code === c), prev.filter(r => r.code === c), monthEnd.getDate(), prevRows.filter(r => r.code === c));
     s.fullBudget = fullBudget[c] || 0;
     return s;
   }).filter(s => s.budget > 0 || s.sales > 0);
   // エリア合計
-  const area = analyzeStore(cur.map(r => ({ ...r, code: 'AREA', name: scopeLabel })), prev, monthEnd.getDate());
+  const area = analyzeStore(cur.map(r => ({ ...r, code: 'AREA', name: scopeLabel })), prev, monthEnd.getDate(), prevRows);
   area.fullBudget = Object.values(fullBudget).reduce((a, b) => a + b, 0);
   // 当月の着地見込み（月の途中のときだけ）
   stores.forEach(s => { s.fc = isFullMonth ? null : forecastStore(s, curRows.filter(r => r.code === s.code), prevRows.filter(r => r.code === s.code), lastDate, monthEnd); });
@@ -2121,7 +2161,7 @@ function analyze(curRows, prevRows, extra) {
     stores.filter(s => s.company && !/^直営/.test(s.fcKind)).forEach(s => { (by[s.company] = by[s.company] || []).push(s); });
     companies = Object.entries(by).map(([name, ss]) => {
       const codes = new Set(ss.map(s => s.code));
-      const c = analyzeStore(cur.filter(r => codes.has(r.code)).map(r => ({ ...r, code: 'CO', name })), prev.filter(r => codes.has(r.code)), monthEnd.getDate());
+      const c = analyzeStore(cur.filter(r => codes.has(r.code)).map(r => ({ ...r, code: 'CO', name })), prev.filter(r => codes.has(r.code)), monthEnd.getDate(), prevRows.filter(r => codes.has(r.code)));
       c.name = name; c.stores = ss; c.codes = [...codes];
       c.ams = [...new Set(ss.map(s => s.am).filter(Boolean))];
       c.fullBudget = sum(ss, s => s.fullBudget || 0);
@@ -2279,6 +2319,8 @@ function storeComment(s, ctx) {
     if (cal.length) L.d(`　前年比の暦差：${cal.join('、')}（前年比を見る際は考慮）。`);
   }
 
+  // 客数の前年比（曜日区分・時間帯は1日あたり）
+  for (const x of custYoyLines(s)) L.push(x);
   // 3) 時間帯：前年データがあれば前年比で見る（時間帯の予算は按分のため参考程度）
   const hasPY = s.hasPrev && s.byBand.some(b => b.pSales > 0);
   if (hasPY) {
@@ -2488,6 +2530,7 @@ function areaComment(a, stores, ctx) {
   if (best.length) L.push(`・達成額上位：${best.map(s => `${s.name}${sman(s.diff)}（${pct(s.rate)}）`).join('、')}。`);
   const t = a.byType.filter(x => x.budget > 0).sort((x, y) => x.diff - y.diff);
   if (t.length) L.push(`・曜日区分：${t.map(x => `${x.key}${pct(x.rate)}`).join('、')}。`);
+  for (const x of custYoyLines(a, stores)) L.push(x);
   if (a.hasPrev && a.byBand.some(x => x.pSales > 0)) {
     const b = a.byBand.filter(x => x.pSales > a.pSales * 0.02).sort((x, y) => x.pDiff - y.pDiff);
     if (b.length) L.push(`・時間帯（前年比）：${b.map(x => `${x.name}${pct(x.yoy)}（${sman(x.pDiff)}）`).join('、')}。`);
@@ -2730,7 +2773,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
 (() => {
   const $ = id => document.getElementById(id);
   let RC = null, lastEff = null, curCo = null; // FC企業別：直営だけを表示中でもFCの店舗で集計する
-  let R = null, cur = null, detail = false, scope = 'direct', areaSel = '', last = null, tab = 'sales';
+  let R = null, cur = null, detail = false, scope = 'direct', areaSel = '', last = null, tab = 'sales', yb = 'cust'; // yb：前年比を客数で見るか売上で見るか
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const cls = v => v < 0 ? 'neg' : 'pos';
   const fit = ta => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 4) + 'px'; };
@@ -3298,6 +3341,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       }
     }
     $('period').textContent = R.plan ? `${kYM(R.plan.k)}（予測）` : `${fmtD(R.firstDate)}〜${R.lastDate.getMonth() + 1}月${R.lastDate.getDate()}日${R.isFullMonth ? '（月間）' : '（途中経過）'}`;
+    $('ybSeg').hidden = tab !== 'sales' || !!R.plan;
     if (tab === 'cost') { renderCost(); return; }
     if (tab === 'labor') { renderLabor(); return; }
     if (tab === 'tenure') { renderTenure(); return; }
@@ -3308,17 +3352,18 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     $('areaTitle').textContent = `${R.titleLabel}（${R.stores.length}店）`;
     $('kpis').innerHTML = kpi('売上', man(a.sales), `予算 ${man(a.budget)}`) + kpi('予算比', pct(a.rate), `差額 ${sman(a.diff)}`, cls(a.diff))
       + kpi('客数要因', sman(a.custEff), `客数予算比 ${pct(a.custRate)}`, cls(a.custEff)) + kpi('単価要因', sman(a.upEff), `客単価 ${yen(a.up)}`, cls(a.upEff))
-      + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `前年比 ${pct(a.yoy)}` : '')
+      + kpi('達成店舗', `${okN}／${R.stores.length}店`, a.yoy ? `売上前年比 ${pct(a.yoy)}` : '')
+      + (a.custYoy ? kpi('客数前年比', pct(a.custYoy), `前年差 ${sppl(a.cust - a.pCust)}・売上前年比 ${pct(a.yoy)}`, a.custYoy >= 1 ? 'pos' : 'neg') : '')
       + fcKpis(a.fc, `達成見込み ${R.stores.filter(s => s.fc && s.fc.landDiff >= 0).length}／${R.stores.filter(s => s.fc).length}店`);
     setCmt('areaComment', commentText(a.lines, detail));
 
     const maxAbs = Math.max(1, ...R.stores.map(s => Math.abs(s.diff)));
     const rows = [...R.stores].sort((x, y) => x.rate - y.rate);
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th>${a.fc ? '<th class="n">着地見込み</th><th class="n">着地予算比</th><th class="n">必要日販</th><th class="n">残り期間の必要予算比</th>' : ''}<th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">前年比</th></tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th>判定</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th style="min-width:120px"></th>${a.fc ? '<th class="n">着地見込み</th><th class="n">着地予算比</th><th class="n">必要日販</th><th class="n">残り期間の必要予算比</th>' : ''}<th class="n">客数要因</th><th class="n">単価要因</th><th class="n">客数予算比</th><th class="n">客単価</th><th class="n">客数前年比</th><th class="n">売上前年比</th></tr></thead><tbody>`
       + rows.map(s => `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}<td><span class="pill ${s.diff >= 0 ? 'ok' : 'ng'}">${s.diff >= 0 ? '達成' : '未達'}</span></td>
         <td class="n">${man(s.sales)}</td><td class="n ${cls(s.diff)}">${pct(s.rate)}</td><td class="n ${cls(s.diff)}">${sman(s.diff)}</td>
         <td><span class="bar" style="width:${Math.round(Math.abs(s.diff) / maxAbs * 110)}px;background:var(${s.diff < 0 ? '--neg' : '--pos'})"></span></td>${a.fc ? fcCells(s.fc) : ''}
-        <td class="n ${cls(s.custEff)}">${sman(s.custEff)}</td><td class="n ${cls(s.upEff)}">${sman(s.upEff)}</td><td class="n">${pct(s.custRate)}</td><td class="n">${yen(s.up)}</td><td class="n">${pct(s.yoy)}</td></tr>`).join('') + '</tbody>';
+        <td class="n ${cls(s.custEff)}">${sman(s.custEff)}</td><td class="n ${cls(s.upEff)}">${sman(s.upEff)}</td><td class="n">${pct(s.custRate)}</td><td class="n">${yen(s.up)}</td><td class="n ${s.custYoy == null ? '' : s.custYoy >= 1 ? 'pos' : 'neg'}"><b>${pct(s.custYoy)}</b></td><td class="n">${pct(s.yoy)}</td></tr>`).join('') + '</tbody>';
     $('storeTbl').querySelectorAll('tr.pick').forEach(tr => {
       const go = () => { cur = tr.dataset.code; render(); $('storeCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
       tr.addEventListener('click', go); tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -3337,7 +3382,8 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     $('sKpis').innerHTML = kpi('売上', man(s.sales), `予算 ${man(s.budget)}`) + kpi('予算比', pct(s.rate), `差額 ${sman(s.diff)}`, cls(s.diff))
       + kpi('客数要因', sman(s.custEff), `客数 ${s.cust.toLocaleString('ja-JP')}人（予算比${pct(s.custRate)}）`, cls(s.custEff))
       + kpi('単価要因', sman(s.upEff), `客単価 ${yen(s.up)}（予算${syen(s.up - s.bUp)}）`, cls(s.upEff))
-      + kpi('売上前年比', pct(s.yoy), s.hasPrev ? `客数前年比 ${pct(s.custYoy)}` : '前年データなし')
+      + (s.hasPrev && s.pCust ? kpi('客数前年比', pct(s.custYoy), `${Math.round(s.cust).toLocaleString('ja-JP')}人・前年差 ${sppl(s.cust - s.pCust)}`, s.custYoy >= 1 ? 'pos' : 'neg') : '')
+      + kpi('売上前年比', pct(s.yoy), s.hasPrev ? `客単価前年比 ${s.pUp ? pct(s.up / s.pUp) : '－'}` : '前年データなし')
       + fcKpis(s.fc);
     setCmt('storeComment', commentText(s.lines, detail));
     // NPS（共通に置いたNPSのファイルから。資料と同じ図）
@@ -3359,15 +3405,23 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     }
 
     // ヒートマップ：前年データがあれば前年比（1日あたり）、なければ按分予算比
-    const py = s.hasPrev && s.grid.some(r => r.some(c => c.pSales > 0));
-    $('heatTitle').textContent = py ? '曜日区分 × 時間帯の前年比（1日あたり）' : '曜日区分 × 時間帯の予算比';
-    $('heatNote').textContent = py ? '曜日区分ごとの日数の違い（休前日5日と4日など）を除くため、1日あたりの売上で前年と比べています。下の段は1日あたりの前年差。' : '前年データがないため予算比で表示しています（時間帯の予算は、日予算を時間帯に按分した参考値）。';
+    const py = s.hasPrev && s.grid.some(r => r.some(c => c.pSales > 0)), yc = py && yb === 'cust' && s.grid.some(r => r.some(c => c.pCust > 0));
+    $('heatTitle').textContent = py ? `曜日区分 × 時間帯の${yc ? '客数' : '売上'}前年比（1日あたり）` : '曜日区分 × 時間帯の予算比';
+    $('heatNote').textContent = py ? `曜日区分ごとの日数の違い（休前日5日と4日など）を除くため、1日あたりの${yc ? '客数' : '売上'}で前年と比べています。下の段は1日あたりの前年差。` : '前年データがないため予算比で表示しています（時間帯の予算は、日予算を時間帯に按分した参考値）。';
     $('lgNeg').textContent = py ? '前年割れ' : '未達'; $('lgPos').textContent = py ? '前年超え' : '超過';
     let h = '<div></div>' + BANDS.map(b => `<div class="h">${b.name}<br><span style="font-weight:400">${b.label}</span></div>`).join('');
     DAYTYPES.forEach((dt, ti) => {
       const days = s.byType[ti].days;
       h += `<div class="h">${dt}<br><span style="font-weight:400">${days}日</span></div>`;
       s.grid[ti].forEach((c, bi) => {
+        if (yc) {
+          if (!days || c.custYoyDay == null || (c.cust < 1 && c.pCust < 1)) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
+          const r = c.custYoyDay, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
+          const bg = `color-mix(in oklab, var(${r < 1 ? '--neg' : '--pos'}) ${m}%, var(--mid))`;
+          const tipTxt = `${dt}×${BANDS[bi].name}（${BANDS[bi].label}）|客数 ${Math.round(c.cust).toLocaleString('ja-JP')}人（${c.d}日）|前年 ${Math.round(c.pCust).toLocaleString('ja-JP')}人（${c.pd}日）|1日あたり客数前年比 ${pct(r)}・1日${sppl(c.custDayDiff)}|売上前年比（1日あたり） ${pct(c.yoyDay)}`;
+          h += `<div class="c" style="background:${bg}" data-tip="${esc(tipTxt)}" tabindex="0"><b>${(r * 100).toFixed(0)}%</b><span class="small">${sppl(c.custDayDiff)}/日</span></div>`;
+          return;
+        }
         if (py) {
           if (!days || c.yoyDay == null || (c.sales < 1000 && c.pSales < 1000)) { h += `<div class="c" style="background:transparent;color:var(--muted)">－</div>`; return; }
           const r = c.yoyDay, k = Math.min(1, Math.abs(r - 1) / 0.2), m = Math.round(k * 75);
@@ -3408,13 +3462,34 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       svg += `<text x="${x + w / 2}" y="${base + 18}" text-anchor="middle">${d.date.getDate()}</text><text x="${x + w / 2}" y="${base + 31}" text-anchor="middle" style="${we ? 'font-weight:700;fill:var(--fg)' : ''}">${d.wd}</text>`;
     });
     $('daily').innerHTML = svg + '</svg>';
+    // 日別の前年比（同じ曜日）：客数か売上か（上の切り替え）
+    { const yc2 = yb === 'cust', vOf = d => yc2 ? d.custYoy : d.yoy, ok = D.some(d => vOf(d) != null);
+      $('dailyYoyBox').hidden = !ok;
+      if (ok) {
+        $('dailyYoyTitle').textContent = `日別の${yc2 ? '客数' : '売上'}前年比`;
+        const lim = 0.4, mx2 = Math.min(lim, Math.max(0.1, ...D.map(d => vOf(d) != null ? Math.abs(vOf(d) - 1) : 0)));
+        const sc2 = v => Math.min(lim, Math.abs(v)) / mx2 * (half / 2 + 10);
+        let g = `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" role="img" aria-label="日別の${yc2 ? '客数' : '売上'}前年比">`;
+        g += `<line x1="52" x2="${W - 4}" y1="${mid}" y2="${mid}" stroke="var(--line)" stroke-width="1"/><text x="48" y="${mid + 3}" text-anchor="end">100%</text>`;
+        g += `<text x="48" y="${top + 6}" text-anchor="end">${Math.round((1 + mx2) * 100)}%</text><text x="48" y="${base}" text-anchor="end">${Math.round((1 - mx2) * 100)}%</text>`;
+        D.forEach((d, i) => {
+          const x = 58 + i * 22, w = 14, v = vOf(d);
+          const tipTxt = `${d.date.getMonth() + 1}/${d.date.getDate()}（${d.wd}・${d.dt}）|客数 ${d.cust}人${d.pCust != null ? `（前年同曜日 ${d.pCust}人・${pct(d.custYoy)}）` : ''}|売上 ${man(d.sales)}${d.pSales != null ? `（前年同曜日 ${man(d.pSales)}・${pct(d.yoy)}）` : ''}`;
+          g += `<rect x="${x - 3}" y="${top}" width="${w + 6}" height="${base - top + 50}" fill="transparent" data-tip="${esc(tipTxt)}"/>`;
+          if (v != null) { const hgt = Math.max(1, sc2(v - 1)), y = v >= 1 ? mid - hgt : mid; g += `<rect x="${x}" y="${y}" width="${w}" height="${hgt}" rx="2" fill="var(${v < 1 ? '--neg' : '--pos'})" pointer-events="none"/>`; }
+          const we = d.wd === '土' || d.wd === '日' || (d.dt === '日祝日');
+          g += `<text x="${x + w / 2}" y="${base + 18}" text-anchor="middle">${d.date.getDate()}</text><text x="${x + w / 2}" y="${base + 31}" text-anchor="middle" style="${we ? 'font-weight:700;fill:var(--fg)' : ''}">${d.wd}</text>`;
+        });
+        $('dailyYoy').innerHTML = g + '</svg>';
+      } }
     renderCum(s);
 
     // 表
-    $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th></tr></thead><tbody>`
-      + s.byType.filter(t => t.days).map(t => `<tr><td>${t.key}</td><td class="n">${t.days}${s.hasPrev ? `<span class="muted small">（前年${t.pDays}）</span>` : ''}</td><td class="n">${man(t.sales)}</td><td class="n ${cls(t.diff)}">${pct(t.rate)}</td><td class="n ${cls(t.diff)}">${sman(t.diff)}</td><td class="n">${man(t.avg)}</td><td class="n">${t.pAvg ? man(t.pAvg) : '－'}</td></tr>`).join('') + '</tbody>';
-    if (py) $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">前年</th><th class="n">前年比</th><th class="n">前年差</th><th class="n">客数</th></tr></thead><tbody>`
-      + s.byBand.map(b => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n muted">${man(b.pSales)}</td><td class="n ${cls(b.pDiff)}">${pct(b.yoy)}</td><td class="n ${cls(b.pDiff)}">${sman(b.pDiff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td></tr>`).join('') + '</tbody>';
+    const pc = s.hasPrev && s.pCust, ycl = v => v == null ? '' : v >= 1 ? 'pos' : 'neg';
+    $('typeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数</th><th class="n">売上</th><th class="n">予算比</th><th class="n">予算差</th><th class="n">平均日販</th><th class="n">前年平均日販</th>${pc ? '<th class="n">平均客数</th><th class="n">前年平均客数</th><th class="n">客数前年比</th>' : ''}</tr></thead><tbody>`
+      + s.byType.filter(t => t.days).map(t => `<tr><td>${t.key}</td><td class="n">${t.days}${s.hasPrev ? `<span class="muted small">（前年${t.pDays}）</span>` : ''}</td><td class="n">${man(t.sales)}</td><td class="n ${cls(t.diff)}">${pct(t.rate)}</td><td class="n ${cls(t.diff)}">${sman(t.diff)}</td><td class="n">${man(t.avg)}</td><td class="n">${t.pAvg ? man(t.pAvg) : '－'}</td>${pc ? `<td class="n">${Math.round(t.custAvg).toLocaleString('ja-JP')}人</td><td class="n muted">${t.pCustAvg ? Math.round(t.pCustAvg).toLocaleString('ja-JP') + '人' : '－'}</td><td class="n ${ycl(t.custYoyDay)}"><b>${pct(t.custYoyDay)}</b></td>` : ''}</tr>`).join('') + '</tbody>';
+    if (py) $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">前年</th><th class="n">売上前年比</th><th class="n">前年差</th><th class="n">客数</th><th class="n">前年客数</th><th class="n">客数前年比</th></tr></thead><tbody>`
+      + s.byBand.map(b => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n muted">${man(b.pSales)}</td><td class="n ${cls(b.pDiff)}">${pct(b.yoy)}</td><td class="n ${cls(b.pDiff)}">${sman(b.pDiff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n muted">${b.pCust ? Math.round(b.pCust).toLocaleString('ja-JP') : '－'}</td><td class="n ${ycl(b.custYoy)}"><b>${pct(b.custYoy)}</b></td></tr>`).join('') + '</tbody>';
     else $('bandTbl').innerHTML = `<thead><tr><th>時間帯</th><th class="n">売上</th><th class="n">按分予算比</th><th class="n">予算差</th><th class="n">客数</th><th class="n">前年比</th></tr></thead><tbody>`
       + s.byBand.map((b, bi) => `<tr><td>${b.name} <span class="muted small">${b.label}</span></td><td class="n">${man(b.sales)}</td><td class="n ${cls(b.diff)}">${pct(b.rate)}</td><td class="n ${cls(b.diff)}">${sman(b.diff)}</td><td class="n">${Math.round(b.cust).toLocaleString('ja-JP')}</td><td class="n">${pct(b.yoy)}</td></tr>`).join('') + '</tbody>';
     // 値引内訳
@@ -3433,6 +3508,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       + `<tr><td>日数</td>${s.byWd.map(w => `<td class="n">${w.days}</td>`).join('')}</tr>`
       + `<tr><td>予算比</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${pct(w.rate)}</td>`).join('')}</tr>`
       + `<tr><td>予算差</td>${s.byWd.map(w => `<td class="n ${cls(w.diff)}">${w.days ? sman(w.diff) : '－'}</td>`).join('')}</tr>`
+      + (pc ? `<tr><td>客数前年比<span class="muted small">（1日あたり）</span></td>${s.byWd.map(w => `<td class="n ${ycl(w.custYoyDay)}">${pct(w.custYoyDay)}</td>`).join('')}</tr>` : '')
       + '</tbody>';
   }
 
@@ -3459,7 +3535,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
    */
   const CM_SECTIONS = [
     ['NPS・QSCs', /^NPS|QSC/],
-    ['前月の課題', /課題のその後|課題の.*状況/], ['着地見込み', /^着地見込み/], ['原価（予算差）', /値引後原価率|原価予算/], ['客数・客単価・値引', /要因分解|値引|誘客|客単価/],
+    ['前月の課題', /課題のその後|課題の.*状況/], ['着地見込み', /^着地見込み/], ['原価（予算差）', /値引後原価率|原価予算/], ['客数（前年比）', /^客数前年比/], ['客数・客単価・値引', /要因分解|値引|誘客|客単価/],
     ['曜日・時間帯', /曜日|時間帯/], ['特異日・データ確認', /不振日|未達が大きかった日|上振れが大きかった日|売上0の日/],
     ['労働時間・雑給', /労働時間|雑給|勤務予定/], ['残業', /残業/], ['標準比', /標準比/], ['採用・定着', /勤務期間|戦力化|新規採用|退社|減り方|入社月/],
     ['営業部・店舗の比較', /営業部別|未達額上位|達成額上位|挽回|の高い店|店舗別|プレミアム比率/], ['原価', /^原価|理論差|喫食|平均との差|コース構成|食べ放題/], ['ロス', /ロス/], ['FC企業別', /株式会社|有限会社|合同会社|（株）|\(株\)|㈱|^企業/],
@@ -3564,11 +3640,11 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     return g + '</svg>';
   }
   /** 曜日区分 × 時間帯の前年比（1日あたり）。色の濃さで良し悪し */
-  function rpHeat(s) {
+  function rpHeat(s, byCust) {
     if (!s.hasPrev) return '';
     const col = v => { if (v == null) return '#f0efec'; const t = Math.max(-1, Math.min(1, (v - 1) / 0.2)); const a = Math.abs(t); return t < 0 ? `rgba(208,59,59,${0.12 + a * 0.75})` : `rgba(42,120,214,${0.12 + a * 0.75})`; };
     let h = `<table class="rp-heat"><thead><tr><th></th>${BANDS.map(b => `<th>${esc(b.name)}<div>${esc(b.label)}</div></th>`).join('')}</tr></thead><tbody>`;
-    DAYTYPES.forEach((dt, ti) => { h += `<tr><th>${dt}</th>${BANDS.map((b, bi) => { const c = s.grid[ti][bi], v = c.yoyDay; const dark = v != null && Math.abs(v - 1) > 0.12; return `<td style="background:${col(v)};color:${dark ? '#fff' : RPC.ink}">${v == null ? '－' : Math.round(v * 100) + '%'}</td>`; }).join('')}</tr>`; });
+    DAYTYPES.forEach((dt, ti) => { h += `<tr><th>${dt}</th>${BANDS.map((b, bi) => { const c = s.grid[ti][bi], v = byCust ? c.custYoyDay : c.yoyDay; const dark = v != null && Math.abs(v - 1) > 0.12; return `<td style="background:${col(v)};color:${dark ? '#fff' : RPC.ink}">${v == null ? '－' : Math.round(v * 100) + '%'}</td>`; }).join('')}</tr>`; });
     return h + '</tbody></table>';
   }
   /** 横棒：当店・平均・前年の比較（指標ごと） */
@@ -3644,16 +3720,17 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
   /** 結論（文字はここだけ）：最大3行 */
   function salesConcl(s) {
     const L = [];
-    L.push({ c: s.diff >= 0 ? 'ok' : 'ng', t: `予算比 <b>${pct(s.rate)}</b>（${sman(s.diff)}）${s.yoy ? `／売上前年比 <b>${pct(s.yoy)}</b>` : ''}` });
+    const yc = yb === 'cust' && s.hasPrev && s.pCust;
+    L.push({ c: s.diff >= 0 ? 'ok' : 'ng', t: `予算比 <b>${pct(s.rate)}</b>（${sman(s.diff)}）${yc ? `／客数前年比 <b>${pct(s.custYoy)}</b>（${sppl(s.cust - s.pCust)}）` : s.yoy ? `／売上前年比 <b>${pct(s.yoy)}</b>` : ''}` });
     const big = Math.abs(s.custEff) >= Math.abs(s.upEff) ? ['客数', s.custEff, `客数予算比 ${pct(s.custRate)}`] : ['客単価', s.upEff, `客単価 ${yen(s.up)}`];
     L.push({ c: big[1] >= 0 ? 'ok' : 'ng', t: `${s.diff >= 0 ? '上振れ' : '未達'}の主な要因は<b>${big[0]}</b>（${sman(big[1])}・${big[2]}）` });
     if (s.fc) L.push({ c: s.fc.landDiff >= 0 ? 'ok' : 'ng', t: `このままの着地見込み <b>${man(s.fc.landing)}</b>（月予算比 ${pct(s.fc.landRate)}）` });
     else if (s.hasPrev) {
-      const cells = []; DAYTYPES.forEach((dt, ti) => BANDS.forEach((b, bi) => { const c = s.grid[ti][bi]; if (c.yoyDay != null && c.pSales > 0) cells.push({ n: `${dt}の${b.name}`, v: c.yoyDay, w: c.pSales }); }));
+      const W = yc ? '客数' : '売上', cells = []; DAYTYPES.forEach((dt, ti) => BANDS.forEach((b, bi) => { const c = s.grid[ti][bi], v = yc ? c.custYoyDay : c.yoyDay, w = yc ? c.pCust : c.pSales; if (v != null && w > 0) cells.push({ n: `${dt}の${b.name}`, v, w }); }));
       const big2 = cells.filter(c => c.w >= sum(cells, x => x.w) * 0.04);
       const lo = [...big2].sort((a, b) => a.v - b.v)[0], hi = [...big2].sort((a, b) => b.v - a.v)[0];
-      if (lo && lo.v < 0.97) L.push({ c: 'ng', t: `売上が前年をいちばん下回ったのは<b>${lo.n}</b>（売上前年比 ${pct(lo.v)}）` });
-      else if (hi) L.push({ c: 'ok', t: `売上がいちばん伸びたのは<b>${hi.n}</b>（売上前年比 ${pct(hi.v)}）` });
+      if (lo && lo.v < 0.97) L.push({ c: 'ng', t: `${W}が前年をいちばん下回ったのは<b>${lo.n}</b>（${W}前年比 ${pct(lo.v)}）` });
+      else if (hi) L.push({ c: 'ok', t: `${W}がいちばん伸びたのは<b>${hi.n}</b>（${W}前年比 ${pct(hi.v)}）` });
     }
     return L;
   }
@@ -3677,15 +3754,17 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       <div class="rp-body fixed"><div class="rp-in">${body}</div></div><div class="rp-foot"><span>${made}</span><span>${n} / 2</span></div></section>`;
     const kp = (l, v, sub, c) => `<div class="kpi"><div class="label">${l}</div><div class="v ${c || ''}">${v}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
     // 1ページ目：売上
+    const yc = yb === 'cust' && s.hasPrev && s.pCust;
     const k1 = kp('売上', man(s.sales), `予算 ${man(s.budget)}`) + kp('予算比', pct(s.rate), sman(s.diff), cls(s.diff)) + (s.yoy ? kp('売上前年比', pct(s.yoy), `前年 ${man(s.pSales)}`, s.yoy >= 1 ? 'pos' : 'neg') : '')
-      + kp('客数', `${Math.round(s.cust).toLocaleString('ja-JP')}人`, s.custYoy ? `客数前年比 ${pct(s.custYoy)}` : `客数予算比 ${pct(s.custRate)}`) + kp('客単価', yen(s.up), s.pUp ? `客単価前年比 ${pct(s.up / s.pUp)}（前年 ${yen(s.pUp)}）` : '')
+      + (yc ? kp('客数前年比', pct(s.custYoy), `${Math.round(s.cust).toLocaleString('ja-JP')}人・前年差 ${sppl(s.cust - s.pCust)}`, s.custYoy >= 1 ? 'pos' : 'neg')
+        : kp('客数', `${Math.round(s.cust).toLocaleString('ja-JP')}人`, s.custYoy ? `客数前年比 ${pct(s.custYoy)}` : `客数予算比 ${pct(s.custRate)}`)) + kp('客単価', yen(s.up), s.pUp ? `客単価前年比 ${pct(s.up / s.pUp)}（前年 ${yen(s.pUp)}）` : '')
       + (s.fc ? kp('着地見込み', man(s.fc.landing), `予算比 ${pct(s.fc.landRate)}`, cls(s.fc.landDiff)) : '');
     const ty = s.byType.filter(t => t.days);
-    const typeChart = rpBars(ty.map(t => t.key), [{ name: '売上予算比', color: v => v >= 1 ? RPC.pos : RPC.neg, vals: ty.map(t => t.rate) }].concat(s.hasPrev ? [{ name: '売上前年比（1日あたり）', color: RPC.cmp, vals: ty.map(t => t.pAvg ? t.avg / t.pAvg : null) }] : []), v => Math.round(v * 100) + '%', { ref: 1, label: '曜日区分別' });
+    const typeChart = rpBars(ty.map(t => t.key), [{ name: '売上予算比', color: v => v >= 1 ? RPC.pos : RPC.neg, vals: ty.map(t => t.rate) }].concat(s.hasPrev ? [yc ? { name: '客数前年比（1日あたり）', color: RPC.cmp, vals: ty.map(t => t.custYoyDay) } : { name: '売上前年比（1日あたり）', color: RPC.cmp, vals: ty.map(t => t.pAvg ? t.avg / t.pAvg : null) }] : []), v => Math.round(v * 100) + '%', { ref: 1, label: '曜日区分別' });
     const grid = ps => { ps = ps.filter(Boolean); return ps.length ? `<div class="rp-g n${ps.length}">${ps.join('')}</div>` : ''; };
     const NP = S && S.nps ? S.nps.data : null, np = NP && NP.stores[s.code], npA = np && NP.brands[np.brand];
     const p1 = concl(salesConcl(s)) + `<div class="kpis">${k1}</div>` + grid([panel('曜日区分別の売上', typeChart),
-      panel('時間帯別の売上前年比（1日あたり）', rpHeat(s), '青＝前年超え・赤＝前年割れ'),
+      panel(`時間帯別の${yc ? '客数' : '売上'}前年比（1日あたり）`, rpHeat(s, yc), '青＝前年超え・赤＝前年割れ'),
       np ? (() => { const ser = npsSeries(HIST, s.code, 6); return panel('NPS（お客様の推奨度）', rpNps(np, npA, ser), `${esc(NP.period.replace(/（.）/g, ''))}・回答${np.n}件`); })() : '', np ? panel('QSCの評価（100点満点）', rpQsc(np, npA), 'オレンジの線＝業態平均') : '']);
     // 2ページ目：原価
     const A = R.area, many = false, I = s.inv, p2f = v => (v * 100).toFixed(2) + '%'; // オーナー資料では対象店の平均を出さない
@@ -4708,6 +4787,8 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
   });
   $('areaSel').addEventListener('change', e => { areaSel = e.target.value; pref.set('area', areaSel); rerun(); });
   $('mShort').addEventListener('click', () => setMode(false));
+  const setYb = v => { yb = v; pref.set('yoyBase', v); $('ybCust').setAttribute('aria-pressed', v === 'cust'); $('ybSales').setAttribute('aria-pressed', v === 'sales'); if (R) render(); };
+  $('ybCust').addEventListener('click', () => setYb('cust')); $('ybSales').addEventListener('click', () => setYb('sales'));
   $('mLong').addEventListener('click', () => setMode(true));
   async function copy(text, btn) {
     const old = btn.textContent;
@@ -4742,8 +4823,9 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
   });
 
   // 前回の表示設定
-  scope = pref.get('scope', 'direct'); areaSel = pref.get('area', ''); detail = pref.get('detail', false); tab = pref.get('tab', 'sales');
+  scope = pref.get('scope', 'direct'); areaSel = pref.get('area', ''); detail = pref.get('detail', false); tab = pref.get('tab', 'sales'); yb = pref.get('yoyBase', 'cust');
   $('mShort').setAttribute('aria-pressed', !detail); $('mLong').setAttribute('aria-pressed', detail);
+  $('ybCust').setAttribute('aria-pressed', yb === 'cust'); $('ybSales').setAttribute('aria-pressed', yb === 'sales');
   try { run(sampleRows(2026), sampleRows(2025)); } catch (e) { console.error(e); setStatus('サンプルの表示に失敗しました：' + e.message, true); }
   if (GAS) startDrive();
   else store.getK('history').then(h => { HIST = h || null; return store.get(); }).then(async v0 => {
@@ -4793,7 +4875,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'e71b873'; // 版（build.py が書き込む）
+  const APP_VERSION = '7913c74'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
