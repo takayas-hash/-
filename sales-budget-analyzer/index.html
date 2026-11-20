@@ -492,6 +492,8 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
         <p class="small muted" style="margin:2px 0 8px"><b>計画標準比＝計画労働時間÷店長の客数予測からの標準時間、実績標準比＝実績労働時間÷実際の客数からの標準時間</b>（標準時間は見込君と同じ式）。右端は予算標準比を超えた時間（○＝予算標準比内）。色の付いた行はこれからの日。「推」＝店長の予測がなく推計した客数、「予」＝勤務スケジュールの予定、「補」＝計画がなく実績平均で補った時間。</p>
         <div class="row" style="justify-content:flex-start;gap:8px 16px;margin-bottom:10px" id="stdSet"></div>
         <div class="tbl" style="max-height:620px;overflow-y:auto"><table id="stdTbl"></table></div>
+        <h3 style="margin-top:14px">平日・土日祝別</h3>
+        <div class="tbl"><table id="stdTypeTbl"></table></div>
         <h3 style="margin-top:14px">週別</h3>
         <div class="tbl"><table id="stdWeekTbl"></table></div>
       </div>
@@ -1626,6 +1628,13 @@ function analyzeStd(s, lab, L, std, settings, salesLast, rows) {
   if (br != null) { r.target = landStd * br; r.over = landH - r.target; r.overCost = r.over > 0 && lab && lab.avgWage ? r.over * lab.avgWage : null; }
   // 週別（月曜始まり）
   const wk = {}; ok.forEach(d => { const w = Math.floor((d.date.getDate() - 1 + ((new Date(d.date.getFullYear(), d.date.getMonth(), 1).getDay() + 6) % 7)) / 7); (wk[w] = wk[w] || []).push(d); });
+  // 平日・土日祝別（標準時間の区分と同じ：土日と祝日＝土日祝）
+  r.byType = [[1, '平日'], [2, '土日祝']].map(([ty, name]) => {
+    const ds = ok.filter(d => d.type === ty), dp = ds.filter(d => d.done), pp = days.filter(d => d.type === ty && d.planSrc === 'plan' && d.stdFc);
+    return { type: ty, name, days: ds.length, doneDays: dp.length, cutStd: SH(dp), cutHours: H(dp), cutRate: SH(dp) ? H(dp) / SH(dp) : null,
+      landStd: SH(ds), landHours: H(ds), landRate: SH(ds) ? H(ds) / SH(ds) : null, planStd: sum(pp, d => d.stdFc), planHours: sum(pp, d => d.planH), planRate: sum(pp, d => d.stdFc) ? sum(pp, d => d.planH) / sum(pp, d => d.stdFc) : null,
+      cutCust: C(dp) };
+  });
   r.weeks = Object.keys(wk).sort((a, b) => a - b).map(w => { const ds = wk[w]; return { from: ds[0].date, to: ds[ds.length - 1].date, n: ds.length, cust: C(ds), std: SH(ds), hours: H(ds), rate: SH(ds) ? H(ds) / SH(ds) : null, done: ds.every(d => d.done), mixed: ds.some(d => d.done) && ds.some(d => !d.done) }; });
   return r;
 }
@@ -1666,6 +1675,15 @@ function stdLines(x, ctx) {
     if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は${x.mgrDays ? '店長の客数予測×計画労働時間' : '客数見込み×勤務予定'}）`; }
   if (x.budgetRate != null) t += `。予算標準比${p0(x.budgetRate)}`;
   out.push({ t: t + '。', d: false });
+  if (x.byType) {
+    const bt = x.byType.filter(b => b.days), fx = b => x.cutHours ? `${p0(b.cutRate)}${b.landRate != null && x.remDays ? `（着地${p0(b.landRate)}）` : ''}` : p0(b.landRate);
+    if (bt.length === 2) {
+      let u = `　平日・土日祝別：平日${fx(bt[0])}、土日祝${fx(bt[1])}`;
+      const a = x.cutHours ? bt[0].cutRate : bt[0].landRate, b = x.cutHours ? bt[1].cutRate : bt[1].landRate;
+      if (a != null && b != null && Math.abs(a - b) >= 0.05) u += `。${a > b ? '平日' : '土日祝'}の方が${Math.abs((a - b) * 100).toFixed(1)}pt高く、標準に対して人時が多い（${a > b ? '平日' : '土日祝'}のシフトが削減の候補）`;
+      out.push({ t: u + '。', d: false });
+    }
+  }
   if (x.budgetRate != null && x.remDays) {
     if (x.over > 0) out.push({ t: `　予算標準比に収めるには、${x.cutHours ? '残り' : ''}${x.remDays}日で${hrs0(x.over * 60)}（1日${(x.over / x.remDays).toFixed(1)}h）の削減が必要${x.overCost ? `（雑給換算で約${man(x.overCost)}）` : ''}。`, d: false });
     else out.push({ t: `　勤務予定どおりなら予算標準比内（余裕${hrs0(-x.over * 60)}）。`, d: false });
@@ -2207,9 +2225,15 @@ function analyze(curRows, prevRows, extra) {
       A.planRate = T2('planStd') ? T2('planHours') / T2('planStd') : null; A.planDays = T2('planDays');
       A.overDays = sum(ws, s => (s.std.overDays || []).length);
       const acc = ws.filter(s => s.std.fcAcc); A.fcAcc = acc.length ? sum(acc, s => s.std.fcAcc.ratio * s.std.fcAcc.n) / sum(acc, s => s.std.fcAcc.n) : null;
+      // 平日・土日祝別（対象店の合計）
+      A.byType = [0, 1].map(i => { const xs = ws.filter(s => s.std.byType); const T3 = k => sum(xs, s => s.std.byType[i][k] || 0);
+        return { name: i ? '土日祝' : '平日', cutRate: T3('cutStd') ? T3('cutHours') / T3('cutStd') : null, landRate: T3('landStd') ? T3('landHours') / T3('landStd') : null, planRate: T3('planStd') ? T3('planHours') / T3('planStd') : null }; });
       area.std = A;
       const rk = [...ws].sort((x, y) => (y.std.landRate - (y.std.budgetRate || 0)) - (x.std.landRate - (x.std.budgetRate || 0)));
+      const btA = A.byType, cutA = !!labor.cut;
+      const btTxt = `平日${p0(cutA ? btA[0].cutRate : btA[0].landRate)}・土日祝${p0(cutA ? btA[1].cutRate : btA[1].landRate)}${cutA && labor.cut < labor.N ? `（着地 平日${p0(btA[0].landRate)}・土日祝${p0(btA[1].landRate)}）` : ''}`;
       area.laborLines.push({ t: `・標準比：${labor.cut ? `実績${p0(A.cutRate)}（${cutTxt}）${labor.cut < labor.N ? `、着地見込み${p0(A.landRate)}` : ''}` : `勤務予定どおりなら${p0(A.landRate)}`}${A.budgetRate != null ? `（予算標準比${p0(A.budgetRate)}）` : ''}。${ws.length > 1 ? `予算標準比を最も上回る見込みの店：${rk.filter(s => s.std.budgetRate != null && s.std.over > 0).slice(0, 3).map(s => `${s.name}${p0(s.std.landRate)}（予算${p0(s.std.budgetRate)}、${hrs0(s.std.over * 60)}超過）`).join('、') || 'なし'}。` : ''}`, d: false });
+      area.laborLines.push({ t: `・標準比（平日・土日祝別）：${btTxt}。`, d: false });
       if (A.planRate != null) area.laborLines.push({ t: `・計画標準比（店長の客数予測×計画労働時間）：${p0(A.planRate)}。これからの日で予算標準比を超える計画：${A.overDays}日（${ws.filter(s => (s.std.overDays || []).length).sort((a, b) => b.std.overDays.length - a.std.overDays.length).slice(0, 4).map(s => `${s.name}${s.std.overDays.length}日`).join('、') || 'なし'}）${A.fcAcc != null ? `。客数の実績は予測の${p0(A.fcAcc)}` : ''}。`, d: false });
       if (ws.some(s => !s.std.custom)) area.laborLines.push({ t: `　※店舗設定が初期値のままの店：${ws.filter(s => !s.std.custom).map(s => s.name).join('、')}。`, d: true });
     } else if (std) area.laborLines.push({ t: '・標準比：標準比マスタに対象店の卓数がありません。', d: false });
@@ -4369,11 +4393,12 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
             + kpi(land ? '雑給の予算差（見込み）' : '雑給の予算差', cman(d), `予算 ${man(b)}`, d > 0 ? 'neg' : 'pos'); })()
       + kpi('残業アラート', `${a.alerts.length}名`, `60h以上 ${a.alerts.filter(p => p.totalOt >= OT_LIMIT).length}名`, a.alerts.some(p => p.totalOt >= OT_LIMIT) ? 'neg' : '')
       + (R.area.std && R.area.std.planRate != null ? kpi('計画標準比', pct(R.area.std.planRate), `予算超えの計画 ${R.area.std.overDays}日`, R.area.std.budgetRate != null && R.area.std.planRate > R.area.std.budgetRate ? 'neg' : 'pos') : '')
-      + (R.area.std ? kpi('標準比（実績）', pct(R.area.std.cutRate), `${L.mo + 1}/${L.cut}時点`) + (land ? kpi('標準比（着地見込み）', pct(R.area.std.landRate), R.area.std.budgetRate != null ? `予算標準比 ${pct(R.area.std.budgetRate)}` : '', R.area.std.budgetRate != null && R.area.std.landRate > R.area.std.budgetRate ? 'neg' : 'pos') : '') : '');
+      + (R.area.std ? kpi('標準比（実績）', pct(R.area.std.cutRate), `${L.mo + 1}/${L.cut}時点${R.area.std.byType ? `・平日 ${pct(R.area.std.byType[0].cutRate)}・土日祝 ${pct(R.area.std.byType[1].cutRate)}` : ''}`) + (land ? kpi('標準比（着地見込み）', pct(R.area.std.landRate), R.area.std.budgetRate != null ? `予算標準比 ${pct(R.area.std.budgetRate)}` : '', R.area.std.budgetRate != null && R.area.std.landRate > R.area.std.budgetRate ? 'neg' : 'pos') : '') : '');
     setCmt('areaComment', commentText(R.area.laborLines, detail));
     const hasStd = !!R.area.std;
-    const stdCells = (s, land) => { if (!hasStd) return ''; const x = s.std; if (!x || x.missing) return `<td class="n muted" colspan="${land ? 4 : 2}">卓数なし</td>`;
-      return `<td class="n">${pct(x.cutRate)}</td>${land ? `<td class="n ${x.budgetRate != null && x.landRate > x.budgetRate ? 'neg' : ''}"><b>${pct(x.landRate)}</b></td>` : ''}<td class="n muted">${pct(x.budgetRate)}</td>${land ? `<td class="n ${x.over > 0 ? 'neg' : 'pos'}">${x.over != null ? (x.over > 0 ? '+' : '▲') + hrs0(Math.abs(x.over) * 60) : '－'}</td>` : ''}`; };
+    const stdCells = (s, land) => { if (!hasStd) return ''; const x = s.std; if (!x || x.missing) return `<td class="n muted" colspan="${land ? 6 : 4}">卓数なし</td>`;
+      const bt = x.byType || [], bcls = v => v == null ? '' : x.budgetRate != null && v > x.budgetRate ? 'neg' : '';
+      return `<td class="n">${pct(x.cutRate)}</td><td class="n ${bcls(bt[0] && bt[0].cutRate)}">${bt[0] ? pct(bt[0].cutRate) : '－'}</td><td class="n ${bcls(bt[1] && bt[1].cutRate)}">${bt[1] ? pct(bt[1].cutRate) : '－'}</td>${land ? `<td class="n ${x.budgetRate != null && x.landRate > x.budgetRate ? 'neg' : ''}"><b>${pct(x.landRate)}</b></td>` : ''}<td class="n muted">${pct(x.budgetRate)}</td>${land ? `<td class="n ${x.over > 0 ? 'neg' : 'pos'}">${x.over != null ? (x.over > 0 ? '+' : '▲') + hrs0(Math.abs(x.over) * 60) : '－'}</td>` : ''}`; };
     // 雑給の予算（損益のパートナー等給与）との差。月の途中＝着地見込み−予算、確定月＝損益の実績（なければ時給×勤務時間）−予算
     const hasWB = L.hasWage && R.stores.some(s => s.plc && s.plc.bWage);
     const wVal = s => land ? s.labor.landCost : s.plc && s.plc.wage != null ? s.plc.wage : s.labor.cost;
@@ -4384,7 +4409,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     const rows = [...R.stores].sort((x, y) => hasWB ? (rDiff(y) ?? -9) - (rDiff(x) ?? -9) : (lRate(y) ?? -1) - (lRate(x) ?? -1));
     const wbCells = s => { if (!hasWB) return `<td class="n">${pct(wRate(s))}</td>`; const b = s.plc && s.plc.bWage; if (!b) return `<td class="n muted" colspan="2">損益なし</td><td class="n">${pct(wRate(s))}</td><td class="n muted" colspan="2">－</td>`; const d = wVal(s) - b, rd = rDiff(s);
       return `<td class="n muted">${man(b)}</td><td class="n ${d > 0 ? 'neg' : 'pos'}">${cman(d)}</td><td class="n"><b>${pct(wRate(s))}</b></td><td class="n muted">${pct(bRate(s))}</td><td class="n ${rd > 0 ? 'neg' : 'pos'}"><b>${rd != null ? cpt(rd) : '－'}</b></td>`; };
-    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}${hasWB ? `<th class="n">雑給予算</th><th class="n">金額の差</th>` : ''}<th class="n">雑給率${land ? '（見込み）' : ''}</th>${hasWB ? '<th class="n">予算の雑給率</th><th class="n">雑給率の差</th>' : ''}<th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th>${hasStd ? `<th class="n">標準比（実績）</th>${land ? '<th class="n">標準比（着地）</th>' : ''}<th class="n">予算標準比</th>${land ? '<th class="n">予算との差</th>' : ''}` : ''}</tr></thead><tbody>`
+    $('storeTbl').innerHTML = `<thead><tr><th>店舗</th>${R.multiArea ? '<th>営業部</th>' : ''}<th class="n">実績</th><th class="n">うち社員</th>${land ? '<th class="n">残り予定</th><th class="n">着地見込み</th><th class="n">予定未作成</th>' : ''}${L.hasWage ? `<th class="n">雑給（実績）</th>${land ? '<th class="n">雑給（着地）</th>' : ''}${hasWB ? `<th class="n">雑給予算</th><th class="n">金額の差</th>` : ''}<th class="n">雑給率${land ? '（見込み）' : ''}</th>${hasWB ? '<th class="n">予算の雑給率</th><th class="n">雑給率の差</th>' : ''}<th class="n">時給なし</th>` : ''}<th class="n">残業45h以上</th>${hasStd ? `<th class="n">標準比（実績）</th><th class="n">うち平日</th><th class="n">うち土日祝</th>${land ? '<th class="n">標準比（着地）</th>' : ''}<th class="n">予算標準比</th>${land ? '<th class="n">予算との差</th>' : ''}` : ''}</tr></thead><tbody>`
       + rows.map(s => { const l = s.labor; return `<tr class="pick" tabindex="0" data-code="${esc(s.code)}" aria-selected="${s.code === cur}"><td>${esc(s.name)}</td>${R.multiArea ? `<td class="muted">${esc(s.area)}</td>` : ''}`
         + (!l ? `<td class="n muted" colspan="9">勤怠データなし</td></tr>` :
         `<td class="n">${hrs0(l.mins)}</td><td class="n muted">${hrs0(l.staffMins)}</td>${land ? `<td class="n">${hrs0(l.planMins)}</td><td class="n"><b>${hrs0(l.landMins)}</b></td><td class="n ${l.estDays ? 'neg' : ''}">${l.estDays ? l.estDays + '日' : '－'}</td>` : ''}`
@@ -4418,7 +4443,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     };
     $('stdSet').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', saveNow));
     if ($('stdSave')) $('stdSave').addEventListener('click', saveNow);
-    if (x.missing) { $('stdTbl').innerHTML = `<tbody><tr><td class="muted">${x.need === 'lane' ? '特急レーン店です。レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '通常店用の標準比マスタを読み込むと計算します。' : '卓数を入れると計算します。'}</td></tr></tbody>`; $('stdWeekTbl').innerHTML = ''; return; }
+    if (x.missing) { $('stdTbl').innerHTML = `<tbody><tr><td class="muted">${x.need === 'lane' ? '特急レーン店です。レーン店用の標準比マスタを読み込むと計算します。' : x.need === 'normal' ? '通常店用の標準比マスタを読み込むと計算します。' : '卓数を入れると計算します。'}</td></tr></tbody>`; $('stdWeekTbl').innerHTML = ''; $('stdTypeTbl').innerHTML = ''; return; }
     const r2 = v => v == null ? '－' : v.toFixed(1), br = x.budgetRate;
     const rc = r => r == null ? '' : br != null ? (r > br ? 'neg' : 'pos') : (r >= 1 ? 'neg' : 'pos');
     const judge = d => { const r = d.done ? d.rAct : d.rPlan; if (r == null || br == null) return '';
@@ -4431,6 +4456,11 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
           + `<td class="n">${d.planH != null ? r2(d.planH) : d.noPlan ? '<span class="muted small">なし</span>' : '－'}${d.planSrc === 'sched' ? ' <span class="muted small">予</span>' : ''}${d.est ? ' <span class="muted small">補</span>' : ''}</td><td class="n">${d.actH != null && d.done ? r2(d.actH) : '－'}</td>`
           + `<td class="n">${r2(d.stdFc)}</td><td class="n">${d.done ? r2(d.stdA) : '－'}</td><td class="n ${rc(d.rPlan)}">${pct(d.rPlan)}</td><td class="n ${rc(d.rAct)}">${pct(d.rAct)}</td><td>${judge(d)}</td></tr>`; }).join('')
       + `<tr><td><b>月間</b></td><td></td><td class="n">${Math.round(sum(x.days, d => d.custFc || 0)).toLocaleString('ja-JP')}</td><td class="n">${Math.round(sum(x.days.filter(d => d.done), d => d.custAct || 0)).toLocaleString('ja-JP')}</td><td class="n">${r2(sum(x.days, d => d.planH || 0))}</td><td class="n">${r2(sum(x.days.filter(d => d.done), d => d.actH || 0))}</td><td class="n">${r2(sum(x.days, d => d.stdFc || 0))}</td><td class="n">${r2(x.cutStd)}</td><td class="n"><b>${pct(x.planRate)}</b></td><td class="n"><b>${pct(x.cutRate)}</b></td><td class="small muted">着地 ${pct(x.landRate)}</td></tr></tbody>`;
+    // 平日・土日祝別（標準時間の区分：土日と祝日＝土日祝）
+    const brT = x.budgetRate, rcT = v => v == null ? '' : brT != null ? (v > brT ? 'neg' : 'pos') : (v > 1 ? 'neg' : 'pos');
+    $('stdTypeTbl').innerHTML = `<thead><tr><th>区分</th><th class="n">日数<br><span class="small muted">実績／月</span></th><th class="n">標準時間<br>実績から</th><th class="n">労働時間<br>実績</th><th class="n">実績<br>標準比</th><th class="n">着地見込み<br>標準比</th><th class="n">計画<br>標準比</th>${brT != null ? `<th class="n">予算標準比</th>` : ''}</tr></thead><tbody>`
+      + (x.byType || []).map(b => `<tr><td><b>${b.name}</b></td><td class="n">${b.doneDays}／${b.days}</td><td class="n">${b.cutStd.toFixed(1)}</td><td class="n">${b.cutHours.toFixed(1)}</td><td class="n ${rcT(b.cutRate)}"><b>${pct(b.cutRate)}</b></td><td class="n ${rcT(b.landRate)}">${pct(b.landRate)}</td><td class="n ${rcT(b.planRate)}">${pct(b.planRate)}</td>${brT != null ? `<td class="n muted">${pct(brT)}</td>` : ''}</tr>`).join('')
+      + `<tr><td><b>月間</b></td><td></td><td class="n">${x.cutStd.toFixed(1)}</td><td class="n">${x.cutHours.toFixed(1)}</td><td class="n ${rcT(x.cutRate)}"><b>${pct(x.cutRate)}</b></td><td class="n ${rcT(x.landRate)}">${pct(x.landRate)}</td><td class="n ${rcT(x.planRate)}">${pct(x.planRate)}</td>${brT != null ? `<td class="n muted">${pct(brT)}</td>` : ''}</tr></tbody>`;
     $('stdWeekTbl').innerHTML = `<thead><tr><th>週</th><th class="n">客数</th><th class="n">標準時間</th><th class="n">労働時間</th><th class="n">標準比</th><th>判定</th></tr></thead><tbody>`
       + x.weeks.map((w, i) => `<tr><td>第${i + 1}週 <span class="muted small">${md(w.from)}〜${md(w.to)}${w.done ? '' : w.mixed ? '・一部見込み' : '・見込み'}</span></td><td class="n">${Math.round(w.cust).toLocaleString('ja-JP')}</td><td class="n">${w.std.toFixed(1)}</td><td class="n">${w.hours.toFixed(1)}</td><td class="n"><b>${pct(w.rate)}</b></td><td>${w.rate <= (x.budgetRate ?? 1) + 0.0005 ? '<span class="pill ok">○</span>' : '<span class="pill ng">×</span>'}</td></tr>`).join('')
       + `<tr><td colspan="6" class="small muted" style="white-space:normal">確定日まで：標準比 ${pct(x.cutRate)}（標準${x.cutStd.toFixed(1)}h・実働${x.cutHours.toFixed(1)}h）${x.budgetRate != null ? `／予算標準比 ${pct(x.budgetRate)}（目標時間 ${hrs0(x.target * 60)}）` : ''}</td></tr></tbody>`;
@@ -4904,7 +4934,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = '1bd1e89'; // 版（build.py が書き込む）
+  const APP_VERSION = '83a147b'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない

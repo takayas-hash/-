@@ -1079,6 +1079,13 @@ function analyzeStd(s, lab, L, std, settings, salesLast, rows) {
   if (br != null) { r.target = landStd * br; r.over = landH - r.target; r.overCost = r.over > 0 && lab && lab.avgWage ? r.over * lab.avgWage : null; }
   // 週別（月曜始まり）
   const wk = {}; ok.forEach(d => { const w = Math.floor((d.date.getDate() - 1 + ((new Date(d.date.getFullYear(), d.date.getMonth(), 1).getDay() + 6) % 7)) / 7); (wk[w] = wk[w] || []).push(d); });
+  // 平日・土日祝別（標準時間の区分と同じ：土日と祝日＝土日祝）
+  r.byType = [[1, '平日'], [2, '土日祝']].map(([ty, name]) => {
+    const ds = ok.filter(d => d.type === ty), dp = ds.filter(d => d.done), pp = days.filter(d => d.type === ty && d.planSrc === 'plan' && d.stdFc);
+    return { type: ty, name, days: ds.length, doneDays: dp.length, cutStd: SH(dp), cutHours: H(dp), cutRate: SH(dp) ? H(dp) / SH(dp) : null,
+      landStd: SH(ds), landHours: H(ds), landRate: SH(ds) ? H(ds) / SH(ds) : null, planStd: sum(pp, d => d.stdFc), planHours: sum(pp, d => d.planH), planRate: sum(pp, d => d.stdFc) ? sum(pp, d => d.planH) / sum(pp, d => d.stdFc) : null,
+      cutCust: C(dp) };
+  });
   r.weeks = Object.keys(wk).sort((a, b) => a - b).map(w => { const ds = wk[w]; return { from: ds[0].date, to: ds[ds.length - 1].date, n: ds.length, cust: C(ds), std: SH(ds), hours: H(ds), rate: SH(ds) ? H(ds) / SH(ds) : null, done: ds.every(d => d.done), mixed: ds.some(d => d.done) && ds.some(d => !d.done) }; });
   return r;
 }
@@ -1119,6 +1126,15 @@ function stdLines(x, ctx) {
     if (x.remDays) t += `、着地見込み${p0(x.landRate)}（残り${x.remDays}日は${x.mgrDays ? '店長の客数予測×計画労働時間' : '客数見込み×勤務予定'}）`; }
   if (x.budgetRate != null) t += `。予算標準比${p0(x.budgetRate)}`;
   out.push({ t: t + '。', d: false });
+  if (x.byType) {
+    const bt = x.byType.filter(b => b.days), fx = b => x.cutHours ? `${p0(b.cutRate)}${b.landRate != null && x.remDays ? `（着地${p0(b.landRate)}）` : ''}` : p0(b.landRate);
+    if (bt.length === 2) {
+      let u = `　平日・土日祝別：平日${fx(bt[0])}、土日祝${fx(bt[1])}`;
+      const a = x.cutHours ? bt[0].cutRate : bt[0].landRate, b = x.cutHours ? bt[1].cutRate : bt[1].landRate;
+      if (a != null && b != null && Math.abs(a - b) >= 0.05) u += `。${a > b ? '平日' : '土日祝'}の方が${Math.abs((a - b) * 100).toFixed(1)}pt高く、標準に対して人時が多い（${a > b ? '平日' : '土日祝'}のシフトが削減の候補）`;
+      out.push({ t: u + '。', d: false });
+    }
+  }
   if (x.budgetRate != null && x.remDays) {
     if (x.over > 0) out.push({ t: `　予算標準比に収めるには、${x.cutHours ? '残り' : ''}${x.remDays}日で${hrs0(x.over * 60)}（1日${(x.over / x.remDays).toFixed(1)}h）の削減が必要${x.overCost ? `（雑給換算で約${man(x.overCost)}）` : ''}。`, d: false });
     else out.push({ t: `　勤務予定どおりなら予算標準比内（余裕${hrs0(-x.over * 60)}）。`, d: false });
@@ -1660,9 +1676,15 @@ function analyze(curRows, prevRows, extra) {
       A.planRate = T2('planStd') ? T2('planHours') / T2('planStd') : null; A.planDays = T2('planDays');
       A.overDays = sum(ws, s => (s.std.overDays || []).length);
       const acc = ws.filter(s => s.std.fcAcc); A.fcAcc = acc.length ? sum(acc, s => s.std.fcAcc.ratio * s.std.fcAcc.n) / sum(acc, s => s.std.fcAcc.n) : null;
+      // 平日・土日祝別（対象店の合計）
+      A.byType = [0, 1].map(i => { const xs = ws.filter(s => s.std.byType); const T3 = k => sum(xs, s => s.std.byType[i][k] || 0);
+        return { name: i ? '土日祝' : '平日', cutRate: T3('cutStd') ? T3('cutHours') / T3('cutStd') : null, landRate: T3('landStd') ? T3('landHours') / T3('landStd') : null, planRate: T3('planStd') ? T3('planHours') / T3('planStd') : null }; });
       area.std = A;
       const rk = [...ws].sort((x, y) => (y.std.landRate - (y.std.budgetRate || 0)) - (x.std.landRate - (x.std.budgetRate || 0)));
+      const btA = A.byType, cutA = !!labor.cut;
+      const btTxt = `平日${p0(cutA ? btA[0].cutRate : btA[0].landRate)}・土日祝${p0(cutA ? btA[1].cutRate : btA[1].landRate)}${cutA && labor.cut < labor.N ? `（着地 平日${p0(btA[0].landRate)}・土日祝${p0(btA[1].landRate)}）` : ''}`;
       area.laborLines.push({ t: `・標準比：${labor.cut ? `実績${p0(A.cutRate)}（${cutTxt}）${labor.cut < labor.N ? `、着地見込み${p0(A.landRate)}` : ''}` : `勤務予定どおりなら${p0(A.landRate)}`}${A.budgetRate != null ? `（予算標準比${p0(A.budgetRate)}）` : ''}。${ws.length > 1 ? `予算標準比を最も上回る見込みの店：${rk.filter(s => s.std.budgetRate != null && s.std.over > 0).slice(0, 3).map(s => `${s.name}${p0(s.std.landRate)}（予算${p0(s.std.budgetRate)}、${hrs0(s.std.over * 60)}超過）`).join('、') || 'なし'}。` : ''}`, d: false });
+      area.laborLines.push({ t: `・標準比（平日・土日祝別）：${btTxt}。`, d: false });
       if (A.planRate != null) area.laborLines.push({ t: `・計画標準比（店長の客数予測×計画労働時間）：${p0(A.planRate)}。これからの日で予算標準比を超える計画：${A.overDays}日（${ws.filter(s => (s.std.overDays || []).length).sort((a, b) => b.std.overDays.length - a.std.overDays.length).slice(0, 4).map(s => `${s.name}${s.std.overDays.length}日`).join('、') || 'なし'}）${A.fcAcc != null ? `。客数の実績は予測の${p0(A.fcAcc)}` : ''}。`, d: false });
       if (ws.some(s => !s.std.custom)) area.laborLines.push({ t: `　※店舗設定が初期値のままの店：${ws.filter(s => !s.std.custom).map(s => s.name).join('、')}。`, d: true });
     } else if (std) area.laborLines.push({ t: '・標準比：標準比マスタに対象店の卓数がありません。', d: false });
