@@ -70,6 +70,8 @@ header.top p { margin: 4px 0 0; max-width: 60ch; }
 .topbar { position: sticky; top: 0; z-index: 30; background: var(--bg); padding-top: 8px; box-shadow: 0 6px 8px -8px rgba(0,0,0,.25); }
 .ctrlbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
 .ctrlbar .seg button, .ctrlbar select { font-size: .85rem; }
+.ctrl-store { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--muted); font-weight: 700; }
+.ctrl-store select { font-weight: 700; color: var(--fg); }
 .card { scroll-margin-top: var(--topH, 130px); }
 .tabs button { font: inherit; font-family: var(--font-display); font-weight: 700; font-size: 1rem; background: transparent; color: var(--muted); border: 0; border-bottom: 3px solid transparent; margin-bottom: -2px; padding: 8px 16px; cursor: pointer; }
 .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
@@ -323,6 +325,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
 
   <div class="topbar">
   <div class="ctrlbar">
+    <label class="ctrl-store" id="storeSelWrap">店舗 <select id="storeSel" aria-label="店舗を選択" class="btn ghost"></select></label>
     <select id="monthSel" class="btn" aria-label="分析する月" hidden></select>
     <select id="areaSel" class="btn ghost" aria-label="営業部" hidden></select>
     <div class="seg" role="group" aria-label="対象店舗">
@@ -401,7 +404,7 @@ tr.pick[aria-selected="true"] td { background: var(--accent-soft); font-weight: 
   <section class="card" id="storeCard">
     <div class="row">
       <div><div class="label">店舗詳細</div><h2 id="storeName"></h2></div>
-      <div class="row" style="gap:8px"><select id="storeSel" aria-label="店舗を選択" class="btn ghost"></select><button type="button" class="btn" id="repOne">訪問資料（PDF）</button></div>
+      <div class="row" style="gap:8px"><button type="button" class="btn" id="repOne">訪問資料（PDF）</button></div>
     </div>
     <div class="kpis" id="sKpis"></div>
     <div>
@@ -3323,7 +3326,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
     $('tabSales').setAttribute('aria-selected', tab === 'sales'); $('tabCost').setAttribute('aria-selected', tab === 'cost'); $('tabLabor').setAttribute('aria-selected', tab === 'labor'); $('tabTenure').setAttribute('aria-selected', tab === 'tenure'); $('tabCompany').setAttribute('aria-selected', tab === 'company'); $('tabPerf').setAttribute('aria-selected', tab === 'perf');
     $('tabPerf').hidden = !perfOn();
     if (tab === 'perf' && !perfOn()) { tab = 'sales'; document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; }); $('tabSales').setAttribute('aria-selected', true); $('tabPerf').setAttribute('aria-selected', false); }
-    $('storeCard').hidden = tab === 'company' || tab === 'perf';
+    $('storeCard').hidden = tab === 'company' || tab === 'perf'; $('storeSelWrap').hidden = $('storeCard').hidden;
     document.querySelector('#storeTbl').closest('section').hidden = tab === 'perf';
     document.querySelectorAll('[data-tab]').forEach(el => { el.hidden = el.dataset.tab !== tab; });
     // 予測月：売上の見込み（予算×直近の予算比）と、勤務予定による労働時間・標準比だけを出す
@@ -4753,7 +4756,8 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
   document.addEventListener('focusout', () => { tip.hidden = true; });
 
   /* ---------- 操作 ---------- */
-  $('storeSel').addEventListener('change', e => { cur = e.target.value; render(); });
+  // 上の帯の店舗選択：店舗詳細が画面より下にあるときは店舗詳細へ移る（見ている位置はそのまま）
+  $('storeSel').addEventListener('change', e => { cur = e.target.value; render(); const sc = $('storeCard'); if (!sc.hidden && sc.getBoundingClientRect().top > innerHeight * 0.6) sc.scrollIntoView({ block: 'start' }); });
   function setMode(d) { detail = d; pref.set('detail', d); $('mShort').setAttribute('aria-pressed', !d); $('mLong').setAttribute('aria-pressed', d); render(); }
   const SC_BTN = { direct: 'scDirect', fc: 'scFc', all: 'scAll' }, SC_TXT = { direct: '直営のみ', fc: 'FCのみ', all: '全店' };
   /** データに合わせて営業部の選択肢と、直営／FC／全店ボタン（店舗数・押せるか）を整える */
@@ -4888,7 +4892,7 @@ if (typeof module !== 'undefined') module.exports = { extractPL, isPLSheet, plNu
       if (first) loadDrive();
     } catch (e) { console.error(e); setStatus('共有ドライブを読めませんでした：' + (e.message || e), true); }
   }
-  const APP_VERSION = 'e9b1b85'; // 版（build.py が書き込む）
+  const APP_VERSION = '0f7fdba'; // 版（build.py が書き込む）
   let DRIVE_AREAS = []; // 見られるエリア {id, name, block}
   let shownLabel = ''; // いま画面に出しているエリア
   let driveSeq = 0; // 読み込み中にエリアを変えたら、前の読み込みの結果は使わない
